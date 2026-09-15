@@ -178,7 +178,8 @@ Windows PowerShell 5.1 で実行すると、評価側の障害 2 件の `stderr`
 [`docs/decision-log.md`](../../docs/decision-log.md) D-15 と
 [`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4 にある。
 証跡形式の変更後のビルドを測った値は `76ae726991b44b7bbf3c07bbd6416dd4988f1f614ab912e0a227a307e6305e24`
-（`bin/Release/net8.0/MusicStore.Evaluator.dll`、評価器ソースの最終更新は `6abe36e`）。
+（測ったのは `45a2b4a` の作業ツリー、アセンブリは `bin/Release/net8.0/MusicStore.Evaluator.dll`、
+評価器ソースの最終更新は `6abe36e`）。
 ただし §4.2 のとおり、**この値は「そのソースをその場所でその作業ツリーのままビルドしたもの」の
 識別子**であり、`6abe36e` のビルドを再現して測った値として扱わない（現在の値は `06fa548c…`。§4.3）。
 **値の正は [`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
@@ -279,7 +280,7 @@ Windows PowerShell 5.1 で実行すると、評価側の障害 2 件の `stderr`
 | --- | --- |
 | `V-0b`（`bin` `obj` を消したビルドが 2 回続けて同じ値になる） | 一致 |
 | 校正の再実行（`pwsh` 7、13 ケース） | すべて一致。`calibration-summary.json` と**行末以外は同じバイト列**（記録にビルドのハッシュは入らない） |
-| 記録コミットの後でのビルド | `06fa548cad3be2c1…`（記録した値と一致） |
+| 記録コミット（`786bcfe`）の後でのビルド | `06fa548cad3be2c1…`（記録した値と一致） |
 
 記録コミットの後で値が変わらないことは、**コミットを値に混ぜなくした効果そのもの**の確認でもある。
 埋め込みが有効なビルドでは `AssemblyInformationalVersion` が `1.0.0+<コミット>` になり、
@@ -287,6 +288,15 @@ sourcelink が有効なビルドでは値がコミットをまたいで変わる
 （実測: `-p:EnableSourceLink=true` は別の値、`false` は同じ値。§4.2）。
 この手順を踏まずに固定すると、条件に**再現しない値**を入れて、
 すべての採点が `rejected_mismatch` になる（§5-16）。
+
+上の表の「記録コミット」は**記録を書いたコミット**であり、評価器のソースを最後に変えたコミットとは
+限らない。値の正は
+[`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
+`artifacts.evaluator_sha256` であり、測ったのは
+`inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll`、
+ビルドは `dotnet build inner/evaluator/MusicStore.Evaluator/MusicStore.Evaluator.csproj -c Release` である。
+固定値を条件に入れるときは、この 4 つ（値の出所・アセンブリ・コマンド・ビルドに使った SDK）を
+`evaluation.evaluator_build` に書く（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
 
 ## 5. 校正の限界（隠さず記録する）
 

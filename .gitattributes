@@ -1,0 +1,20 @@
+# 評価の再現性のため、テキストは改行コードを固定する。
+# 成果物・仕様台帳のハッシュを安定させる目的。
+* text=auto eol=lf
+
+*.cs text eol=lf
+*.cshtml text eol=lf
+*.csproj text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.md text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.sln text eol=crlf
+
+*.gif binary
+*.png binary
+*.jpg binary
+*.sqlite binary
+*.sdf binary

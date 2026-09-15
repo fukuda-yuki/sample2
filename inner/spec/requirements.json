@@ -1,0 +1,393 @@
+{
+  "specVersion": "1.0.0",
+  "taskId": "MS1-001",
+  "taskTitle": "MVC Music Store ストアフロントの ASP.NET Core 移行",
+  "sourceRepository": "chack411/MVC-Music-Store",
+  "sourceCommit": "2967afb9d69488641df0d154e2ad5827a7820e71",
+  "notes": [
+    "この台帳は「何を正解とするか」の定義である。採点コードは inner/evaluator にあり、本台帳の checks[].id と 1 対 1 で対応する。",
+    "basis は期待結果の根拠種別。legacy=旧実装のコードから読み取った維持すべき挙動、independent=旧実装に依存せず導出した要求、decision=課題側が明示的に決めた保持/変更。",
+    "severity=critical の要件が 1 つでも不合格なら、全体判定は平均点に関係なく fail_critical とする。"
+  ],
+  "severityScale": {
+    "critical": "移行契約の根幹、または金額・注文・データ破壊に関わる重大な誤り",
+    "major": "業務機能の意味が変わる誤り",
+    "minor": "仕様の細部の不一致"
+  },
+  "artifactContract": {
+    "kind": "aspnetcore-web",
+    "build": "成果物ディレクトリ内の Web プロジェクトを dotnet publish でビルドできる",
+    "launch": "公開された出力を、環境変数 ConnectionStrings__MusicStoreEntities と --urls を与えて起動できる",
+    "readiness": "GET / が 200 を返すまで待機する",
+    "isolation": "評価ごとに空の作業ディレクトリと空の SQLite ファイルを与える"
+  },
+  "requirements": [
+    {
+      "id": "R-001",
+      "category": "起動",
+      "title": "ビルドと起動",
+      "severity": "critical",
+      "basis": "independent",
+      "basisDetail": "移行先が動作することは、他のすべての要件の前提である。旧実装の起動可否には依存しない。",
+      "expectation": "成果物がビルドでき、HTTP で応答する。",
+      "checks": [
+        { "id": "C-001", "observation": "dotnet publish が終了コード 0 で完了し、公開出力に Web アセンブリが存在する。" },
+        { "id": "C-002", "observation": "起動後、GET / が 200 を返す。" }
+      ]
+    },
+    {
+      "id": "R-002",
+      "category": "起動",
+      "title": "初期カタログの投入",
+      "severity": "critical",
+      "basis": "legacy",
+      "basisDetail": "Models/SampleData.cs の Seed が 10 ジャンルを投入している（確認者: 本作業、確認方法: 旧リポジトリのコード読解）。",
+      "expectation": "初回起動時、GET /Store が 200 を返し、10 ジャンル名（Rock, Jazz, Metal, Alternative, Disco, Blues, Latin, Reggae, Pop, Classical）をすべて含む。",
+      "checks": [
+        { "id": "C-003", "observation": "GET /Store の応答本文に 10 ジャンル名がすべて現れる。" }
+      ]
+    },
+    {
+      "id": "R-003",
+      "category": "起動",
+      "title": "ジャンル別アルバム件数",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "Models/SampleData.cs の 246 アルバムのジャンル割り当て（確認方法: SampleData.cs の解析。inner/spec/catalog.json と一致することを独立に確認済み）。",
+      "expectation": "各ジャンルの GET /Store/Browse のアルバム件数が Rock=111, Jazz=12, Metal=34, Alternative=5, Disco=3, Blues=6, Latin=35, Reggae=4, Pop=2, Classical=34 と一致する。",
+      "checks": [
+        { "id": "C-004", "observation": "10 ジャンルそれぞれの Browse ページのアルバムリンク数を数え、期待件数と比較する（ジャンル別の実測値を証拠に残す）。" }
+      ]
+    },
+    {
+      "id": "R-004",
+      "category": "起動",
+      "title": "アルバム識別子の採番",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "旧実装は EF の identity により SampleData の投入順に 1 から採番する（確認方法: Models/SampleData.cs と Views/Store/Details.cshtml のルーティング）。",
+      "expectation": "GET /Store/Details/1 が 200 で 'The Best Of Men At Work' を表示する。",
+      "checks": [
+        { "id": "C-005", "observation": "GET /Store/Details/1 の応答本文にタイトルが現れる。" }
+      ]
+    },
+    {
+      "id": "R-005",
+      "category": "起動",
+      "title": "再起動でデータを保持する",
+      "severity": "critical",
+      "basis": "decision",
+      "basisDetail": "旧実装は DropCreateDatabaseIfModelChanges によりモデル変更時に DB を破棄する。これは旧実装の不具合とみなし、保持しない（課題側の判断。docs/topic-selection.md §2）。",
+      "expectation": "注文を作成した後、同じ DB でプロセスを再起動しても、その注文の完了画面が引き続き表示される（DB が破棄されない）。",
+      "checks": [
+        { "id": "C-006", "observation": "注文完了後にアプリを停止・再起動し、同じセッションで GET /Checkout/Complete/{id} が注文番号を表示する。" }
+      ]
+    },
+    {
+      "id": "R-006",
+      "category": "閲覧",
+      "title": "ジャンル別アルバム一覧の絞り込み",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "Controllers/StoreController.cs の Browse が genre 名でジャンルを絞る（確認者: 本作業、確認方法: コード読解）。",
+      "expectation": "GET /Store/Browse?genre=Rock が 200 を返し、Rock のアルバムを含み、他ジャンル（例: Classical の 'A Copland Celebration, Vol. I'）を含まない。",
+      "checks": [
+        { "id": "C-007", "observation": "Browse の応答本文に Rock 固有のタイトルが現れ、他ジャンル固有のタイトルが現れない。" }
+      ]
+    },
+    {
+      "id": "R-007",
+      "category": "閲覧",
+      "title": "存在しないジャンルは 404",
+      "severity": "minor",
+      "basis": "decision",
+      "basisDetail": "旧実装は Single() により例外となり 500 を返す。これは旧実装の不具合とみなし、404 に変更する（docs/topic-selection.md §2）。",
+      "expectation": "GET /Store/Browse?genre=NoSuchGenre が 404 を返す。",
+      "checks": [
+        { "id": "C-008", "observation": "HTTP ステータスコードが 404 である。" }
+      ]
+    },
+    {
+      "id": "R-008",
+      "category": "閲覧",
+      "title": "アルバム詳細の表示項目",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "Views/Store/Details.cshtml がタイトル・ジャンル・アーティスト・価格と「Add to cart」リンクを表示する（確認方法: ビューの読解）。",
+      "expectation": "GET /Store/Details/2 が 200 で、タイトル・ジャンル名（Classical）・アーティスト名・価格（0.00 形式）を表示する。",
+      "checks": [
+        { "id": "C-009", "observation": "応答本文にタイトル・ジャンル名・アーティスト名・小数点付き価格が現れる。" }
+      ]
+    },
+    {
+      "id": "R-009",
+      "category": "閲覧",
+      "title": "存在しないアルバムは 404",
+      "severity": "minor",
+      "basis": "decision",
+      "basisDetail": "R-007 と同じ判断。旧実装は存在しない ID で null 参照により 500 を返す。",
+      "expectation": "GET /Store/Details/99999 が 404 を返す。",
+      "checks": [
+        { "id": "C-010", "observation": "HTTP ステータスコードが 404 である。" }
+      ]
+    },
+    {
+      "id": "R-010",
+      "category": "閲覧",
+      "title": "トップページのジャンルメニューとかご件数",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "Views/Shared/_Layout.cshtml が GenreMenu と CartSummary の子アクションを合成する（確認方法: レイアウト・子アクションの読解）。",
+      "expectation": "GET / が 200 で、10 ジャンル名と、かごの合計数量を表す 'Cart (N)' を含む。",
+      "checks": [
+        { "id": "C-011", "observation": "応答本文に 10 ジャンル名と 'Cart (n)' 形式の件数表示が現れる。" }
+      ]
+    },
+    {
+      "id": "R-011",
+      "category": "かご",
+      "title": "かごへの追加はかご画面へリダイレクト",
+      "severity": "minor",
+      "basis": "legacy",
+      "basisDetail": "Controllers/ShoppingCartController.cs の AddToCart が RedirectToAction(\"Index\") を返す。",
+      "expectation": "GET /ShoppingCart/AddToCart/1 が 3xx を返し、/ShoppingCart へ誘導する。",
+      "checks": [
+        { "id": "C-012", "observation": "ステータスコードが 302 で Location が /ShoppingCart を指す。" }
+      ]
+    },
+    {
+      "id": "R-012",
+      "category": "かご",
+      "title": "同一アルバムの重複追加は 1 明細",
+      "severity": "critical",
+      "basis": "legacy",
+      "basisDetail": "AddToCart は既存の明細があれば Count++ し、新規明細を追加しない（確認方法: コード読解）。二重計上は金額の誤りに直結する。",
+      "expectation": "同じアルバムを 2 回追加すると、かごの明細は 1 行で数量 2 になる。",
+      "checks": [
+        { "id": "C-013", "observation": "かご画面の明細行数が 1、数量が 2 である。" }
+      ]
+    },
+    {
+      "id": "R-013",
+      "category": "かご",
+      "title": "かご合計は単価×数量の総和",
+      "severity": "critical",
+      "basis": "legacy",
+      "basisDetail": "ViewModels/ShoppingCartViewModel.cs の CartTotal が Count * Album.Price の総和（確認方法: コード読解）。全アルバムが 8.99 のため、数量 2 以上でなければ乗算の誤りを検出できない。",
+      "expectation": "同一アルバムを 3 回追加したとき、かご合計が 26.97 になる。",
+      "checks": [
+        { "id": "C-014", "observation": "かご画面の合計表示が 26.97 である。" }
+      ]
+    },
+    {
+      "id": "R-014",
+      "category": "かご",
+      "title": "数量 2 からの削除は数量を 1 減らす",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "RemoveFromCart は Count > 1 のとき Count-- して明細を残す（確認方法: コード読解）。",
+      "expectation": "数量 2 の明細に対して削除を要求すると、JSON の ItemCount が 1、明細は残り、合計が単価 1 件分になる。",
+      "checks": [
+        { "id": "C-015", "observation": "応答 JSON の ItemCount が 1、かご画面の明細が 1 行で数量 1、合計が 8.99 である。" }
+      ]
+    },
+    {
+      "id": "R-015",
+      "category": "かご",
+      "title": "数量 1 からの削除は明細を消す",
+      "severity": "major",
+      "basis": "decision",
+      "basisDetail": "旧実装は明細を削除した後も削除前の Count を返す（Views/ShoppingCart/Index.cshtml の AJAX は ItemCount==0 で行を消す想定）。意図された契約は残数量であり、削除時は 0 とする（課題側の判断）。",
+      "expectation": "数量 1 の明細に対して削除を要求すると、JSON の ItemCount が 0、明細が消え、合計が 0.00 になる。",
+      "checks": [
+        { "id": "C-016", "observation": "応答 JSON の ItemCount が 0、かご画面に明細行がなく合計が 0.00 である。" }
+      ]
+    },
+    {
+      "id": "R-016",
+      "category": "かご",
+      "title": "異なるアルバムの追加で明細が増える",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "AddToCart はアルバム単位で明細を作る（確認方法: コード読解）。",
+      "expectation": "アルバム A を 2 回、アルバム B を 1 回追加すると、明細は 2 行、合計は 26.97 になる。",
+      "checks": [
+        { "id": "C-017", "observation": "かご画面の明細行数が 2、数量の合計が 3、合計金額が 26.97 である。" }
+      ]
+    },
+    {
+      "id": "R-017",
+      "category": "かご",
+      "title": "かごはセッションごとに独立",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "ShoppingCart の ShoppingCartId が Session[\"CartId\"] に依存する（確認方法: コード読解）。",
+      "expectation": "あるセッションでかごに追加しても、別セッションのかごは空のままである。",
+      "checks": [
+        { "id": "C-018", "observation": "セッション B のかご画面に明細行がなく、合計が 0.00 である。" }
+      ]
+    },
+    {
+      "id": "R-018",
+      "category": "注文",
+      "title": "正しい入力とプロモコードで注文が確定する",
+      "severity": "critical",
+      "basis": "legacy",
+      "basisDetail": "CheckoutController.AddressAndPayment が PromoCode 'FREE'（大文字小文字を無視）のとき注文を保存し Complete へリダイレクトする（確認方法: コード読解）。",
+      "expectation": "かごに商品がある状態で正しい住所と promoCode=FREE を POST すると、302 で /Checkout/Complete/{id} へ誘導される。",
+      "checks": [
+        { "id": "C-019", "observation": "POST の応答が 302 で、Location が /Checkout/Complete/ で始まる。" }
+      ]
+    },
+    {
+      "id": "R-019",
+      "category": "注文",
+      "title": "注文合計は単価×数量の総和",
+      "severity": "critical",
+      "basis": "legacy",
+      "basisDetail": "ShoppingCart.CreateOrder が orderTotal に Count * Album.Price を積み上げ、order.Total に設定する（確認方法: コード読解）。",
+      "expectation": "アルバム A を 2 個、アルバム B を 1 個の注文で、注文合計が 26.97 になる。",
+      "checks": [
+        { "id": "C-020", "observation": "注文後に取得できる合計（完了画面またはかご表示に依存しない観測点）が 26.97 である。" }
+      ]
+    },
+    {
+      "id": "R-020",
+      "category": "注文",
+      "title": "注文確定後にかごが空になる",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "CreateOrder の最後に EmptyCart を呼ぶ（確認方法: コード読解）。",
+      "expectation": "注文確定後、かご画面の明細が 0 行で合計が 0.00 になる。",
+      "checks": [
+        { "id": "C-021", "observation": "注文確定後の GET /ShoppingCart に明細行がなく、合計が 0.00 である。" }
+      ]
+    },
+    {
+      "id": "R-021",
+      "category": "注文",
+      "title": "完了画面に注文番号を表示する",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "Views/Checkout/Complete.cshtml が注文番号を表示する（確認方法: ビューの読解）。",
+      "expectation": "GET /Checkout/Complete/{id} が 200 で、その注文番号を表示する。",
+      "checks": [
+        { "id": "C-022", "observation": "応答本文に注文番号が現れる。" }
+      ]
+    },
+    {
+      "id": "R-022",
+      "category": "注文",
+      "title": "他人の注文の完了画面は表示されない",
+      "severity": "critical",
+      "basis": "legacy",
+      "basisDetail": "Complete が Orders.Any(o => o.OrderId == id && o.Username == User.Identity.Name) で所有者を検査する（確認方法: コード読解）。",
+      "expectation": "注文したセッションとは別のセッションで GET /Checkout/Complete/{id} を要求しても、注文番号は表示されない。",
+      "checks": [
+        { "id": "C-023", "observation": "別セッションの応答本文に注文番号が現れない。" }
+      ]
+    },
+    {
+      "id": "R-023",
+      "category": "注文",
+      "title": "プロモコード不一致では注文しない",
+      "severity": "major",
+      "basis": "legacy",
+      "basisDetail": "AddressAndPayment が promoCode の一致を確認し、一致しなければ View(order) を返す（確認方法: コード読解）。",
+      "expectation": "promoCode を誤った値にして POST すると、注文が作られず、入力画面が再表示され、かごの内容が残る。",
+      "checks": [
+        { "id": "C-024", "observation": "応答が 200 で入力フォームを含み、かごの明細が残っている。" }
+      ]
+    },
+    {
+      "id": "R-024",
+      "category": "注文",
+      "title": "必須項目の欠落では注文しない",
+      "severity": "major",
+      "basis": "decision",
+      "basisDetail": "旧実装は TryUpdateModel のみで検証属性を持たない。移行先では住所項目を必須とする（課題側の判断。docs/quality-spec.md の試験条件）。",
+      "expectation": "FirstName を空にして POST すると、注文が作られず入力画面が再表示される。",
+      "checks": [
+        { "id": "C-025", "observation": "応答が 200 で、かごの明細が残っている。" }
+      ]
+    },
+    {
+      "id": "R-025",
+      "category": "注文",
+      "title": "未認証で購入できる",
+      "severity": "minor",
+      "basis": "decision",
+      "basisDetail": "旧実装は CheckoutController に [Authorize] を付し ASP.NET Membership に依存する。組み込みメンバーシップは移行対象外とし、注文の帰属はセッションのカート識別子で判定する（課題側の判断。docs/topic-selection.md §2）。",
+      "expectation": "ログイン操作を行わずに注文を確定できる。",
+      "checks": [
+        { "id": "C-026", "observation": "ログインなしのセッションで R-018 の手順が成立する。" }
+      ]
+    },
+    {
+      "id": "R-026",
+      "category": "移行",
+      "title": "移行先フレームワークである",
+      "severity": "critical",
+      "basis": "independent",
+      "basisDetail": "移行契約: 移行先は .NET 8 以降 / ASP.NET Core MVC（docs/topic-selection.md §2）。",
+      "expectation": "起動対象の Web プロジェクトが Microsoft.NET.Sdk.Web を使い、TargetFramework が net8.0 以降である。",
+      "checks": [
+        { "id": "C-027", "observation": "成果物の csproj を静的に読み、Sdk 属性と TargetFramework を確認する。" }
+      ]
+    },
+    {
+      "id": "R-027",
+      "category": "移行",
+      "title": "旧フレームワーク依存が残っていない",
+      "severity": "critical",
+      "basis": "independent",
+      "basisDetail": "移行契約: ASP.NET MVC 5 / .NET Framework の資産をそのまま起動対象にしない。",
+      "expectation": "起動対象のプロジェクトに System.Web への参照がなく、TargetFramework が net4x ではない。",
+      "checks": [
+        { "id": "C-028", "observation": "成果物の csproj と参照アセンブリに System.Web が現れない。" }
+      ]
+    },
+    {
+      "id": "R-028",
+      "category": "移行",
+      "title": "接続文字列の外部化",
+      "severity": "major",
+      "basis": "independent",
+      "basisDetail": "移行契約: 構成キー ConnectionStrings:MusicStoreEntities から接続先を読む（docs/quality-spec.md の試験条件）。",
+      "expectation": "環境変数 ConnectionStrings__MusicStoreEntities で指定した Data Source のパスに SQLite ファイルが作られる。",
+      "checks": [
+        { "id": "C-029", "observation": "起動と最初のリクエストの後、指定パスにファイルが存在する。" }
+      ]
+    },
+    {
+      "id": "R-029",
+      "category": "移行",
+      "title": "旧実装を呼び出していない",
+      "severity": "major",
+      "basis": "decision",
+      "basisDetail": "移行契約: ラッパー化ではなく業務ロジックの置換を目的とする。旧アプリの呼び出し・プロキシを認めない（docs/topic-selection.md §2）。",
+      "expectation": "成果物のソースに旧実装（MvcMusicStore のプロジェクト・アセンブリ・実行ファイル）を起動または参照する記述がない。",
+      "checks": [
+        { "id": "C-030", "observation": "成果物ツリーを静的に走査し、旧プロジェクト名・旧アセンブリ名・外部プロセス起動の記述を探す。" }
+      ]
+    }
+  ],
+  "outOfScope": [
+    "性能、可用性、同時実行、スケーラビリティ",
+    "セキュリティ全般（認証・認可・入力検証の網羅、CSRF、XSS）",
+    "保守性・可読性・設計の質の自動採点",
+    "画面の見た目、CSS、JavaScript の動作",
+    "GET / の「売れ筋」アルバムの選択と順序（旧実装で非決定的）",
+    "StoreManagerController（管理 CRUD・画像アップロード）",
+    "AccountController（登録・パスワード変更）と ASP.NET Membership",
+    "決済連携、メール送信",
+    "旧実装との HTML マークアップの一致",
+    "旧実装の実行時比較（旧実装は挙動の参照元であり、評価の実行時依存ではない）"
+  ],
+  "knownLimits": [
+    "C-030（旧実装を呼び出していない）は静的なヒューリスティックであり、間接的なラッパー化を証明しない。",
+    "C-020（注文合計）は HTTP で観測できる範囲に限る。注文明細の行構成そのものは観測しない。",
+    "C-027 / C-028 は起動対象プロジェクトの csproj に限る。成果物に含まれる未使用の旧資産は検出しない。",
+    "旧実装を実行して比較していないため、「旧挙動の保持」はコード読解に基づく。"
+  ]
+}

@@ -1,8 +1,8 @@
 # 題材・移行課題の選定（第 1 課題）
 
 対応 Issue: [#3](https://github.com/fukuda-yuki/sample2/issues/3)
-状態: **仮決定**。ユーザー承認まで「採用済み」として扱わない。
-関連: [docs/plan.md](plan.md) の D-4（最初の題材は .NET 候補）、[docs/sample1-inventory.md](sample1-inventory.md)
+状態: **採用確定（.NET 候補）／移行課題 `MS1-001` の範囲は仮決定**。ユーザー指示（D-6「対象は `.NET` で良い」）により候補の採用は確定した。§2 の移行範囲は、[quality-spec.md](quality-spec.md) の評価仕様と校正で妥当性を確認するまで仮決定として扱う。
+関連: [docs/plan.md](plan.md) の D-4・D-6、[docs/decision-log.md](decision-log.md)、[docs/sample1-inventory.md](sample1-inventory.md)、[docs/quality-spec.md](quality-spec.md)
 
 ## 0. この文書の事実区分
 
@@ -87,7 +87,8 @@
 - [x] 3 候補の比較を、確認した事実・推測・未確認に分けた（§1、§0）
 - [x] 最初の 1 課題の推奨案、選定理由、評価可能な品質の範囲、主なリスクを示した（§2〜§4）
 - [x] 必要情報の探索・依存関係を残せているかと、評価準備の負担の両方を説明した（§3 の 3、§4）
-- [ ] **採用／保留／見直しについてユーザーの判断が記録されるまでは、推奨案を採用済みとして扱わない**（[decision-log.md](decision-log.md) に追記する）
+- [x] ユーザー判断が記録されている（[decision-log.md](decision-log.md) の D-4・D-6。`.NET` 候補の採用は確定）
+- [ ] `MS1-001` の移行範囲（§2）は仮決定のまま。[quality-spec.md](quality-spec.md) の校正（正例・負例・別実装・評価側障害）で妥当性を確認してから確定する
 
 ## 7. 参照
 

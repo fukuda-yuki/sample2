@@ -1,0 +1,37 @@
+@model MusicStore.Web.Models.Order
+@{
+    ViewData["Title"] = "Address And Payment";
+}
+
+<form action="/Checkout/AddressAndPayment" method="post">
+    <h2>Address And Payment</h2>
+    <fieldset>
+        <legend>Shipping Information</legend>
+        <div class="editor-label"><label for="FirstName">FirstName</label></div>
+        <div class="editor-field"><input id="FirstName" name="FirstName" type="text" value="@Model.FirstName" /></div>
+        <div class="editor-label"><label for="LastName">LastName</label></div>
+        <div class="editor-field"><input id="LastName" name="LastName" type="text" value="@Model.LastName" /></div>
+        <div class="editor-label"><label for="Address">Address</label></div>
+        <div class="editor-field"><input id="Address" name="Address" type="text" value="@Model.Address" /></div>
+        <div class="editor-label"><label for="City">City</label></div>
+        <div class="editor-field"><input id="City" name="City" type="text" value="@Model.City" /></div>
+        <div class="editor-label"><label for="State">State</label></div>
+        <div class="editor-field"><input id="State" name="State" type="text" value="@Model.State" /></div>
+        <div class="editor-label"><label for="PostalCode">PostalCode</label></div>
+        <div class="editor-field"><input id="PostalCode" name="PostalCode" type="text" value="@Model.PostalCode" /></div>
+        <div class="editor-label"><label for="Country">Country</label></div>
+        <div class="editor-field"><input id="Country" name="Country" type="text" value="@Model.Country" /></div>
+        <div class="editor-label"><label for="Phone">Phone</label></div>
+        <div class="editor-field"><input id="Phone" name="Phone" type="text" value="@Model.Phone" /></div>
+        <div class="editor-label"><label for="Email">Email</label></div>
+        <div class="editor-field"><input id="Email" name="Email" type="text" value="@Model.Email" /></div>
+    </fieldset>
+    <fieldset>
+        <legend>Payment</legend>
+        <p>We're running a promotion: all music is free with the promo code: "FREE"</p>
+        <div class="editor-label"><label for="PromoCode">Promo Code</label></div>
+        <div class="editor-field"><input id="PromoCode" name="PromoCode" type="text" value="" /></div>
+    </fieldset>
+
+    <input type="submit" value="Submit Order" />
+</form>

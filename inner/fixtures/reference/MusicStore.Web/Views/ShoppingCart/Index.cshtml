@@ -1,0 +1,45 @@
+@using System.Globalization
+@model List<MusicStore.Web.Models.Cart>
+@{
+    ViewData["Title"] = "Shopping Cart";
+}
+
+<h3><em>Review</em> your cart:</h3>
+<p class="button">
+    <a href="/Checkout/AddressAndPayment">Checkout &gt;&gt;</a>
+</p>
+<div id="update-message">
+</div>
+<table>
+    <tr>
+        <th>Album Name</th>
+        <th>Price (each)</th>
+        <th>Quantity</th>
+        <th></th>
+    </tr>
+    @foreach (var item in Model)
+    {
+        <tr id="row-@item.RecordId">
+            <td>
+                <a href="/Store/Details/@item.AlbumId">@item.Album.Title</a>
+            </td>
+            <td>
+                @item.Album.Price.ToString("0.00", CultureInfo.InvariantCulture)
+            </td>
+            <td id="item-count-@item.RecordId">
+                @item.Count
+            </td>
+            <td>
+                <a href="#" class="RemoveLink" data-id="@item.RecordId">Remove from cart</a>
+            </td>
+        </tr>
+    }
+    <tr>
+        <td>Total</td>
+        <td></td>
+        <td></td>
+        <td id="cart-total">
+            @(((decimal)ViewBag.CartTotal).ToString("0.00", CultureInfo.InvariantCulture))
+        </td>
+    </tr>
+</table>

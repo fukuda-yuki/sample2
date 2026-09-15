@@ -1,0 +1,35 @@
+@using System.Linq
+@inject MusicStore.Web.Data.MusicStoreContext Db
+@inject MusicStore.Web.Services.CartService Cart
+<!DOCTYPE html>
+<html>
+<head>
+    <title>@ViewData["Title"]</title>
+    <link href="/Content/Site.css" rel="stylesheet" type="text/css" />
+</head>
+<body>
+    <div id="header">
+        <h1><a href="/">ASP.NET MVC MUSIC STORE</a></h1>
+        <ul id="navlist">
+            <li class="first"><a href="/" id="current">Home</a></li>
+            <li><a href="/Store">Store</a></li>
+            <li><a href="/ShoppingCart" id="cart-status">Cart (@Cart.GetCount())</a></li>
+        </ul>
+    </div>
+
+    <ul id="categories">
+        @foreach (var genre in Db.Genres.OrderBy(g => g.GenreId).ToList())
+        {
+            <li><a href="/Store/Browse?genre=@genre.Name">@genre.Name</a></li>
+        }
+    </ul>
+
+    <div id="main">
+        @RenderBody()
+    </div>
+
+    <div id="footer">
+        built with ASP.NET Core
+    </div>
+</body>
+</html>

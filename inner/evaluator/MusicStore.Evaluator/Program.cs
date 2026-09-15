@@ -25,6 +25,7 @@ public static class Program
 
         Ledger ledger;
         Catalog catalog;
+        var faults = new List<string>();
         try
         {
             ledger = Ledger.Load(options.SpecPath);
@@ -32,34 +33,36 @@ public static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("評価側の障害: " + ex.Message);
+            // 台帳やカタログが読めない場合も、評価側の障害として記録を残す。
+            ledger = null;
+            catalog = null;
+            faults.Add(ex.Message);
+        }
+
+        if (ledger != null)
+        {
+            var missing = ledger.AllCheckIds().Where(id => !Checks.Registry.ContainsKey(id)).ToList();
+            if (missing.Count > 0)
+            {
+                faults.Add("台帳の検査が実装されていません: " + string.Join(", ", missing));
+            }
+        }
+
+        if (!Directory.Exists(options.ArtifactPath))
+        {
+            faults.Add("成果物ディレクトリが存在しません: " + options.ArtifactPath);
+        }
+
+        if (faults.Count > 0)
+        {
+            // 成果物の品質を判定できない状態。品質点を返さず error とし、
+            // 呼び出し側が成果物の欠陥と区別できるよう記録を残す。
+            WriteFaultOutput(options, ledger, startedAt, faults);
+            Console.Error.WriteLine("評価側の障害: " + string.Join(" / ", faults));
             return 2;
         }
 
         var ledgerCheckIds = ledger.AllCheckIds().ToList();
-        var missing = ledgerCheckIds.Where(id => !Checks.Registry.ContainsKey(id)).ToList();
-        if (missing.Count > 0)
-        {
-            // 台帳にある検査が実装されていない = 評価側の障害。成果物の失敗として扱わない。
-            var faultOutput = new EvaluationOutput
-            {
-                EvaluationId = $"{ledger.TaskId}-nospec-{options.EvaluationVersion}-{options.Sequence:000}",
-                TaskId = ledger.TaskId,
-                TaskTitle = ledger.TaskTitle,
-                EvaluationVersion = options.EvaluationVersion,
-                SpecVersion = ledger.SpecVersion,
-                ArtifactPath = options.ArtifactPath,
-                Verdict = "error",
-                Quality = null,
-                EvaluatorFaults = { "台帳の検査が実装されていません: " + string.Join(", ", missing) },
-                StartedAt = startedAt.ToString("o", CultureInfo.InvariantCulture),
-                FinishedAt = DateTimeOffset.Now.ToString("o", CultureInfo.InvariantCulture),
-            };
-            WriteJson(Path.Combine(options.OutDir, "evaluation.json"), faultOutput);
-            Console.Error.WriteLine("評価側の障害: 未実装の検査 " + string.Join(", ", missing));
-            return 2;
-        }
-
         var specHash = Sha256File(options.SpecPath);
         var artifactHash = Sha256Directory(options.ArtifactPath);
         var evaluationId = $"{ledger.TaskId}-{artifactHash.Substring(0, 12)}-{options.EvaluationVersion}-{options.Sequence:000}";
@@ -145,6 +148,39 @@ public static class Program
         }
 
         return output.Verdict == "error" ? 2 : 0;
+    }
+
+    /// <summary>
+    /// 評価側の障害を記録する。終了コード 2 の経路は必ずここを通り、呼び出し側は
+    /// evaluation.json の verdict=error と quality=null で成果物の欠陥と区別できる。
+    /// </summary>
+    private static void WriteFaultOutput(CliOptions options, Ledger ledger, DateTimeOffset startedAt, List<string> faults)
+    {
+        var artifactHash = Directory.Exists(options.ArtifactPath) ? Sha256Directory(options.ArtifactPath) : string.Empty;
+        var shortHash = artifactHash.Length >= 12 ? artifactHash.Substring(0, 12) : "000000000000";
+        var taskId = ledger == null ? "unknown" : ledger.TaskId;
+
+        var output = new EvaluationOutput
+        {
+            EvaluationId = $"{taskId}-{shortHash}-{options.EvaluationVersion}-{options.Sequence:000}",
+            TaskId = taskId,
+            TaskTitle = ledger == null ? string.Empty : ledger.TaskTitle,
+            EvaluationVersion = options.EvaluationVersion,
+            SpecVersion = ledger == null ? string.Empty : ledger.SpecVersion,
+            SpecSha256 = Sha256File(options.SpecPath),
+            ArtifactPath = options.ArtifactPath,
+            ArtifactSha256 = artifactHash,
+            SourceRepository = ledger == null ? string.Empty : ledger.SourceRepository,
+            SourceCommit = ledger == null ? string.Empty : ledger.SourceCommit,
+            Verdict = "error",
+            Quality = null,
+            EvaluatorFaults = faults,
+            StartedAt = startedAt.ToString("o", CultureInfo.InvariantCulture),
+            FinishedAt = DateTimeOffset.Now.ToString("o", CultureInfo.InvariantCulture),
+        };
+
+        WriteJson(Path.Combine(options.OutDir, "evaluation.json"), output);
+        File.WriteAllText(Path.Combine(options.OutDir, "results.jsonl"), string.Empty, new UTF8Encoding(false));
     }
 
     private static void PrepareAndRun(RunState state, CliOptions options, Ledger ledger, string evidenceDir)

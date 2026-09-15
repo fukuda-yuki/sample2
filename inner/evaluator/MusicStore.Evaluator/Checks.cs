@@ -709,6 +709,13 @@ public static class Checks
             return Fault(state, "R-023", "C-024", input, scenario, state.Transcript("invalid"));
         }
 
+        if (scenario.LinesBefore.Count == 0)
+        {
+            // かごに入れられない成果物では「かごが変わらないこと」を観測できない。
+            // 前提が成立しないので不合格ではなく未評価（blocked）とする。
+            return Make(state, "R-023", "C-024", input, Judgement.Blocked, "未評価: かごに明細を入れられないため、プロモコード不一致の挙動を観測できません。", state.Transcript("invalid"));
+        }
+
         var showsForm = Html.Contains(scenario.WrongPromo.Body, "PromoCode");
         var ok = scenario.WrongPromo.Status == 200 && showsForm && scenario.LinesAfterWrongPromo.Count == scenario.LinesBefore.Count && scenario.LinesAfterWrongPromo.Count > 0;
         return Verdict(
@@ -734,6 +741,11 @@ public static class Checks
         if (!scenario.Ok)
         {
             return Fault(state, "R-024", "C-025", input, scenario, state.Transcript("invalid"));
+        }
+
+        if (scenario.LinesBefore.Count == 0)
+        {
+            return Make(state, "R-024", "C-025", input, Judgement.Blocked, "未評価: かごに明細を入れられないため、必須項目欠落の挙動を観測できません。", state.Transcript("invalid"));
         }
 
         var ok = scenario.MissingField.Status == 200

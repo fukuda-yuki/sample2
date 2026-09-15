@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-15T15:52:24.157445+00:00",
-  "started_at": "2026-09-15T15:51:45.233713+00:00",
+  "generated_at": "2026-09-15T15:56:27.037899+00:00",
+  "started_at": "2026-09-15T15:55:45.023577+00:00",
   "repo": "C:\\Users\\mwam0\\.copilot\\repos\\sample2",
   "note": "外側の実験実行基盤の非モデル検証の生記録。モデルは一切呼び出していない。期待は実行前に宣言し、観測値と完全一致で突き合わせる。",
   "environment": {
@@ -11,14 +11,16 @@
   },
   "commands": [
     "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
+    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
     "C:\\Python314\\python.exe -m unittest discover -p test_*.py -v",
     "harness.cli preserve --run MS1-001-C01-001 --archive C:\\Users\\mwam0\\.copilot\\repos\\sample2\\outer\\verify\\.scratch\\archive"
   ],
   "artifacts": {
+    "evaluator_sha256_rebuild": "d6798301a91d97a5aa7f2ed6744b7668e53b2c99448d530878dfd92c39b4fbfe",
     "evaluator_dll": "inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll",
-    "evaluator_sha256": "09679d524befd9cb1b29e6041adb6b3395b806797000a3cab7979f4bda764a55"
+    "evaluator_sha256": "d6798301a91d97a5aa7f2ed6744b7668e53b2c99448d530878dfd92c39b4fbfe"
   },
-  "case_count": 14,
+  "case_count": 15,
   "mismatched": [],
   "cases": [
     {
@@ -30,6 +32,20 @@
       },
       "observed": {
         "exit_code": 0
+      },
+      "matched": true
+    },
+    {
+      "id": "V-0b",
+      "kind": "measured",
+      "what": "同じソースを同じ場所で作り直すと同じ評価器ビルドになる",
+      "expected": {
+        "exit_code": 0,
+        "rebuild_matches_first_build": true
+      },
+      "observed": {
+        "exit_code": 0,
+        "rebuild_matches_first_build": true
       },
       "matched": true
     },

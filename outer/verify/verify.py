@@ -107,7 +107,28 @@ def build_evaluator(repo, report):
                          repo)
     report.case('V-0', 'measured', '評価器をビルドする',
                 {'exit_code': 0}, {'exit_code': completed.returncode})
-    return completed.returncode == 0
+    if completed.returncode != 0:
+        return False
+    # A recorded build identity is only worth something if the build repeats.
+    # Rebuild from scratch and compare before any scoring run uses the assembly.
+    first = util.sha256_file(evaluate.evaluator_file(repo))
+    again = clean_rebuild(report, repo, project)
+    second = util.sha256_file(evaluate.evaluator_file(repo))
+    report.artifact('evaluator_sha256_rebuild', second)
+    report.case('V-0b', 'measured', '同じソースを同じ場所で作り直すと同じ評価器ビルドになる',
+                {'exit_code': 0, 'rebuild_matches_first_build': True},
+                {'exit_code': again.returncode, 'rebuild_matches_first_build': first == second})
+    return again.returncode == 0
+
+
+def clean_rebuild(report, repo, project):
+    """Delete bin and obj and build again, so a measured value can be trusted."""
+    for name in ('bin', 'obj'):
+        path = project.parent / name
+        if path.exists():
+            shutil.rmtree(path)
+    return run_step(report, ['dotnet', 'build', project, '-c', 'Release', '--nologo', '-v', 'q'],
+                    repo)
 
 
 def run_unit_tests(repo, report):

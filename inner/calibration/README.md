@@ -8,8 +8,12 @@
 - **モデルは一切呼び出さない。** 成果物を固定し、評価器だけを検証する。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-calibration.ps1
+pwsh -NoProfile -File .\inner\calibration\run-calibration.ps1
 ```
+
+**実行するホストを記録に合わせる。** 記録した [`calibration-summary.json`](calibration-summary.json) は
+**PowerShell 7**（本記録では `pwsh` 7.6.6）で実行した出力である。
+Windows PowerShell 5.1 で実行すると、評価側の障害 2 件の `stderr` の書き方だけが変わる（§5-15）。
 
 ## 1. 校正の方法
 
@@ -173,17 +177,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 判定の意味（`evaluation_version`）とビルドの同一性（`evaluatorSha256`）を分けて扱う規則は
 [`docs/decision-log.md`](../../docs/decision-log.md) D-15 と
 [`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4 にある。
-証跡形式の変更後のビルドの `sha256` は `76ae726991b44b7bbf3c07bbd6416dd4988f1f614ab912e0a227a307e6305e24`
+証跡形式の変更後のビルドを測った値は `76ae726991b44b7bbf3c07bbd6416dd4988f1f614ab912e0a227a307e6305e24`
 （`bin/Release/net8.0/MusicStore.Evaluator.dll`、評価器ソースの最終更新は `6abe36e`）。
-**この値の正は [`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
-`artifacts.evaluator_sha256` であり、この本文の値はそれを写したものである。**
+ただし §4.2 のとおり、**この値は「そのソースをその場所でその作業ツリーのままビルドしたもの」の
+識別子**であり、`6abe36e` のビルドを再現して測った値として扱わない（現在の値は `d6798301…`）。
+**値の正は [`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
+`artifacts.evaluator_sha256` であり、本文の値はそれを写したものである。**
 評価器のソースを変えるとこの値は陳腐化するため、本文の値だけを根拠にしない。
-**この値は下の §4.2 の変更で更新されている。**
 
 この値の再現性は 2 通り測った。**同じソースを同じパスで作り直すと同じ値になる**
 （`bin` と `obj` を消して 2 回ビルドし、2 回とも同じ値）。**ソースを別のパスに置いてビルドすると値が変わる**
 （`%TEMP%` に同じ `.cs` と `.csproj` を置いてビルドすると `9f1bbdf5f4cdade2…` になった）。
 つまりこの値は「そのソース」ではなく「**そのソースをその場所でビルドしたもの**」の識別子である。
+**ソースファイルのバイト列（改行コード）も値に効く**（§4.2 の実測）。
 固定値を使う場合は条件の `evaluation.evaluator_sha256` に入れるが、そのときは
 **`evaluation.evaluator_build` にソースの位置・アセンブリ・ビルドコマンド・ビルドに使った SDK の版・
 固定値の出所も書く**（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
@@ -195,32 +201,71 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 その値が**ビルドしたコミットにも依存していた**。.NET SDK は既定で、ビルドした作業ツリーの
 コミットを `AssemblyInformationalVersion` に埋め込むためである。実測で確認した。
 
-| ビルドした時点の `HEAD` | `MusicStore.Evaluator.dll` の `sha256` |
-| --- | --- |
-| `45a2b4a` | `76ae726991b44b7b…` |
-| `6675e19`（文書だけのコミット） | `60c8fbd406ad6484…` |
+| ビルドした時点の `HEAD` | 測った `sha256` | 注 |
+| --- | --- | --- |
+| `45a2b4a` | `76ae726991b44b7b…` | コミットの文字列はアセンブリに無い |
+| `6675e19`（文書だけのコミット） | `60c8fbd406ad6484…` | アセンブリに `6675e19` の文字列がある |
 
 アセンブリの中に `6675e19` の文字列があることも確認した（`45a2b4a` のビルドには無い）。
-この状態では、**測定値を記録するコミット自身が次のビルドの値を変えてしまう**ため、
-記録した値とその記録を含むコミットが一致しえない。そこで評価器の `.csproj` で
+**この 2 つの絶対値は、後述のとおりバイト列を作業ツリーから採ったものなので再現値として扱わない**が、
+**文書だけのコミットで値が変わったこと**と**コミットの文字列が埋まっていたこと**は、
+埋め込みの事実を示す観測である。この状態では、**測定値を記録するコミット自身が次のビルドの値を
+変えてしまう**ため、記録した値とその記録を含むコミットが一致しえない。そこで評価器の `.csproj` で
 `IncludeSourceRevisionInInformationalVersion` を `false` にし、**値がソース・パス・SDK だけ**で
 決まるようにした（評価器はこの属性を読まないため、判定の意味は変わらない）。
+生成される `AssemblyInformationalVersion` が `1.0.0` になっていること、アセンブリにコミットの文字列が
+無いこと、そして `-p:SourceRevisionId=<別の値>` を与えても値が変わらないことを確認した。
 
 校正を再実行し、13 ケースすべてが**同じ判定・同じ品質点・同じ評価 ID・同じ不合格の集合**で
 一致した。[`calibration-summary.json`](calibration-summary.json) はこの実行の出力に入れ替えてある。
-入れ替えで前の記録と差が出たのは**評価側の障害 2 件の `stderr` の書き方だけ**である
-（PowerShell がネイティブコマンドの標準エラーをどのように記録するかで変わる。
-前の記録は 6 行、今の記録は 1 行。判定・品質点・終了コードは同じ）。
+入れ替えで前の記録と差が出たのは**評価側の障害 2 件の `stderr` の書き方だけ**である。
+原因は**実行した PowerShell のホスト**で、Windows PowerShell 5.1 はネイティブコマンドの標準エラーを
+`dotnet.exe : …` と `At <行>` の形に包んで記録するのに対し、PowerShell 7 は包まない
+（前の記録は 5.1 で 6 行、今の記録は 7 で 1 行。判定・品質点・終了コードは同じ。§5-15）。
 この差は評価器の出力ではなく、実行のしかたに依存する。
+**記録したビルド（`d6798301…`）で `pwsh` 7 により再実行すると、この記録は行末以外まったく同じ
+バイト列になった**（同じビルドなら同じ出力になることを確認している。§4.3）。
 
 この変更でも**評価版は `1.0.0` のままである**。判定の意味は変えていない。
-変更後のビルドの `sha256` は
-`09679d524befd9cb1b29e6041adb6b3395b806797000a3cab7979f4bda764a55`
-（`bin/Release/net8.0/MusicStore.Evaluator.dll`）。
-**この値も [`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
-`artifacts.evaluator_sha256` を正とする。**
+
+**このとき本文に書いた値 `09679d524befd9cb…` は、その後どこからも再現しなかった。**
+クリーンな作業ツリーで測り直すと `d6798301a91d97a5…` になり、`bin` `obj` を消した作り直しでも
+同じ値になる（4 回）。埋め込みを切った後も値が変わっていたのは、
+**`09679d52…` を測った作業ツリーのソースのバイト列がコミットと一致していなかった**ためである。
+`.cs` を CRLF で保存してビルドすると値が変わることが実測で確認できた
+（LF は `d6798301a91d97a5…`、CRLF は `d5443910a342d9f6…`）。
+`.csproj` のバイト列は値に効かない（CRLF にしても `d6798301…` のまま）。
+追跡ファイルを書き換えていないクリーンな作業ツリー（`.gitattributes` の `eol=lf` のまま）で測る、
+という条件が抜けていた**記録のしかたの誤り**である。§4.3 で手順に入れた。
+
 ビルドしたコミットは、条件の `evaluation.evaluator_build.source_commit` に追跡用として残す
 （値には影響しない）。
+
+### 4.3 記録した値を記録コミットの後で作り直して確かめる
+
+値が「ソースの版」ではなく「ビルドしたもの」の識別子である以上、**測って記録するだけでは足りない**。
+記録を書き込むコミットで値が変わらないことを、次のように確かめる手順にした。
+
+1. 追跡ファイルを書き換えていない**クリーンな作業ツリー**で測る（`git status --porcelain` が空）。
+2. 外側の検証が `bin` `obj` を消して作り直し、**同じ値になることを `V-0b` で確認する**
+   （採点に使う前。[`outer/verify/README.md`](../../outer/verify/README.md) §V-11）。
+3. その値を記録に書き、**記録を含むコミットを作る**。
+4. **そのコミットの後でもう一度作り直し、記録した値と同じになることを確かめる。**
+
+2026-09-16 時点の結果:
+
+| 確認 | 結果 |
+| --- | --- |
+| `V-0b`（`bin` `obj` を消した作り直し） | 一致（`d6798301a91d97a5…`） |
+| 記録したビルドでの校正の再実行（`pwsh` 7、13 ケース） | すべて一致。`calibration-summary.json` と**行末以外は同じバイト列** |
+| 修正コミット `1e5a8b5` の後でのビルド | `d6798301a91d97a5…`（記録した値と一致） |
+
+記録コミットの後で値が変わらないことは、**埋め込みを切った効果そのもの**の確認でもある。
+埋め込みが有効なビルドでは `AssemblyInformationalVersion` が `1.0.0+<コミット>` になり、
+値が変わる（実測: `IncludeSourceRevisionInInformationalVersion=true` と `SourceRevisionId=1e5a8b5` で
+ビルドすると `1.0.0+1e5a8b5`、`sha256` は `2985c4a3bbdca2ca…`。切り方を戻すと `d6798301…` に戻る）。
+この手順を踏まずに固定すると、条件に**再現しない値**を入れて、
+すべての採点が `rejected_mismatch` になる（§5-16）。
 
 ## 5. 校正の限界（隠さず記録する）
 
@@ -261,6 +306,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
     `.csproj` で埋め込みを切った後も、**この切り方を知らない別のビルド手順では値が変わりうる**
     （手で `AssemblyInformationalVersion` を指定する、別の SDK を使うなど）。
     固定値の出所にコマンドと SDK を書くのはこのためである。
-15. **`calibration-summary.json` の「評価側の障害」2 件の `stderr` は実行のしかたに依存する。**
-    評価器の出力ではなく、PowerShell がネイティブコマンドの標準エラーをどう記録するかの差である
-    （§4.2）。この 2 フィールドは同一性の比較に使わない。
+15. **`calibration-summary.json` の「評価側の障害」2 件の `stderr` は、実行する PowerShell の
+    ホストに依存する。** Windows PowerShell 5.1 はネイティブコマンドの標準エラーを
+    `dotnet.exe : …` と `At <行>` の形に包むため 6 行になり、PowerShell 7 は包まないため 1 行になる
+    （§4.2。判定・品質点・終了コードは同じ）。記録は **PowerShell 7** の出力であり、
+    実行コマンドは本ファイルの冒頭にある。この 2 フィールドは同一性の比較に使わない。
+16. **`evaluatorSha256` は、ソースファイルのバイト列（改行コードを含む）にも依存する。** 同じ `.cs` を
+    CRLF で保存してビルドすると値が変わる（実測: LF `d6798301…`、CRLF `d5443910…`。§4.2）。
+    したがって記録に使う値は**追跡ファイルを書き換えていないクリーンな作業ツリー**で測り、
+    **記録コミットの後で作り直して同じ値になることを確かめる**（§4.3）。
+    この手順を踏まずに固定値を条件に入れると、**再現しない値**を入れてしまい、
+    すべての採点が `rejected_mismatch` になる（拒否は記録に残るので静かには壊れない）。
+    本ファイルの「4.1」「4.2」にある古い値（`76ae7269…`、`09679d52…`）は、
+    この条件を満たす前の作業ツリーで測ったものであり、**再現値として扱わない**。
+    値の正は [`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
+    `artifacts.evaluator_sha256` である。

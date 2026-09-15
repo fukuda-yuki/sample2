@@ -156,9 +156,13 @@ error が 1 つでもある            → verdict = error, quality = null
 
 `evaluatorSha256` は**ソースの版ではなく、ビルドしたもの**を指す。同じソースでも
 ビルドしたパスが変われば値が変わる（[`inner/calibration/README.md`](../inner/calibration/README.md) §4.1 に
-実測がある）。同じマシン・同じパスでの作り直しでは同じ値になることを確認しているが、
+実測がある）。**ソースファイルのバイト列（改行コード）でも変わる**（同 §4.2 に実測）。
+同じマシン・同じパスでの作り直しでは同じ値になることを確認しているが、
 別のマシンや別のパスでの一致は期待しない。
 **この値の一致を「同じ意味の判定をする評価器である」ことの根拠に使わない。**
+記録に使う値は**追跡ファイルを書き換えていないクリーンな作業ツリー**で測り、
+**記録コミットの後で作り直して同じ値になることを確かめる**（同 §4.3。外側の検証では
+`bin` `obj` を消した作り直しを `V-0b` が確認する）。
 
 **ビルドしたコミットは値に混ぜない。** .NET SDK は既定で、ビルドした作業ツリーのコミットを
 `AssemblyInformationalVersion` に埋め込む。その既定のままでは、**文書だけのコミットでも
@@ -169,6 +173,8 @@ error が 1 つでもある            → verdict = error, quality = null
 評価器はこの属性を読まないため、`MusicStore.Evaluator.csproj` で
 `IncludeSourceRevisionInInformationalVersion` を `false` にして、
 値がソース・パス・SDK だけで決まるようにした。
+`AssemblyInformationalVersion` が `1.0.0` になり、`SourceRevisionId` を与えても値が変わらないことを
+確認している（埋め込みが有効なビルドでは `1.0.0+<コミット>` になる。同 §4.3）。
 **この変更は判定の意味を変えないので `evaluation_version` は据え置く**（本節の規則）。
 ビルドしたコミットは、条件の `evaluation.evaluator_build.source_commit` に追跡用として残す。
 

@@ -44,7 +44,7 @@ python outer\verify\verify.py --repo .
 | ID | 種別 | 何を確認するか | 結果 |
 | --- | --- | --- | --- |
 | V-0 | measured | 評価器がビルドできる（終了コード `0`） | 一致 |
-| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 72 件） | 一致 |
+| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 78 件） | 一致 |
 | V-1b | scripted | 取り違え 5 検査のテストが存在して緑である（**代替評価器**） | 一致 |
 | V-2 | measured | 正例を実行し、**実評価器**で採点する | 一致 |
 | V-3 | measured | CRLF と BOM の作業ツリーでも同じ成果物ハッシュと同じ評価 ID になる | 一致 |

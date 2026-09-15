@@ -195,6 +195,10 @@ public sealed class EvaluatorManifest
 
     public int Port { get; set; }
 
+    public int AppProcessId { get; set; }
+
+    public List<int> AppProcessIds { get; set; }
+
     public List<string> LedgerCheckIds { get; set; } = new List<string>();
 
     public List<string> ImplementedCheckIds { get; set; } = new List<string>();

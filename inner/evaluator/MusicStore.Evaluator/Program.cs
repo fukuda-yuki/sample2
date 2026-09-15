@@ -135,6 +135,8 @@ public static class Program
             PublishDirectory = host.PublishDir,
             DatabasePath = host.DatabasePath,
             Port = host.Port,
+            AppProcessId = host.AppProcessId,
+            AppProcessIds = host.AppProcessIds,
             LedgerCheckIds = ledgerCheckIds,
             ImplementedCheckIds = Checks.Registry.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList(),
         };

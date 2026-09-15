@@ -107,10 +107,24 @@ error が 1 つでもある            → verdict = error, quality = null
 | --- | --- |
 | `evaluation.json` | 評価 1 回分の結果（下記） |
 | `results.jsonl` | 検査ごとに 1 行（`requirementId` `checkId` `input` `expectation` `observation` `judgement` `evidence`） |
-| `evaluator-manifest.json` | 評価器・台帳・成果物のハッシュ、選んだプロジェクト、発行先、DB パス、ポート、検査 ID の突合結果 |
+| `evaluator-manifest.json` | 評価器・台帳・成果物のハッシュ、選んだプロジェクト、発行先、DB パス、ポート、アプリのプロセス ID、検査 ID の突合結果 |
 | `evidence/publish.log` | `dotnet publish` の標準出力・標準エラー |
-| `evidence/app-process.log` | 起動したプロセスの標準出力・標準エラー |
+| `evidence/app-process.log` | 起動したプロセスの標準出力・標準エラー。起動のたびに `===== app process (pid <PID>, url <URL>, started <時刻>) =====` の行を先に書く（下記） |
 | `evidence/http-*.log` | 操作ごとの HTTP 要求・応答の抜粋 |
+
+### 6.1 アプリのプロセスを後から特定できるようにする
+
+評価器は成果物のアプリを子プロセスとして起動する。**評価器自身が強制終了されると
+`Dispose` に到達せず、アプリが残ることがある**（実際に 1 度起きた）。
+そのとき「どのプロセスが残ったのか」を後から突き合わせられるよう、次を残す。
+
+- `evidence/app-process.log` の先頭行に `pid` と `url` を書く。**`Stop()` ではなく `Start()` で
+  書く**ため、評価器が道連れにされなくても残る。
+- `evaluator-manifest.json` の `appProcessIds` に、起動したアプリのプロセス ID を起動順に並べる
+  （`appProcessId` は最後の 1 つ、`port` は使用したポート）。再起動を挟む評価では 2 つ以上になる。
+
+この記録は**特定のためのものであり、残骸の除去ではない。** 残骸を止めるのは
+呼び出し側（外側の実行基盤）の責務である（[`docs/outer-harness.md`](outer-harness.md) §6.3）。
 
 `evaluation.json` の主な項目:
 

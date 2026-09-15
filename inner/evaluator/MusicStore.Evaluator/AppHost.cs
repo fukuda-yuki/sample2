@@ -26,6 +26,11 @@ public sealed class AppHost : IDisposable
 
     public int Port { get; private set; }
 
+    public int AppProcessId { get; private set; }
+
+    /// <summary>起動したアプリのプロセス ID（再起動のたびに増える）。</summary>
+    public List<int> AppProcessIds { get; } = new List<int>();
+
     public string BaseUrl => $"http://127.0.0.1:{Port}";
 
     public string EntryAssembly { get; private set; }
@@ -168,10 +173,29 @@ public sealed class AppHost : IDisposable
         };
 
         process.Start();
+        AppProcessId = process.Id;
+        AppProcessIds.Add(process.Id);
+        AppendEvidenceHeader();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         Started = true;
         ProcessLogSink = log;
+    }
+
+    /// <summary>
+    /// アプリのプロセス ID と接続先を起動直後に証跡へ書く。評価器自体が強制終了されると
+    /// Stop() に到達しないため、残骸を後から特定できる行は先に書いておく必要がある。
+    /// </summary>
+    private void AppendEvidenceHeader()
+    {
+        if (processLogPath == null)
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(processLogPath));
+        using var writer = new StreamWriter(processLogPath, append: true, new UTF8Encoding(false));
+        writer.Write($"===== app process (pid {AppProcessId}, url {BaseUrl}, started {DateTimeOffset.Now:o}) =====\n");
     }
 
     private StringBuilder ProcessLogSink;
@@ -210,7 +234,7 @@ public sealed class AppHost : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(processLogPath));
             // 再起動を挟むと 2 つ目のプロセスのログで上書きされてしまうため追記する。
             using var writer = new StreamWriter(processLogPath, append: true, new UTF8Encoding(false));
-            writer.Write($"===== app process log ({DateTimeOffset.Now:o}) =====\n");
+            writer.Write($"===== app process log (pid {AppProcessId}, url {BaseUrl}, {DateTimeOffset.Now:o}) =====\n");
             writer.Write(LastProcessLog);
             writer.Write('\n');
         }

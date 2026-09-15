@@ -164,17 +164,25 @@ error が 1 つでもある            → verdict = error, quality = null
 **記録コミットの後で作り直して同じ値になることを確かめる**（同 §4.3。外側の検証では
 `bin` `obj` を消した作り直しを `V-0b` が確認する）。
 
-**ビルドしたコミットは値に混ぜない。** .NET SDK は既定で、ビルドした作業ツリーのコミットを
-`AssemblyInformationalVersion` に埋め込む。その既定のままでは、**文書だけのコミットでも
-値が変わる**（実際に `45a2b4a` で測った値と `6675e19` で測った値が食い違い、
-アセンブリに `6675e19` が埋まっていることを確認した）。
-すると測定値を記録するコミット自身が次のビルドの値を変えてしまい、
+**ビルドしたコミットは値に混ぜない。** 実際には**コミットが 2 つの経路で値に入っていた**。
+どちらも既定で有効であり、両方を切らないと値はコミットのたびに動く。
+
+| 経路 | 何が起きるか | 切る指定 |
+| --- | --- | --- |
+| `AssemblyInformationalVersion` | アセンブリに `1.0.0+<コミット>` が入る | `IncludeSourceRevisionInInformationalVersion` = `false` |
+| sourcelink 文書 → 移植可能 PDB | SDK が `obj/…/MusicStore.Evaluator.sourcelink.json` を作る。中身は `…/raw.githubusercontent.com/<owner>/<repo>/<コミット>/*`。Roslyn がこれを **PDB に入れ**、アセンブリはその **PDB の id をデバッグディレクトリに持つ**ため、**コミットがアセンブリのバイト列まで間接的に届く** | `EnableSourceLink` = `false` |
+
+その既定のままでは、**文書だけのコミットでも値が変わる**（`45a2b4a` で測った値と `6675e19` で
+測った値が食い違った）。すると測定値を記録するコミット自身が次のビルドの値を変えてしまい、
 **記録した値と、その記録を含むコミットが一致しえない**。
-評価器はこの属性を読まないため、`MusicStore.Evaluator.csproj` で
-`IncludeSourceRevisionInInformationalVersion` を `false` にして、
-値がソース・パス・SDK だけで決まるようにした。
-`AssemblyInformationalVersion` が `1.0.0` になり、`SourceRevisionId` を与えても値が変わらないことを
-確認している（埋め込みが有効なビルドでは `1.0.0+<コミット>` になる。同 §4.3）。
+1 つ目だけを切った状態でも値はコミットのたびに動いており、値の中にコミットの文字列が無いことから
+2 つ目の経路を特定した（`-p:EnableSourceLink=true` でビルドすると値が変わり、
+`false` ではコミットをまたいで同じ値になる。実測は
+[`inner/calibration/README.md`](../inner/calibration/README.md) §4.2 §4.3）。
+評価器はこの属性も sourcelink 文書も読まないため、
+`MusicStore.Evaluator.csproj` で両方を切って**値がソース・パス・SDK だけで決まる**ようにした。
+`AssemblyInformationalVersion` が `1.0.0` になること、`SourceRevisionId` を与えても値が変わらないことを
+確認している。
 **この変更は判定の意味を変えないので `evaluation_version` は据え置く**（本節の規則）。
 ビルドしたコミットは、条件の `evaluation.evaluator_build.source_commit` に追跡用として残す。
 

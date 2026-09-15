@@ -16,6 +16,15 @@
       attribute; turning it off keeps the identity a function of source, path and SDK.
     -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!--
+      Turning off the attribute above is not enough. The SDK also writes a sourcelink
+      document containing the commit (".../raw.githubusercontent.com/<owner>/<repo>/<sha>/*")
+      and Roslyn records it in the portable PDB, whose id the assembly carries in its
+      debug directory. The commit therefore reached the assembly's bytes indirectly and
+      the sha256 still moved with every commit. The evaluator is a local, sealed tool and
+      nothing reads this document, so source link is turned off as well.
+    -->
+    <EnableSourceLink>false</EnableSourceLink>
   </PropertyGroup>
 
 </Project>

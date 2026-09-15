@@ -302,12 +302,18 @@
 記録コミットを作る → そのコミットの後で作り直して一致を確認する）。
 この手順を踏まずに固定すると、条件に**再現しない値**が入り、採点がすべて拒否される。
 
-**ビルドしたコミットは値に混ぜない。** .NET SDK は既定で作業ツリーのコミットを
-`AssemblyInformationalVersion` に埋め込むため、以前はこの値が**コミットのたびに変わっていた**
-（文書だけのコミットでも変わる）。その状態では、測定値を記録するコミット自身が次のビルドの値を
-変えてしまい、**記録した値とその記録を含むコミットが一致しえない**。
-評価器はこの属性を読まないので、`IncludeSourceRevisionInInformationalVersion` を切って
-ソース・パス・SDK だけで決まるようにした（[`docs/evaluator.md`](evaluator.md) §6.2 に実測）。
+**ビルドしたコミットは値に混ぜない。** コミットは**2 つの経路**で値に入っていた。
+`AssemblyInformationalVersion` への埋め込みと、sourcelink 文書（
+`obj/…/MusicStore.Evaluator.sourcelink.json`。中身は
+`…/raw.githubusercontent.com/<owner>/<repo>/<コミット>/*`）が**移植可能 PDB に入り、
+アセンブリがその PDB の id をデバッグディレクトリに持つ**経路である。
+そのため以前はこの値が**コミットのたびに変わっていた**（文書だけのコミットでも変わる）。
+その状態では、測定値を記録するコミット自身が次のビルドの値を変えてしまい、
+**記録した値とその記録を含むコミットが一致しえない**。
+評価器はどちらも読まないので `IncludeSourceRevisionInInformationalVersion` と
+`EnableSourceLink` を切ってソース・パス・SDK だけで決まるようにした
+（[`docs/evaluator.md`](evaluator.md) §6.2、実測は
+[`inner/calibration/README.md`](../inner/calibration/README.md) §4.2 §4.3）。
 
 **実モデル比較の前にこの値を確定する**（未確定のまま比較を始めない）。
 
@@ -425,7 +431,7 @@ runs/<run_id>/
 | 非公開情報を入力として配布できないこと | V-9 |
 | アプリのプロセスを証跡（`appProcessIds` と `app-process.log` の先頭行）から特定できること | V-10 |
 | 採点した評価器ビルドを外側が実測して `record.json` `index.jsonl` 集計表に残し、評価器の申告と一致すること | V-11 |
-| 同じ評価器を `bin` `obj` を消して作り直しても同じビルド（同じ `sha256`）になること | V-0b |
+| `bin` `obj` を消したビルドが 2 回続けて同じ `sha256` になること | V-0b |
 | 条件に評価器ビルドを固定したとき、出所が欠けていれば採点せずに拒否し、一致しないビルドは `rejected_mismatch` の記録として残ること | V-1（**代替評価器**。実評価器では未確認） |
 | 実行の前後で成果物のアプリのプロセスが増えていないこと | V-12 |
 | アーカイブからの復元と、復元した資材での再集計 | V-8 |

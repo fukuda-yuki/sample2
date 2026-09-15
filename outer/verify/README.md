@@ -43,8 +43,8 @@ python outer\verify\verify.py --repo .
 
 | ID | 種別 | 何を確認するか | 結果 |
 | --- | --- | --- | --- |
-| V-0 | measured | 評価器がビルドできる（終了コード `0`） | 一致 |
-| V-0b | measured | `bin` `obj` を消して作り直しても同じ評価器ビルドになる | 一致 |
+| V-0 | measured | 評価器がビルドできる（`bin` `obj` を消してから。終了コード `0`） | 一致 |
+| V-0b | measured | `bin` `obj` を消したビルドが 2 回続けて同じ評価器ビルドになる | 一致 |
 | V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 80 件） | 一致 |
 | V-1b | scripted | 取り違え 5 検査のテストが存在して緑である（**代替評価器**） | 一致 |
 | V-2 | measured | 正例を実行し、**実評価器**で採点する | 一致 |
@@ -211,18 +211,20 @@ python outer\verify\verify.py --repo .
 | 条件が固定していないとき、`evaluator_sha256_pinned` が `null` で記録される | `true` |
 
 実測した値は `verification-summary.json` の `artifacts.evaluator_sha256` にある
-（本記録では `d6798301a91d97a5…`）。**「外側が呼び出したものを実測している」ことの確認であり、
+（本記録では `06fa548cad3be2c1…`）。**「外側が呼び出したものを実測している」ことの確認であり、
 その値が別のマシンや別のパスで再現することの確認ではない**（限界 15）。
-この値を使う前に、同じソースを同じ場所で作り直すと同じ値になることを `V-0b` で確かめている
-（採点に使う前。`bin` と `obj` を消して作り直し、`artifacts.evaluator_sha256_rebuild` が
-`artifacts.evaluator_sha256` と一致する）。**繰り返せないビルドの値を
+採点に使う前に、**評価器を `bin` `obj` を消してからビルドし**（`V-0`）、
+**もう一度消して作り直して同じ値になること**を `V-0b` で確かめている
+（`artifacts.evaluator_sha256_rebuild` が `artifacts.evaluator_sha256` と一致する）。
+`V-0` のビルドを消してから始めるのは、**残っていた `bin` `obj` が前のビルドの設定を引き継ぐ**ためである
+（作り直しの値と一致しないことを実測で確認した）。**繰り返せないビルドの値を
 「どのビルドで採点したか」の記録に使わない。**
 「評価器が申告した値をそのまま写していない」ことは、代替評価器が別の値を申告する
 `outer/tests` の `test_the_recorded_build_is_what_the_outer_invoked_not_what_was_claimed`
 で確認している。
 
 条件の `evaluation.evaluator_sha256` に固定値を入れたときの扱いは、この検証では
-**代替評価器でしか**確認していない（限界 16）。
+**代替評価器でしか**確認していない（限界 17）。
 
 - 固定値があって `evaluation.evaluator_build` が欠けていれば、採点のディレクトリを作る前に拒否する
   （`test_pinning_without_provenance_is_refused`）。固定値とその出所が離れないようにするため。
@@ -253,7 +255,7 @@ python outer\verify\verify.py --repo .
 | OS | `win32` |
 | Python | `3.14.4` |
 | `dotnet --version` | `10.0.300-preview.0.26177.108` |
-| 採点した評価器ビルドの `sha256` | `d6798301a91d97a5aa7f2ed6744b7668e53b2c99448d530878dfd92c39b4fbfe`（`verification-summary.json` の `artifacts` と同じ値） |
+| 採点した評価器ビルドの `sha256` | `06fa548cad3be2c1e2a4bbdd1e97687fb333864661cc4ab478dc3ee673cef388`（`verification-summary.json` の `artifacts` と同じ値） |
 | 作り直した評価器ビルドの `sha256` | 同上（`V-0b`。`bin` `obj` を消して作り直したもの） |
 
 実行したコマンドは `verification-summary.json` の `commands` に残る。
@@ -309,7 +311,8 @@ python outer\verify\verify.py --repo .
     埋め込みを切った今も、**この切り方を知らない別のビルド手順では値が変わりうる**。
     だから固定するときは条件にビルドのコマンドと SDK を書く（§6.4）。
 16. **`evaluator_sha256` は、ソースファイルのバイト列にも依存する。** 同じ `.cs` を CRLF で
-    保存してビルドすると値が変わる（実測: LF `d6798301…` に対し CRLF `d5443910…`）。
+    保存してビルドすると値が変わる（実測: LF `d6798301…` に対し CRLF `d5443910…`。
+    いずれもコミットを値に混ぜる 2 経路を切る前の計測であり、**現在の値ではない**）。
     `.gitattributes` が `eol=lf` なので**チェックアウトしたままの作業ツリー**が基準であり、
     記録に使う値は**追跡ファイルを書き換えていないクリーンな作業ツリー**で測る。
     コミットを混ぜる不具合は直したが、**測り直さずに記録すると、前のように再現しない値を

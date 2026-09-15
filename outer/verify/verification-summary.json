@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-15T15:21:57.122649+00:00",
+  "started_at": "2026-09-15T15:21:19.104367+00:00",
+  "repo": "C:\\Users\\mwam0\\.copilot\\repos\\sample2",
+  "note": "外側の実験実行基盤の非モデル検証の生記録。モデルは一切呼び出していない。期待は実行前に宣言し、観測値と完全一致で突き合わせる。",
+  "environment": {
+    "platform": "win32",
+    "python": "3.14.4",
+    "dotnet": "10.0.300-preview.0.26177.108"
+  },
+  "commands": [
+    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
+    "C:\\Python314\\python.exe -m unittest discover -p test_*.py -v",
+    "harness.cli preserve --run MS1-001-C01-001 --archive C:\\Users\\mwam0\\.copilot\\repos\\sample2\\outer\\verify\\.scratch\\archive"
+  ],
+  "case_count": 13,
+  "mismatched": [],
+  "cases": [
+    {
+      "id": "V-0",
+      "kind": "measured",
+      "what": "評価器をビルドする",
+      "expected": {
+        "exit_code": 0
+      },
+      "observed": {
+        "exit_code": 0
+      },
+      "matched": true
+    },
+    {
+      "id": "V-1",
+      "kind": "measured",
+      "what": "外側のテストを実行する",
+      "expected": {
+        "failed": 0,
+        "ran_at_least_70": true
+      },
+      "observed": {
+        "failed": 0,
+        "ran_at_least_70": true
+      },
+      "matched": true
+    },
+    {
+      "id": "V-1b",
+      "kind": "scripted",
+      "what": "取り違えの 5 検査は outer/tests の代替評価器で確認する（実評価器ではない）",
+      "expected": {
+        "test_present_and_green": true
+      },
+      "observed": {
+        "test_present_and_green": true
+      },
+      "matched": true
+    },
+    {
+      "id": "V-2",
+      "kind": "measured",
+      "what": "正例を実行し、実評価器で採点する",
+      "expected": {
+        "end_reason": "completed",
+        "stop_confirmed": true,
+        "stop_method": "process_exit",
+        "model_called": false,
+        "artifact_state": "fixed",
+        "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "artifact_sha256_collected": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "normalized_files": 0,
+        "usage_state": "complete",
+        "total_tokens": 7420,
+        "scoring_state": "scored",
+        "adopted": true,
+        "verdict": "pass",
+        "quality": 100.0,
+        "mismatches": [],
+        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001",
+        "artifact_sha256_reported": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73"
+      },
+      "observed": {
+        "end_reason": "completed",
+        "stop_confirmed": true,
+        "stop_method": "process_exit",
+        "model_called": false,
+        "artifact_state": "fixed",
+        "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "artifact_sha256_collected": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "normalized_files": 0,
+        "usage_state": "complete",
+        "total_tokens": 7420,
+        "scoring_state": "scored",
+        "adopted": true,
+        "verdict": "pass",
+        "quality": 100,
+        "mismatches": [],
+        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001",
+        "artifact_sha256_reported": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73"
+      },
+      "matched": true
+    },
+    {
+      "id": "V-3",
+      "kind": "measured",
+      "what": "CRLF と BOM の作業ツリーでも同じ成果物ハッシュと同じ評価 ID になる",
+      "expected": {
+        "artifact_hash_changed_by_collection": true,
+        "normalized_kinds": [
+          "bom_removed",
+          "crlf_to_lf"
+        ],
+        "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001"
+      },
+      "observed": {
+        "artifact_hash_changed_by_collection": true,
+        "normalized_kinds": [
+          "bom_removed",
+          "crlf_to_lf"
+        ],
+        "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001"
+      },
+      "matched": true
+    },
+    {
+      "id": "V-4",
+      "kind": "measured",
+      "what": "同じ成果物・同じ評価版・同じ連番の再実行を重複として拒否する",
+      "expected": {
+        "raised": "FileExistsError",
+        "directories_before": 1,
+        "directories_after": 1,
+        "index_unchanged": true
+      },
+      "observed": {
+        "raised": "FileExistsError",
+        "directories_before": 1,
+        "directories_after": 1,
+        "index_unchanged": true
+      },
+      "matched": true
+    },
+    {
+      "id": "V-5",
+      "kind": "measured",
+      "what": "連番を進めた再採点で判定・品質・成果物ハッシュが一致し、差が連番だけになる",
+      "expected": {
+        "verdict": "pass",
+        "quality": 100,
+        "artifact_sha256_outer": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "prefix_equal": true,
+        "sequence_delta": 1,
+        "index_lines": 2
+      },
+      "observed": {
+        "verdict": "pass",
+        "quality": 100,
+        "artifact_sha256_outer": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "prefix_equal": true,
+        "sequence_delta": 1,
+        "index_lines": 2
+      },
+      "matched": true
+    },
+    {
+      "id": "V-6",
+      "kind": "measured",
+      "what": "実評価器の障害を実行の失敗として扱わない",
+      "expected": {
+        "scoring_state": "evaluator_fault",
+        "evaluator_exit_code": 2,
+        "quality": null,
+        "adopted": false,
+        "end_reason": "completed",
+        "stop_confirmed": true,
+        "row_quality": null,
+        "row_verdict": null,
+        "row_issue_kinds": [
+          "evaluator_fault",
+          "synthetic"
+        ]
+      },
+      "observed": {
+        "scoring_state": "evaluator_fault",
+        "evaluator_exit_code": 2,
+        "quality": null,
+        "adopted": false,
+        "end_reason": "completed",
+        "stop_confirmed": true,
+        "row_quality": null,
+        "row_verdict": null,
+        "row_issue_kinds": [
+          "evaluator_fault",
+          "synthetic"
+        ]
+      },
+      "matched": true
+    },
+    {
+      "id": "V-7",
+      "kind": "measured",
+      "what": "保存済み資材だけから集計し、失敗した Run も残す",
+      "expected": {
+        "run_count": 3,
+        "scored_rows": 2,
+        "fault_rows": 1,
+        "unscored_quality_is_null": true,
+        "unscored_verdict_is_null": true,
+        "synthetic_rows": 3
+      },
+      "observed": {
+        "run_count": 3,
+        "scored_rows": 2,
+        "fault_rows": 1,
+        "unscored_quality_is_null": true,
+        "unscored_verdict_is_null": true,
+        "synthetic_rows": 3
+      },
+      "matched": true
+    },
+    {
+      "id": "V-8",
+      "kind": "measured",
+      "what": "保存したパッケージを検証・復元し、復元した資材で再集計できる",
+      "expected": {
+        "package_id": "run-MS1-001-C01-001",
+        "package_files": 152,
+        "restored_runs": 1,
+        "quality": 100,
+        "verdict": "pass",
+        "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "usage_total_tokens": 7420
+      },
+      "observed": {
+        "package_id": "run-MS1-001-C01-001",
+        "package_files": 152,
+        "restored_runs": 1,
+        "quality": 100,
+        "verdict": "pass",
+        "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
+        "usage_total_tokens": 7420
+      },
+      "matched": true
+    },
+    {
+      "id": "V-9",
+      "kind": "measured",
+      "what": "非公開領域と許可リスト外を入力にできない",
+      "expected": {
+        "attempts": [
+          "refused",
+          "refused",
+          "refused"
+        ],
+        "runs_unchanged": true
+      },
+      "observed": {
+        "attempts": [
+          "refused",
+          "refused",
+          "refused"
+        ],
+        "runs_unchanged": true
+      },
+      "matched": true
+    },
+    {
+      "id": "V-10",
+      "kind": "measured",
+      "what": "証跡がアプリのプロセス ID とポートを残す",
+      "expected": {
+        "header_matches": true,
+        "app_process_ids": 2,
+        "first_pid_in_header": true
+      },
+      "observed": {
+        "header_matches": true,
+        "app_process_ids": 2,
+        "first_pid_in_header": true
+      },
+      "matched": true
+    },
+    {
+      "id": "V-11",
+      "kind": "measured",
+      "what": "検証の前後で成果物のアプリのプロセスが増えていない",
+      "expected": {
+        "leaked": []
+      },
+      "observed": {
+        "leaked": []
+      },
+      "matched": true
+    }
+  ]
+}

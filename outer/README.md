@@ -6,6 +6,8 @@
 
 開始状態の用意、条件の固定、実行、停止確認、成果物の回収と固定、内側の評価器の呼び出し、保存、再集計を行う。
 **品質の正解基準は持たない。** 評価器の `verdict` `quality` をそのまま保存し、外側で合否や配点を作らない。
+評価器の実行には上限時間を設け、超えた場合は評価器とその子プロセスを道連れに停止して
+`evaluator_fault` として記録する（成果物のアプリが残らないようにする）。
 
 ## 何をしないか
 
@@ -18,24 +20,26 @@
 
 | パス | 内容 |
 | --- | --- |
-| `harness/` | 実行基盤の実装（Python 3、標準ライブラリのみ）（**未作成**） |
+| `harness/` | 実行基盤の実装（Python 3、標準ライブラリのみ） |
 | `conditions/<task_id>/condition.json` | 条件。課題・開始状態・環境・移行要求・入力条件・実行上限・エージェント版・評価版 |
-| `tests/` | 非モデル検証（`unittest`）（**未作成**） |
-| `verify/` | 接続検証のドライバと記録（**未作成**） |
-
-**未作成のものは上のように明示する。** 本 Issue の作業で順に作成する。
+| `tests/` | 非モデル検証の単体テスト（`unittest`）。72 件 |
+| `verify/` | 接続検証のドライバ（`verify.py`）、記録（`README.md`）、生データ（`verification-summary.json`） |
 
 実行時のデータは `runs/` に置き、**追跡しない**。
 
 ## 使い方
 
 ```powershell
-# 非モデル検証（ダミー実行器と合成使用量のみ。モデルを呼ばない）
-python -m unittest discover -s outer\tests -t .
-powershell -NoProfile -ExecutionPolicy Bypass -File .\outer\verify\run-non-model-verification.ps1
+cd <repo root>
+
+# 単体テスト（ダミー実行器と合成使用量のみ。モデルを呼ばない）
+python -m unittest discover -s outer\tests -p 'test_*.py'
+
+# 接続検証（実評価器をビルドして動かす。モデルを呼ばない）
+python outer\verify\verify.py --repo .
 ```
 
-上の 2 つは `tests/` と `verify/` を作成した後に使える。個別の操作は次のとおり。
+接続検証は `runs/_verify` を毎回消してから作り直す。個別の操作は次のとおり。
 
 ```powershell
 $py = 'python'

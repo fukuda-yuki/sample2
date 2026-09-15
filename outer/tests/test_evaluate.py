@@ -1,0 +1,227 @@
+"""Scoring hand-over rules, tested with a stand-in evaluator.
+
+The stand-in is not the real evaluator; it exists so the outer harness's own
+rules can be tested quickly. The real evaluator is exercised by
+`python outer/verify/verify.py --repo .`.
+"""
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+try:
+    from . import support
+except ImportError:  # started as a top-level module (discover -s outer/tests)
+    import support
+from harness import aggregate, evaluate, run as run_mod, util
+
+STUB = Path(__file__).resolve().parent / 'stub_evaluator.py'
+
+
+class RunFixture:
+    """A completed dummy run with a fixed submission, ready to be scored."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.repo, self.runs, self.legacy, self.seed = support.make_env(self.root)
+        self.manifest = run_mod.create_run(self.repo, self.runs, support.TASK_ID,
+                                           support.CONDITION_ID, 1,
+                                           {'legacy-source': self.legacy})
+        run_mod.start_run(self.repo, self.runs, self.manifest['run_id'], 'dummy',
+                          synthetic=True, scenario='ok', seed=self.seed)
+        run_mod.collect_run(self.runs, self.manifest['run_id'])
+        self.run_dir = self.runs / self.manifest['run_id']
+        self.addCleanup(os.environ.pop, 'HARNESS_STUB_MODE', None)
+
+    def score(self, mode='ok', **kwargs):
+        os.environ['HARNESS_STUB_MODE'] = mode
+        return evaluate.score_run(self.repo, self.runs, self.manifest['run_id'],
+                                  evaluator=STUB, **kwargs)
+
+
+class ScoreTestCase(RunFixture, unittest.TestCase):
+
+    def test_scored_run_records_the_evaluator_output_unchanged(self):
+        record = self.score('ok')
+        self.assertEqual('scored', record['scoring_state'])
+        self.assertEqual(0, record['evaluator_exit_code'])
+        self.assertEqual('pass', record['verdict'])
+        self.assertEqual(100.0, record['quality'])
+        self.assertEqual([], record['mismatches'])
+        self.assertEqual(record['artifact_sha256_outer'],
+                         record['artifact_sha256_reported'])
+        target = self.run_dir / record['directory']
+        produced = util.read_json(target / 'evaluation.json')
+        self.assertEqual(record['evaluation_id'], produced['evaluationId'])
+        self.assertEqual('pass', produced['verdict'])
+
+    def test_index_is_append_only_and_keeps_every_scoring(self):
+        first = self.score('ok')
+        second = self.score('ok')
+        entries = evaluate.read_index(self.run_dir)
+        self.assertEqual(2, len(entries))
+        self.assertEqual(1, entries[0]['sequence'])
+        self.assertEqual(2, entries[1]['sequence'])
+        self.assertEqual(first['evaluation_id'], entries[0]['evaluation_id'])
+        self.assertEqual(second['evaluation_id'], entries[1]['evaluation_id'])
+
+    def test_same_artifact_and_version_at_the_same_sequence_repeats_the_id(self):
+        first = self.score('ok')
+        expected = '{}-{}-1.0.0-001'.format(support.TASK_ID,
+                                            first['artifact_sha256_outer'][:12])
+        self.assertEqual(expected, first['evaluation_id'])
+        with self.assertRaises(FileExistsError):
+            self.score('ok', sequence=1)
+        directories = sorted(p.name for p in (self.run_dir / 'evaluations').iterdir()
+                             if p.is_dir())
+        self.assertEqual([expected], directories)
+        leftovers = [p.name for p in (self.run_dir / 'evaluations').iterdir()
+                     if p.name.startswith('.tmp-')]
+        self.assertEqual([], leftovers)
+
+    def test_rescoring_keeps_verdict_and_quality_and_only_the_sequence_differs(self):
+        first = self.score('ok')
+        second = self.score('ok')
+        self.assertNotEqual(first['evaluation_id'], second['evaluation_id'])
+        self.assertEqual(first['verdict'], second['verdict'])
+        self.assertEqual(first['quality'], second['quality'])
+        self.assertEqual(first['artifact_sha256_outer'], second['artifact_sha256_outer'])
+        self.assertEqual(first['evaluation_id'].rsplit('-', 1)[0],
+                         second['evaluation_id'].rsplit('-', 1)[0])
+
+    def test_evaluator_fault_is_not_a_run_failure(self):
+        record = self.score('fault')
+        self.assertEqual('evaluator_fault', record['scoring_state'])
+        self.assertEqual(2, record['evaluator_exit_code'])
+        self.assertIsNone(record['quality'])
+        self.assertEqual('error', record['verdict'])
+        manifest = run_mod.load_manifest(self.runs, self.manifest['run_id'])
+        self.assertEqual('completed', manifest['end_reason'])
+        self.assertTrue(manifest['stop_confirmed'])
+        row = aggregate.row_for(self.runs, self.manifest['run_id'])
+        self.assertEqual('evaluator_fault', row['scoring']['state'])
+        self.assertIsNone(row['quality'])
+        self.assertIn('evaluator_fault', [issue['kind'] for issue in row['issues']])
+        self.assertNotIn('execution', [issue['kind'] for issue in row['issues']])
+
+    def test_missing_evaluator_output_is_a_fault(self):
+        record = self.score('no-output')
+        self.assertEqual('evaluator_fault', record['scoring_state'])
+        self.assertIsNone(record['evaluation_id'])
+        self.assertIsNone(record['quality'])
+
+    def test_mismatches_are_rejected_and_kept_as_evidence(self):
+        for mode, check in (('mismatch-task', 'task'), ('mismatch-spec', 'spec'),
+                            ('mismatch-artifact', 'artifact'),
+                            ('mismatch-version', 'evaluation_version'),
+                            ('mismatch-path', 'artifact_path')):
+            with self.subTest(mode=mode):
+                record = self.score(mode)
+                self.assertEqual('rejected_mismatch', record['scoring_state'])
+                self.assertFalse(record['adopted'])
+                self.assertIn(check, [item['check'] for item in record['mismatches']])
+                self.assertTrue((self.run_dir / record['directory'] / 'evaluation.json').is_file())
+                row = aggregate.row_for(self.runs, self.manifest['run_id'])
+                self.assertIsNone(row['quality'])
+                self.assertIsNone(row['verdict'])
+
+    def test_adopted_score_carries_its_verdict_and_quality(self):
+        record = self.score('ok')
+        self.assertTrue(record['adopted'])
+        self.assertEqual('pass', record['verdict'])
+        self.assertEqual(100.0, record['quality'])
+
+    def test_rejected_mismatch_is_not_used_in_the_aggregate(self):
+        self.score('mismatch-artifact')
+        row = aggregate.row_for(self.runs, self.manifest['run_id'])
+        self.assertEqual('rejected_mismatch', row['scoring']['state'])
+        self.assertIsNone(row['quality'])
+        self.assertIsNone(row['verdict'])
+        self.assertIn('mismatch', [issue['kind'] for issue in row['issues']])
+
+    def test_blocked_verdict_is_kept_and_not_dropped(self):
+        record = self.score('blocked')
+        self.assertEqual('scored', record['scoring_state'])
+        self.assertTrue(record['adopted'])
+        self.assertEqual('blocked', record['verdict'])
+        self.assertEqual(90.0, record['quality'])
+        self.assertEqual(2, record['blocked_count'])
+        row = aggregate.row_for(self.runs, self.manifest['run_id'])
+        self.assertEqual('blocked', row['verdict'])
+        self.assertEqual(90.0, row['quality'])
+        self.assertIn('quality_blocked', [issue['kind'] for issue in row['issues']])
+        self.assertNotIn('quality', [issue['kind'] for issue in row['issues']])
+
+    def test_failed_verdict_is_reported_as_a_quality_issue(self):
+        self.score('fail-critical')
+        row = aggregate.row_for(self.runs, self.manifest['run_id'])
+        self.assertEqual('fail_critical', row['verdict'])
+        self.assertEqual(31.03, row['quality'])
+        self.assertIn('quality', [issue['kind'] for issue in row['issues']])
+
+    def test_scoring_requires_a_confirmed_stop_and_a_fixed_submission(self):
+        other = run_mod.create_run(self.repo, self.runs, support.TASK_ID,
+                                   support.CONDITION_ID, 2, {'legacy-source': self.legacy})
+        with self.assertRaises(RuntimeError):
+            evaluate.score_run(self.repo, self.runs, other['run_id'], evaluator=STUB)
+        run_mod.start_run(self.repo, self.runs, other['run_id'], 'dummy',
+                          synthetic=True, scenario='ok', seed=self.seed)
+        with self.assertRaises(RuntimeError):
+            evaluate.score_run(self.repo, self.runs, other['run_id'], evaluator=STUB)
+
+    def test_changed_ledger_is_refused_before_scoring(self):
+        (self.repo / 'inner' / 'spec' / 'requirements.json').write_text('{"changed": true}\n',
+                                                                       encoding='utf-8')
+        with self.assertRaises(RuntimeError):
+            self.score('ok')
+
+
+class ScoringTimeoutTests(RunFixture, unittest.TestCase):
+    """A scoring run that never returns must not leave the app behind."""
+
+    def test_timeout_is_recorded_as_an_evaluator_fault(self):
+        marker = self.root / 'grandchild.pid'
+        os.environ['HARNESS_STUB_MARKER'] = str(marker)
+        self.addCleanup(os.environ.pop, 'HARNESS_STUB_MARKER', None)
+        record = self.score('sleep', timeout=5)
+        self.assertEqual('evaluator_fault', record['scoring_state'])
+        self.assertTrue(record['evaluator_timed_out'])
+        self.assertEqual(5, record['timeout_seconds'])
+        self.assertEqual(-1, record['evaluator_exit_code'])
+        self.assertFalse(record['adopted'])
+        self.assertIsNone(record['quality'])
+        self.assertEqual('評価器の実行が上限を超えたため停止しました', record['reason'])
+        row = aggregate.row_for(self.runs, self.manifest['run_id'])
+        self.assertEqual('evaluator_fault', row['scoring']['state'])
+        self.assertNotIn('execution', [issue['kind'] for issue in row['issues']])
+
+    def test_timeout_takes_the_process_tree_down(self):
+        marker = self.root / 'grandchild.pid'
+        os.environ['HARNESS_STUB_MARKER'] = str(marker)
+        self.addCleanup(os.environ.pop, 'HARNESS_STUB_MARKER', None)
+        self.score('sleep', timeout=5)
+        self.assertTrue(marker.is_file(), 'スタブが子プロセスを起動していない')
+        grandchild = int(marker.read_text(encoding='utf-8'))
+        self.addCleanup(_force_kill, grandchild)
+        self.assertFalse(_is_alive(grandchild),
+                         '評価器の子プロセスが残っている: ' + str(grandchild))
+
+
+def _is_alive(pid):
+    try:
+        completed = subprocess.run(['tasklist', '/FI', 'PID eq {}'.format(pid), '/NH'],
+                                   capture_output=True, text=True)
+    except OSError:
+        return None
+    return str(pid) in completed.stdout
+
+
+def _force_kill(pid):
+    subprocess.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True)
+
+
+if __name__ == '__main__':
+    unittest.main()

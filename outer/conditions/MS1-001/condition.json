@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "condition_id": "C01",
+  "task_id": "MS1-001",
+  "task_title": "MVC Music Store の .NET モダナイズ（部分移行）",
+  "start_state": {
+    "kind": "legacy-source",
+    "source_repository": "chack411/MVC-Music-Store",
+    "source_branch": "net48",
+    "source_commit": "2967afb9d69488641df0d154e2ad5827a7820e71",
+    "license_note": "LICENSE ファイルなし。readme.txt に「コードは Ms-PL、チュートリアル文書は CC BY 3.0」と記載。教材本体を sample2 へ取り込まず、参照コミットと取得手順のみを記録する。",
+    "fetch_note": "参照コミットを取得したローカルディレクトリを create 時に --input で与える。clone 全体を成果物に含めない。",
+    "repository_size_note": "リポジトリに存在する情報量は、渡した入力の総バイト数として inputs-manifest.json に記録する。これはモデルの実入力ではない。"
+  },
+  "environment": {
+    "runtime": "dotnet",
+    "sdk": "10.0.300-preview",
+    "network": "none",
+    "note": "評価器は .NET 8 SDK で成果物を publish する。実モデル接続時の実行環境は未決定。"
+  },
+  "migration_request": "ASP.NET MVC 5 / .NET Framework 4.8 の MVC Music Store から、HomeController（トップ）、StoreController（ジャンル一覧・ジャンル別アルバム一覧・アルバム詳細・ジャンルメニュー）、ShoppingCartController（かご表示・追加・削除・件数サマリ）、CheckoutController（住所入力・注文確定・注文完了）と、それらが依存するモデル・サンプルデータを移行する。StoreManagerController（管理 CRUD・画像アップロード）と AccountController（会員登録・ログイン）は対象外。既存の不具合は保持せず、存在しない識別子は 404、モデル変更で DB を破棄しない、削除時の残数量は 0、住所項目は必須とする。詳細な契約は渡さない。",
+  "input_policy": {
+    "allowlist": [
+      "legacy-source"
+    ],
+    "denied": [
+      "inner/",
+      "docs/",
+      "outer/conditions/ 以外の outer/",
+      "旧実験の条件名・採点分母・実行許可",
+      "inner/spec/requirements.json",
+      "inner/fixtures/"
+    ],
+    "note": "許可リストは入力の名前に一致するものだけを通す。解決後のパスが inner/ または docs/ の下になる入力を拒否する。"
+  },
+  "budget": {
+    "kind": "wall_clock_seconds",
+    "value": 1800,
+    "scope": "run",
+    "note": "暫定値。実モデル接続時の実測にもとづき更新する。ダミー実行器では実行上限の検証にのみ使う。"
+  },
+  "agent": {
+    "agent_id": null,
+    "model_id": null,
+    "agent_version": null,
+    "tool_versions": null,
+    "subagent_policy": null,
+    "note": "旧実験のモデル設定を固定値で持ち込まない。値が埋まっていなければ start を拒否する。ダミー実行器では --synthetic を付けて起動し、model_called: false を記録する。"
+  },
+  "evaluation": {
+    "evaluation_version": "1.0.0",
+    "spec_path": "inner/spec/requirements.json",
+    "catalog_path": "inner/spec/catalog.json",
+    "spec_sha256": "2209bbf18b1990ac69d131909bc1961eb5c84ef25b95215dc4add6acefbe8951",
+    "note": "spec_sha256 は台帳のハッシュ。採点時に評価結果と突き合わせ、食い違えば有効な採点として記録しない。"
+  }
+}

@@ -55,19 +55,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 
 | ケース | 評価 ID | 成果物ハッシュ先頭 12 桁 |
 | --- | --- | --- |
-| `cal-ref-001` | `MS1-001-b62edb6d0c05-1.0.0-001` | `b62edb6d0c05` |
-| `cal-ref-002` | `MS1-001-b62edb6d0c05-1.0.0-002` | `b62edb6d0c05` |
-| `cal-alt-001` | `MS1-001-7f0ba107d850-1.0.0-003` | `7f0ba107d850` |
-| `cal-alt-002` | `MS1-001-7f0ba107d850-1.0.0-004` | `7f0ba107d850` |
-| `neg-remove-count-pre-decrement` | `MS1-001-c40d2654cb6f-1.0.0-010` | `c40d2654cb6f` |
-| `neg-no-quantity-multiply` | `MS1-001-12e5d26ce03a-1.0.0-011` | `12e5d26ce03a` |
-| `neg-duplicate-cart-lines` | `MS1-001-7e22e7316de1-1.0.0-012` | `7e22e7316de1` |
-| `neg-no-seed` | `MS1-001-702e115ef6db-1.0.0-013` | `702e115ef6db` |
-| `neg-destructive-seed` | `MS1-001-875e7ec49f98-1.0.0-014` | `875e7ec49f98` |
-| `neg-unknown-album-500` | `MS1-001-d1b3ccb1ae13-1.0.0-015` | `d1b3ccb1ae13` |
-| `neg-legacy-wrapper` | `MS1-001-ac273a7004ea-1.0.0-016` | `ac273a7004ea` |
+| `cal-ref-001` | `MS1-001-9a6de335c982-1.0.0-001` | `9a6de335c982` |
+| `cal-ref-002` | `MS1-001-9a6de335c982-1.0.0-002` | `9a6de335c982` |
+| `cal-alt-001` | `MS1-001-a4a3f8acf2ad-1.0.0-003` | `a4a3f8acf2ad` |
+| `cal-alt-002` | `MS1-001-a4a3f8acf2ad-1.0.0-004` | `a4a3f8acf2ad` |
+| `neg-remove-count-pre-decrement` | `MS1-001-5dc3f2a5ad81-1.0.0-010` | `5dc3f2a5ad81` |
+| `neg-no-quantity-multiply` | `MS1-001-eca552dfe0d1-1.0.0-011` | `eca552dfe0d1` |
+| `neg-duplicate-cart-lines` | `MS1-001-68bd495e68c4-1.0.0-012` | `68bd495e68c4` |
+| `neg-no-seed` | `MS1-001-623bee9b1abd-1.0.0-013` | `623bee9b1abd` |
+| `neg-destructive-seed` | `MS1-001-5f65778d7b2a-1.0.0-014` | `5f65778d7b2a` |
+| `neg-unknown-album-500` | `MS1-001-90da6f047c55-1.0.0-015` | `90da6f047c55` |
+| `neg-legacy-wrapper` | `MS1-001-5adff2f6252a-1.0.0-016` | `5adff2f6252a` |
 | `fault-missing-artifact` | `MS1-001-000000000000-1.0.0-090` | （成果物なし） |
-| `fault-unimplemented-check` | `MS1-001-b62edb6d0c05-1.0.0-091` | `b62edb6d0c05` |
+| `fault-unimplemented-check` | `MS1-001-9a6de335c982-1.0.0-091` | `9a6de335c982` |
 
 反復の確認: `cal-ref-001` と `cal-ref-002`、`cal-alt-001` と `cal-alt-002` は
 **同じ成果物ハッシュで同じ判定・同じ品質点**を返した（仕様 §6）。
@@ -76,9 +76,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 
 | 実行 | 成果物 | 評価版 | 連番 | 評価 ID |
 | --- | --- | --- | --- | --- |
-| 再採点 | `inner/fixtures/reference` | `1.0.0` | 1 | `MS1-001-b62edb6d0c05-1.0.0-001` |
-| 再採点 | 同じ（ハッシュ `b62edb6d0c05`） | `1.0.0` | 2 | `MS1-001-b62edb6d0c05-1.0.0-002` |
-| 評価版変更 | 同じ（ハッシュ `b62edb6d0c05`） | `1.0.1` | 7 | `MS1-001-b62edb6d0c05-1.0.1-007` |
+| 再採点 | `inner/fixtures/reference` | `1.0.0` | 1 | `MS1-001-9a6de335c982-1.0.0-001` |
+| 再採点 | 同じ（ハッシュ `9a6de335c982`） | `1.0.0` | 2 | `MS1-001-9a6de335c982-1.0.0-002` |
+| 評価版変更 | 同じ（ハッシュ `9a6de335c982`） | `1.0.1` | 7 | `MS1-001-9a6de335c982-1.0.1-007` |
 
 - 評価 ID は `{課題ID}-{成果物ハッシュ先頭12桁}-{評価版}-{連番}` であり、
   **成果物が同じでも評価版または連番が変われば別の ID になる**。
@@ -94,6 +94,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 実際、正例の説明文書を `inner/fixtures/reference/` の中に置いていたため、その文書の編集で
 同じ成果物のハッシュが変わった。現在は説明文書を [`inner/fixtures/README.md`](../fixtures/README.md) に移し、
 `reference/` `alternative/` の直下には成果物そのものだけを置いている。
+
+**改行コードもハッシュに効く。** `.gitattributes` は成果物のソースを LF に固定しているが、
+作業ツリーのファイルが CRLF のまま残っていると、記録したハッシュは新規 clone で再現しない。
+本ファイルの表のハッシュは、作業ツリーを `git checkout` が書き出す改行コードに揃えたうえで記録した。
+**ハッシュは「どのバイト列を評価したか」の識別子であり、「同じ実装かどうか」の判定ではない。**
 
 ## 3. 4 分類の対応
 
@@ -141,6 +146,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 | 3 | `fault-unimplemented-check` が `evaluation.json` を**書かなかった** | 明示した `--spec` のディレクトリに `catalog.json` が無く、台帳の読み込み前に終了していた | 台帳・カタログの読み込み失敗と成果物ディレクトリの不在を評価側の障害として集約し、必ず `evaluation.json` を書くようにした。あわせて `--catalog` を明示 |
 | 4 | 校正スクリプトが負例の生成失敗を**見逃しえた** | 子スクリプトの `$LASTEXITCODE` に依存していた | 生成後に成果物ディレクトリの存在を確認するようにした |
 | 5 | 同じ成果物の**ハッシュが変わった** | 成果物ディレクトリの中に研究用の説明文書を置いていたため、その文書の編集がハッシュに影響していた | 説明文書を [`inner/fixtures/README.md`](../fixtures/README.md) に移した（§2.1） |
+| 6 | 記録したハッシュが**新規 clone で再現しなかった** | `.gitattributes` は成果物のソースを LF に固定しているが、作業ツリーのファイルが CRLF のまま残っていた。成果物ハッシュはバイト列を見るため、git が書き出す内容と一致していなかった | 作業ツリーを `git checkout` が書き出す改行コードに揃え、`apply.ps1` の差分アンカーも LF に合わせた（§2.1） |
 
 事象 1・2 は「期待を実行前に宣言して完全一致で突き合わせる」方式にした理由そのものである。
 `pass` になるはずのないケースが `pass` になっても、宣言した集合と一致しなければ校正は失敗する。
@@ -165,3 +171,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 9. **成果物ハッシュは成果物ディレクトリの置き方に依存する。** 同じ実装でも、成果物の外に置く文書を
    中に移せばハッシュは変わる。ハッシュは「この木を評価した」ことの識別子であり、
    「実装の意味が同じ」ことの証明ではない（§2.1）。
+10. **成果物ハッシュは改行コードにも依存する。** `.gitattributes` でソースを LF に固定しているが、
+    それに合わない作業ツリーで評価すると、記録したハッシュは新規 clone で再現しない（§2.1、§4-6）。
+    本ファイルのハッシュは揃えた状態で記録しているが、別環境での再現は確認していない。

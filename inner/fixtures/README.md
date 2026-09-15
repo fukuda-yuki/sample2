@@ -12,6 +12,10 @@
 全ファイルを対象にするため、研究メモを中に置くとハッシュが研究メモの編集で変わってしまう。
 `reference/` `alternative/` の直下は成果物そのものだけにする。
 
+**成果物のソースは `.gitattributes` により LF に固定する。** 成果物ハッシュはバイト列を見るため、
+作業ツリーが CRLF のままだと記録したハッシュが新規 clone で再現しない。
+負例を作る [`negatives/apply.ps1`](negatives/apply.ps1) の差分アンカーも LF で組んである。
+
 **この 3 つを「正解の定義」として扱わない。** 正解の定義は
 [`inner/spec/requirements.json`](../spec/requirements.json)（要件台帳）と
 [`docs/quality-spec.md`](../../docs/quality-spec.md)（品質評価仕様）である。

@@ -37,7 +37,8 @@ if ($LASTEXITCODE -ge 8) {
     throw "robocopy が失敗しました（終了コード $LASTEXITCODE）"
 }
 
-$nl = "`r`n"
+# 成果物のソースは .gitattributes により LF に固定されている。差分のアンカーも LF で組む。
+$nl = "`n"
 $log = New-Object System.Collections.Generic.List[string]
 
 function Edit-File {

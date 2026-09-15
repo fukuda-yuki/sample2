@@ -39,6 +39,11 @@ dotnet .\inner\evaluator\MusicStore.Evaluator\bin\Release\net8.0\MusicStore.Eval
 全ファイル（`bin` `obj` `.git` を除く）を対象にするため、中の文書を編集すると
 同じ実装でもハッシュが変わる（[`inner/fixtures/README.md`](../inner/fixtures/README.md)）。
 
+**ハッシュはバイト列の同一性であり、実装の同一性ではない。** 改行コードが変わればハッシュも変わる。
+成果物のソースは `.gitattributes` で LF に固定してあるので、記録したハッシュを再現するには
+作業ツリーを `git checkout` が書き出す改行コードに揃えておく必要がある
+（[`inner/calibration/README.md`](../inner/calibration/README.md) §2.1）。
+
 ## 2. 採点対象の選び方
 
 成果物ディレクトリ配下を走査し、`Microsoft.NET.Sdk.Web` を SDK に持つ `csproj` を起動対象にする。

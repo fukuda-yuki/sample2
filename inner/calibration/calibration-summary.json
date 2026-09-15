@@ -1,10 +1,10 @@
-﻿[
+[
     {
         "caseId":  "cal-ref-001",
         "exitCode":  0,
         "verdict":  "pass",
         "quality":  100,
-        "evaluationId":  "MS1-001-b62edb6d0c05-1.0.0-001",
+        "evaluationId":  "MS1-001-9a6de335c982-1.0.0-001",
         "failed":  [
 
                    ],
@@ -14,7 +14,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-b62edb6d0c05-1.0.0-001\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 b62edb6d0c05)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+        "stdout":  "[evaluator] evaluation id: MS1-001-9a6de335c982-1.0.0-001\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 9a6de335c982)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
         "stderr":  "",
         "expectedVerdict":  "pass",
         "expectedExitCode":  0,
@@ -39,7 +39,7 @@
         "exitCode":  0,
         "verdict":  "pass",
         "quality":  100,
-        "evaluationId":  "MS1-001-b62edb6d0c05-1.0.0-002",
+        "evaluationId":  "MS1-001-9a6de335c982-1.0.0-002",
         "failed":  [
 
                    ],
@@ -49,7 +49,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-b62edb6d0c05-1.0.0-002\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 b62edb6d0c05)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+        "stdout":  "[evaluator] evaluation id: MS1-001-9a6de335c982-1.0.0-002\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 9a6de335c982)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
         "stderr":  "",
         "expectedVerdict":  "pass",
         "expectedExitCode":  0,
@@ -74,7 +74,7 @@
         "exitCode":  0,
         "verdict":  "pass",
         "quality":  100,
-        "evaluationId":  "MS1-001-7f0ba107d850-1.0.0-003",
+        "evaluationId":  "MS1-001-a4a3f8acf2ad-1.0.0-003",
         "failed":  [
 
                    ],
@@ -84,7 +84,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-7f0ba107d850-1.0.0-003\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 7f0ba107d850)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+        "stdout":  "[evaluator] evaluation id: MS1-001-a4a3f8acf2ad-1.0.0-003\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 a4a3f8acf2ad)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
         "stderr":  "",
         "expectedVerdict":  "pass",
         "expectedExitCode":  0,
@@ -109,7 +109,7 @@
         "exitCode":  0,
         "verdict":  "pass",
         "quality":  100,
-        "evaluationId":  "MS1-001-7f0ba107d850-1.0.0-004",
+        "evaluationId":  "MS1-001-a4a3f8acf2ad-1.0.0-004",
         "failed":  [
 
                    ],
@@ -119,7 +119,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-7f0ba107d850-1.0.0-004\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 7f0ba107d850)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+        "stdout":  "[evaluator] evaluation id: MS1-001-a4a3f8acf2ad-1.0.0-004\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 a4a3f8acf2ad)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
         "stderr":  "",
         "expectedVerdict":  "pass",
         "expectedExitCode":  0,
@@ -144,7 +144,7 @@
         "exitCode":  0,
         "verdict":  "fail",
         "quality":  96.55,
-        "evaluationId":  "MS1-001-c40d2654cb6f-1.0.0-010",
+        "evaluationId":  "MS1-001-5dc3f2a5ad81-1.0.0-010",
         "failed":  [
                        "R-014"
                    ],
@@ -154,7 +154,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-c40d2654cb6f-1.0.0-010\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\artifact (sha256 c40d2654cb6f)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
+        "stdout":  "[evaluator] evaluation id: MS1-001-5dc3f2a5ad81-1.0.0-010\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\artifact (sha256 5dc3f2a5ad81)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
         "stderr":  "",
         "expectedVerdict":  "fail",
         "expectedExitCode":  0,
@@ -179,7 +179,7 @@
         "exitCode":  0,
         "verdict":  "fail_critical",
         "quality":  93.1,
-        "evaluationId":  "MS1-001-12e5d26ce03a-1.0.0-011",
+        "evaluationId":  "MS1-001-eca552dfe0d1-1.0.0-011",
         "failed":  [
                        "R-013",
                        "R-016"
@@ -190,7 +190,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-12e5d26ce03a-1.0.0-011\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\artifact (sha256 12e5d26ce03a)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\work\r\n[evaluator] verdict: fail_critical, quality: 93.10\r\n[evaluator] requirements: pass 27 / fail 2 / blocked 0 / error 0\r\n[evaluator] critical failed: R-013",
+        "stdout":  "[evaluator] evaluation id: MS1-001-eca552dfe0d1-1.0.0-011\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\artifact (sha256 eca552dfe0d1)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\work\r\n[evaluator] verdict: fail_critical, quality: 93.10\r\n[evaluator] requirements: pass 27 / fail 2 / blocked 0 / error 0\r\n[evaluator] critical failed: R-013",
         "stderr":  "",
         "expectedVerdict":  "fail_critical",
         "expectedExitCode":  0,
@@ -216,7 +216,7 @@
         "exitCode":  0,
         "verdict":  "fail_critical",
         "quality":  82.76,
-        "evaluationId":  "MS1-001-7e22e7316de1-1.0.0-012",
+        "evaluationId":  "MS1-001-68bd495e68c4-1.0.0-012",
         "failed":  [
                        "R-012",
                        "R-013",
@@ -230,7 +230,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-7e22e7316de1-1.0.0-012\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\artifact (sha256 7e22e7316de1)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\work\r\n[evaluator] verdict: fail_critical, quality: 82.76\r\n[evaluator] requirements: pass 24 / fail 5 / blocked 0 / error 0\r\n[evaluator] critical failed: R-012, R-013",
+        "stdout":  "[evaluator] evaluation id: MS1-001-68bd495e68c4-1.0.0-012\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\artifact (sha256 68bd495e68c4)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\work\r\n[evaluator] verdict: fail_critical, quality: 82.76\r\n[evaluator] requirements: pass 24 / fail 5 / blocked 0 / error 0\r\n[evaluator] critical failed: R-012, R-013",
         "stderr":  "",
         "expectedVerdict":  "fail_critical",
         "expectedExitCode":  0,
@@ -259,7 +259,7 @@
         "exitCode":  0,
         "verdict":  "fail_critical",
         "quality":  48.28,
-        "evaluationId":  "MS1-001-702e115ef6db-1.0.0-013",
+        "evaluationId":  "MS1-001-623bee9b1abd-1.0.0-013",
         "failed":  [
                        "R-002",
                        "R-003",
@@ -282,7 +282,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-702e115ef6db-1.0.0-013\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\artifact (sha256 702e115ef6db)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 48.28\r\n[evaluator] requirements: pass 14 / fail 13 / blocked 2 / error 0\r\n[evaluator] critical failed: R-002, R-005, R-012, R-013",
+        "stdout":  "[evaluator] evaluation id: MS1-001-623bee9b1abd-1.0.0-013\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\artifact (sha256 623bee9b1abd)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 48.28\r\n[evaluator] requirements: pass 14 / fail 13 / blocked 2 / error 0\r\n[evaluator] critical failed: R-002, R-005, R-012, R-013",
         "stderr":  "",
         "expectedVerdict":  "fail_critical",
         "expectedExitCode":  0,
@@ -320,7 +320,7 @@
         "exitCode":  0,
         "verdict":  "fail_critical",
         "quality":  96.55,
-        "evaluationId":  "MS1-001-875e7ec49f98-1.0.0-014",
+        "evaluationId":  "MS1-001-5f65778d7b2a-1.0.0-014",
         "failed":  [
                        "R-005"
                    ],
@@ -330,7 +330,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-875e7ec49f98-1.0.0-014\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\artifact (sha256 875e7ec49f98)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0\r\n[evaluator] critical failed: R-005",
+        "stdout":  "[evaluator] evaluation id: MS1-001-5f65778d7b2a-1.0.0-014\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\artifact (sha256 5f65778d7b2a)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0\r\n[evaluator] critical failed: R-005",
         "stderr":  "",
         "expectedVerdict":  "fail_critical",
         "expectedExitCode":  0,
@@ -355,7 +355,7 @@
         "exitCode":  0,
         "verdict":  "fail",
         "quality":  96.55,
-        "evaluationId":  "MS1-001-d1b3ccb1ae13-1.0.0-015",
+        "evaluationId":  "MS1-001-90da6f047c55-1.0.0-015",
         "failed":  [
                        "R-009"
                    ],
@@ -365,7 +365,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-d1b3ccb1ae13-1.0.0-015\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\artifact (sha256 d1b3ccb1ae13)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
+        "stdout":  "[evaluator] evaluation id: MS1-001-90da6f047c55-1.0.0-015\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\artifact (sha256 90da6f047c55)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
         "stderr":  "",
         "expectedVerdict":  "fail",
         "expectedExitCode":  0,
@@ -390,7 +390,7 @@
         "exitCode":  0,
         "verdict":  "fail",
         "quality":  96.55,
-        "evaluationId":  "MS1-001-ac273a7004ea-1.0.0-016",
+        "evaluationId":  "MS1-001-5adff2f6252a-1.0.0-016",
         "failed":  [
                        "R-029"
                    ],
@@ -400,7 +400,7 @@
         "errored":  [
 
                     ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-ac273a7004ea-1.0.0-016\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\artifact (sha256 ac273a7004ea)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
+        "stdout":  "[evaluator] evaluation id: MS1-001-5adff2f6252a-1.0.0-016\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\artifact (sha256 5adff2f6252a)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
         "stderr":  "",
         "expectedVerdict":  "fail",
         "expectedExitCode":  0,
@@ -460,7 +460,7 @@
         "exitCode":  2,
         "verdict":  "error",
         "quality":  null,
-        "evaluationId":  "MS1-001-b62edb6d0c05-1.0.0-091",
+        "evaluationId":  "MS1-001-9a6de335c982-1.0.0-091",
         "failed":  [
 
                    ],

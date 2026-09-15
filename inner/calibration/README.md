@@ -167,6 +167,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 [`calibration-summary.json`](calibration-summary.json) の内容は変更前と
 **改行コードを除いて完全一致**した（本ファイルの表の値もそのままである）。
 
+このとき、**評価版は `1.0.0` のままである**。判定の意味は変わっていないためである。
+ただし**評価器のビルドは変わっている**ので、`evaluatorSha256` は変更前と異なる。
+判定の意味（`evaluation_version`）とビルドの同一性（`evaluatorSha256`）を分けて扱う規則は
+[`docs/decision-log.md`](../docs/decision-log.md) D-15 と
+[`docs/outer-harness.md`](../docs/outer-harness.md) §6.4 にある。
+証跡形式の変更後のビルドの `sha256` は `76ae726991b44b7bbf3c07bbd6416dd4988f1f614ab912e0a227a307e6305e24`
+（`bin/Release/net8.0/MusicStore.Evaluator.dll`）。
+
+この値の再現性は 2 通り測った。**同じソースを同じパスで作り直すと同じ値になる**
+（`bin` と `obj` を消して 2 回ビルドし、2 回とも同じ値）。**ソースを別のパスに置いてビルドすると値が変わる**
+（`%TEMP%` に同じ `.cs` と `.csproj` を置いてビルドすると `9f1bbdf5f4cdade2…` になった）。
+つまりこの値は「そのソース」ではなく「**そのソースをその場所でビルドしたもの**」の識別子である。
+固定値を使う場合は条件の `evaluation.evaluator_sha256` に入れるが、
+**別のマシンや別のパスでの一致は期待しない**（§5-13）。
+
 ## 5. 校正の限界（隠さず記録する）
 
 1. **正例を評価器と同じ作業者が書いている。** `cal-ref-*` が通ったことは評価器の妥当性の根拠にならない。
@@ -190,3 +205,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 10. **成果物ハッシュは改行コードにも依存する。** `.gitattributes` でソースを LF に固定しているが、
     それに合わない作業ツリーで評価すると、記録したハッシュは新規 clone で再現しない（§2.1、§4-6）。
     本ファイルのハッシュは揃えた状態で記録しているが、別環境での再現は確認していない。
+11. **`calibration-summary.json` は絶対パスを含む。** `runs` の位置と成果物のパスが
+    `C:\Users\...` として記録されるため、この記録の突き合わせは**同じマシンでしかできない**。
+    成果物ハッシュと評価 ID の再現性とは別の話である（前者はパスに依存せず、後者は依存する）。
+12. **評価版 `1.0.0` は判定の意味の版である。** 校正が確認しているのは「この評価版の意味の下で
+    期待と一致すること」であり、**評価器のビルドの同一性は確認していない**。
+    ビルドの同一性は `evaluator-manifest.json` の `evaluatorSha256` が表す
+    （[`docs/evaluator.md`](../docs/evaluator.md) §6.2、[`docs/outer-harness.md`](../docs/outer-harness.md) §6.4）。
+13. **`evaluatorSha256` はソースの版ではなく、ビルドした場所を含む。** 同じソースでも置き場所を
+    変えると値が変わる（§4.1）。同じソース・同じパスなら作り直しても同じ値になることは
+    このマシンで確認したが、**別のマシン・別のパス・別の SDK での一致は確認していない**。
+    この値の一致を「同じ意味の判定をする評価器である」ことの根拠に使わない。

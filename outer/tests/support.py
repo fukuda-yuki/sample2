@@ -30,8 +30,18 @@ def condition(spec_sha256):
         'evaluation': {'evaluation_version': '1.0.0',
                        'spec_path': 'inner/spec/requirements.json',
                        'catalog_path': 'inner/spec/catalog.json',
-                       'spec_sha256': spec_sha256},
+                       'spec_sha256': spec_sha256,
+                       'evaluator_sha256': None},
     }
+
+
+def pin_evaluator(run_dir, sha256):
+    """Set (or clear) the evaluator build pinned by the run's condition copy."""
+    path = Path(run_dir) / 'condition.json'
+    data = util.read_json(path)
+    data['evaluation']['evaluator_sha256'] = sha256
+    util.write_json_atomic(path, data)
+    return path
 
 
 def make_repo(root, spec_sha256=None):

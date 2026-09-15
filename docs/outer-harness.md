@@ -186,14 +186,14 @@
 | `--out <dir>` | 新しい評価ディレクトリ（既存なら拒否） |
 | `--spec <file>` | `inner/spec/requirements.json`（条件に固定したハッシュと一致することを確認する） |
 | `--catalog <file>` | `inner/spec/catalog.json` |
-| `--evaluation-version <v>` | 条件に固定した評価版 |
+| `--evaluation-version <v>` | 条件に固定した評価版（**判定の意味**の版。ビルドの同一性は §6.4） |
 | `--sequence <n>` | 連番。**連番と評価履歴の管理は外側の責務**であり、評価器は履歴を持たない |
 
 | 出力 | 内容 |
 | --- | --- |
 | `evaluation.json` | 1 評価分の結果。外側はこれを**そのまま保存する** |
 | `results.jsonl` | 検査ごとに 1 行 |
-| `evaluator-manifest.json` | 評価器・台帳・成果物のハッシュ |
+| `evaluator-manifest.json` | 評価器・台帳・成果物のハッシュ、アプリのプロセス ID。外側は `evaluatorSha256` を `record.json` の `evaluator_sha256_reported` に写す（§6.4） |
 | `evidence/` | `publish.log` `app-process.log` `http-*.log` |
 
 ### 6.1 1 評価 = 1 出力ディレクトリ
@@ -246,7 +246,37 @@
 `scoring.state = evaluator_fault`、`evaluator_exit_code = -1`、`evaluator_timed_out = true`、
 `timeout_seconds` に使った値、`reason` に上限超過を記録する。**実行の失敗としては扱わない。**
 
-### 6.4 再採点
+### 6.4 評価版と評価器ビルド
+
+`evaluation_version` は**判定の意味**（検査集合・合否規則・配点・分母）の版であり、
+`evaluationId` に入る。**採点したビルドの同一性はこれとは別**で、`evaluatorSha256` が表す。
+
+| 何の同一性か | 何で表すか | どこに残すか |
+| --- | --- | --- |
+| 判定の意味 | `evaluation_version`（条件に固定） | `evaluation.json`、`record.json`、`index.jsonl`、集計表 |
+| 採点したビルド | `evaluatorSha256` | `evaluator-manifest.json`（評価器が出す）、`record.json` の `evaluator_sha256`（**外側が実測**）、`index.jsonl`、集計表の `scoring.evaluator_sha256` |
+
+外側は採点のたびに、**呼び出した評価器のファイルのハッシュを自分で計算**して記録する。
+評価器が出す `evaluatorSha256` も `evaluator_sha256_reported` として並べて残す。
+評価器が `evaluator-manifest.json` を出さなかった場合（上限超過など）は `null` になる。
+
+条件の `evaluation.evaluator_sha256` に値を入れておくと、一致しないビルドでの採点を**拒否**する
+（`spec_sha256` と同じ扱い）。`null` は「固定しない」であり、固定しなくても実測値は毎回記録される。
+**実モデル比較の前にこの値を確定する**（未確定のまま比較を始めない）。
+
+この値が何を同一視するのかは限られている。同じソースを**同じパス**で作り直すと同じ値になるが、
+**ソースを別のパスに置いてビルドすると値が変わる**（[`inner/calibration/README.md`](../inner/calibration/README.md) §4.1 に
+実測がある）。つまり `evaluator_sha256` は「**そのソースをその場所でビルドしたもの**」の識別子であり、
+ソースの版の識別子ではない。別のマシン・別のパス・別の SDK で同じ値になることは期待しない。
+したがってこの値の一致を「同じ意味の判定をする評価器である」ことの根拠に使わない。
+
+`evaluation_version` は**意味が変わったときだけ**上げる。評価器のビルドを変えても意味が
+変わらない場合（証跡の形式、ログ、内部の整理）は据え置いてよいが、
+**据え置くときは校正を再実行して同じ結果だったことを記録する**
+（[`inner/calibration/README.md`](../inner/calibration/README.md) §4.1）。
+据え置きの根拠を残さずに評価器を差し替えることはしない。
+
+### 6.5 再採点
 
 再採点は**成果物を変更せず**、新しい連番で新しい評価ディレクトリを作る。
 `evaluations/index.jsonl` は追記のみとし、旧評価の行を書き換えない。
@@ -320,7 +350,7 @@ runs/<run_id>/
 | `outer/harness/usage.py` | `scripts/normalize_usage.py` | **そのまま利用** | 関数名・判定規則・`usage_complete` の扱いを変えない。モジュール名のみ変更 |
 | `outer/harness/run.py` | `scripts/run_experiment.py` | **順序のみ採用** | 「識別 → 実行 → 停止確認 → 成果物固定」の順序と、停止未確認時に固定しない判断だけを引き継ぐ。`pilot` 命名・開始認可・Docker・予算ゲートは持ち込まない |
 | `outer/harness/runner.py` | `scripts/fake_responses.py` | **考え方のみ採用** | モデルを呼ばない実行器という位置づけを引き継ぐ。旧実装はゲートウェイ（`/telemetry`）前提で単体では動かないため作り直した |
-| `outer/harness/evaluate.py` | `scripts/evaluation_receipt.py` | **作り直す** | receipt の考え方（誰が・どの版で・どの成果物を採点したか）のみ採用。旧実装は Docker コンテナと旧アプリのログインに結合している |
+| `outer/harness/evaluate.py` | `scripts/evaluation_receipt.py` | **作り直す** | receipt の考え方（誰が・どの版で・どの成果物を採点したか）のみ採用し、**評価器ビルドの同一性（`evaluator_sha256`）を記録に足す**（§6.4）。旧実装は Docker コンテナと旧アプリのログインに結合している |
 | `outer/harness/aggregate.py` | `analysis/aggregate.py`、`docs/metrics.md` | **作り直す** | 「欠測を 0 に置換しない」「成功 Run だけに絞らない」原則のみ採用。旧集計列は持ち込まない |
 | `outer/tests/` | `scripts/test_preservation.py` ほか | **作り直す** | 保全の不変条件（改変検出・ID 再利用禁止・中断復元・リンク拒否）を移植先で検証し直す |
 
@@ -353,13 +383,17 @@ runs/<run_id>/
 | 評価器の実行が上限を超えたとき、評価器とその子プロセスを道連れに停止すること | V-1（`ScoringTimeoutTests`。**代替評価器**。実評価器では未確認） |
 | 非公開情報を入力として配布できないこと | V-9 |
 | アプリのプロセスを証跡（`appProcessIds` と `app-process.log` の先頭行）から特定できること | V-10 |
-| 実行の前後で成果物のアプリのプロセスが増えていないこと | V-11 |
+| 採点した評価器ビルドを外側が実測して `record.json` `index.jsonl` 集計表に残し、評価器の申告と一致すること | V-11 |
+| 実行の前後で成果物のアプリのプロセスが増えていないこと | V-12 |
 | アーカイブからの復元と、復元した資材での再集計 | V-8 |
 
 **欠測の 0 置換防止**、**取り違え 5 検査の実評価器での発火**、**上限超過時のプロセスツリー停止の
 実評価器での確認**は、非モデルの自動検証では確認していない（前者は [`outer/tests`](../outer/tests)
-の単体テスト、後ろ 2 つは代替評価器のみ）。`V-11` が確かめるのは「この検証が残骸を残さなかった
+の単体テスト、後ろ 2 つは代替評価器のみ）。`V-12` が確かめるのは「この検証が残骸を残さなかった
 こと」であり、**実行中に一時的に立つアプリのプロセスを外側が確実に止められることの実測ではない。**
+
+`V-11` が確かめるのは「**外側が呼び出したファイルを実測している**こと」であり、
+その値が別のマシンや別のパスで再現することでも、ソースの版を識別することでもない（§6.4）。
 
 ### 10.2 実モデル接続でしか確認できない残件
 

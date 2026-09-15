@@ -3,7 +3,9 @@
 It produces the same hand-over shape so the outer harness's own rules
 (duplicate refusal, mismatch rejection, fault classification, timeout and
 process-tree teardown) can be tested without running the real evaluator.
-The mode comes from HARNESS_STUB_MODE.
+The mode comes from HARNESS_STUB_MODE. Modes: ok, fault, no-output, sleep,
+blocked, fail-critical, mismatch-{task,spec,artifact,version,path},
+manifest-mismatch (claims a different evaluator build than the one invoked).
 """
 import json
 import os
@@ -19,6 +21,22 @@ from harness import util  # noqa: E402
 def write_json(path, value):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def write_manifest(out, version, artifact_hash, evaluator_sha256=None):
+    """The evaluator's own statement about which build it is.
+
+    The real evaluator hashes `Assembly.Location`. This stand-in hashes itself,
+    so a test can tell "the outer recorded what it invoked" apart from "the
+    outer copied what the evaluator claimed".
+    """
+    write_json(out / 'evaluator-manifest.json',
+               {'evaluatorVersion': 'stub',
+                'evaluationVersion': version,
+                'evaluatorSha256': evaluator_sha256 or util.sha256_file(__file__),
+                'artifactSha256': artifact_hash,
+                'appProcessId': None,
+                'appProcessIds': []})
 
 
 def main():
@@ -49,6 +67,9 @@ def main():
     artifact_hash = util.artifact_hash(artifact) if artifact.is_dir() else ''
     sequence = int(options.get('sequence', '1'))
     version = options.get('evaluation-version', '1.0.0')
+    # A stand-in that claims to be a different build, to check that the outer
+    # records what it invoked rather than what it was told.
+    claimed_build = 'f' * 64 if mode == 'manifest-mismatch' else None
     ledger = util.read_json(options['spec'])
     task = ledger.get('taskId', 'MS1-001')
     spec_hash = util.sha256_file(options['spec'])
@@ -65,6 +86,7 @@ def main():
                   'blockedCount': 0, 'errorCount': 0}
         write_json(out / 'evaluation.json', output)
         (out / 'results.jsonl').write_text('', encoding='utf-8')
+        write_manifest(out, version, artifact_hash, claimed_build)
         sys.stderr.write('stub: evaluator fault\n')
         return 2
     if mode == 'mismatch-task':
@@ -92,6 +114,7 @@ def main():
               'failedCount': failed, 'blockedCount': blocked, 'errorCount': 0}
     write_json(out / 'evaluation.json', output)
     (out / 'results.jsonl').write_text('', encoding='utf-8')
+    write_manifest(out, version, artifact_hash, claimed_build)
     return 0
 
 

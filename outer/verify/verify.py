@@ -39,10 +39,15 @@ class Report:
         self.repo = str(repo)
         self.cases = []
         self.commands = []
+        self.artifacts = {}
         self.started_at = datetime.now(timezone.utc).isoformat()
 
     def command(self, text):
         self.commands.append(text)
+
+    def artifact(self, key, value):
+        """A measured value recorded so a reader can recheck it independently."""
+        self.artifacts[key] = value
 
     def case(self, case_id, kind, what, expected, observed):
         matched = expected == observed
@@ -72,6 +77,7 @@ class Report:
                 'dotnet': dotnet_version(self.repo),
             },
             'commands': self.commands,
+            'artifacts': self.artifacts,
             'case_count': len(self.cases),
             'mismatched': [case['id'] for case in self.cases if not case['matched']],
             'cases': self.cases,
@@ -353,8 +359,36 @@ def app_process_path(runs, run_id, report):
     return evaluation_id
 
 
-def leaked_app_processes(report, before):
+def evaluator_build_path(repo, runs, run_id, record, rows, report):
+    """Which build scored must be measured by the outer, not taken on trust.
+
+    `evaluation_version` names the meaning of the judgement; this is the
+    identity of the artifact that produced it.
+    """
+    measured = util.sha256_file(evaluate.evaluator_file(repo))
+    run_dir = run_mod.run_dir_for(runs, run_id)
+    index_rows = evaluate.read_index(run_dir)
+    scoring = rows[run_id]['scoring']
+    report.artifact('evaluator_dll', evaluate.DEFAULT_EVALUATOR_DLL)
+    report.artifact('evaluator_sha256', measured)
     report.case('V-11', 'measured',
+                '採点した評価器ビルドを外側が測って記録する',
+                {'record_matches_file': True, 'reported_matches_file': True,
+                 'every_index_row_matches_file': True, 'index_row_count': 2,
+                 'aggregate_matches_file': True,
+                 'version_is_not_the_build': True},
+                {'record_matches_file': record['evaluator_sha256'] == measured,
+                 'reported_matches_file': record['evaluator_sha256_reported'] == measured,
+                 'every_index_row_matches_file': all(
+                     row['evaluator_sha256'] == measured for row in index_rows),
+                 'index_row_count': len(index_rows),
+                 'aggregate_matches_file': scoring['evaluator_sha256'] == measured,
+                 'version_is_not_the_build': record['evaluation_version'] == '1.0.0'
+                 and record['evaluation_version'] != measured})
+
+
+def leaked_app_processes(report, before):
+    report.case('V-12', 'measured',
                 '検証の前後で成果物のアプリのプロセスが増えていない',
                 {'leaked': []}, {'leaked': sorted(_app_processes() - before)})
 
@@ -405,6 +439,7 @@ def main(argv=None):
                       scratch / 'archive', scratch / 'restored', report)
     input_policy_path(repo, runs, scratch, report)
     app_process_path(runs, RUN_ID, report)
+    evaluator_build_path(repo, runs, RUN_ID, first, rows, report)
     leaked_app_processes(report, app_processes_before)
 
     summary = report.summary()

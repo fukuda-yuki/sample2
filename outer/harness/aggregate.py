@@ -23,7 +23,10 @@ def build(runs_dir):
         'source': '保存済み資材のみから作成した。成果物の再評価はしていない。',
         'run_count': len(rows),
         'columns_note': ('quality と total_tokens は別の列である。未採点は 0 ではなく null。'
-                         'blocked は分母から落とさない。'),
+                         'blocked は分母から落とさない。scoring.evaluation_version は判定の'
+                         '意味の版、scoring.evaluator_sha256 は採点した評価器ビルドの同一性。'
+                         '後者はソースの版ではなくビルドした場所を含むため、別環境での一致を'
+                         '前提にしない。'),
         'runs': rows,
     }
 
@@ -86,7 +89,8 @@ def row_for(runs_dir, run_id):
         'scoring': {'state': scoring_state,
                     'evaluation_id': (scoring or {}).get('evaluation_id'),
                     'sequence': (scoring or {}).get('sequence'),
-                    'evaluation_version': (scoring or {}).get('evaluation_version')},
+                    'evaluation_version': (scoring or {}).get('evaluation_version'),
+                    'evaluator_sha256': (scoring or {}).get('evaluator_sha256')},
         'quality': scoring.get('quality') if scored else None,
         'verdict': scoring.get('verdict') if scored else None,
         'usage': {'state': usage.get('state'),

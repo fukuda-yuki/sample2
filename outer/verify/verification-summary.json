@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-15T15:21:57.122649+00:00",
-  "started_at": "2026-09-15T15:21:19.104367+00:00",
+  "generated_at": "2026-09-15T15:36:20.967303+00:00",
+  "started_at": "2026-09-15T15:35:42.064551+00:00",
   "repo": "C:\\Users\\mwam0\\.copilot\\repos\\sample2",
   "note": "外側の実験実行基盤の非モデル検証の生記録。モデルは一切呼び出していない。期待は実行前に宣言し、観測値と完全一致で突き合わせる。",
   "environment": {
@@ -14,7 +14,11 @@
     "C:\\Python314\\python.exe -m unittest discover -p test_*.py -v",
     "harness.cli preserve --run MS1-001-C01-001 --archive C:\\Users\\mwam0\\.copilot\\repos\\sample2\\outer\\verify\\.scratch\\archive"
   ],
-  "case_count": 13,
+  "artifacts": {
+    "evaluator_dll": "inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll",
+    "evaluator_sha256": "76ae726991b44b7bbf3c07bbd6416dd4988f1f614ab912e0a227a307e6305e24"
+  },
+  "case_count": 14,
   "mismatched": [],
   "cases": [
     {
@@ -283,6 +287,28 @@
     },
     {
       "id": "V-11",
+      "kind": "measured",
+      "what": "採点した評価器ビルドを外側が測って記録する",
+      "expected": {
+        "record_matches_file": true,
+        "reported_matches_file": true,
+        "every_index_row_matches_file": true,
+        "index_row_count": 2,
+        "aggregate_matches_file": true,
+        "version_is_not_the_build": true
+      },
+      "observed": {
+        "record_matches_file": true,
+        "reported_matches_file": true,
+        "every_index_row_matches_file": true,
+        "index_row_count": 2,
+        "aggregate_matches_file": true,
+        "version_is_not_the_build": true
+      },
+      "matched": true
+    },
+    {
+      "id": "V-12",
       "kind": "measured",
       "what": "検証の前後で成果物のアプリのプロセスが増えていない",
       "expected": {

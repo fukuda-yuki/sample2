@@ -20,15 +20,24 @@ SCORING_TIMEOUT_SECONDS = 1800
 SCORING_STATES = ('not_attempted', 'scored', 'evaluator_fault', 'rejected_mismatch')
 
 
-def evaluator_command(repo, evaluator=None):
+def evaluator_file(repo, evaluator=None):
+    """The evaluator artifact this harness will invoke.
+
+    `evaluation_version` names the *meaning* of the judgement. The build that
+    produced the judgement is identified by this file's hash instead, so a
+    rebuild that does not change the judgement does not need a new version.
+    """
     if evaluator is None:
         path = Path(repo) / DEFAULT_EVALUATOR_DLL
-        if not path.is_file():
-            raise FileNotFoundError('評価器のアセンブリがありません: ' + str(path))
-        return ['dotnet', str(path)]
-    path = Path(evaluator)
+    else:
+        path = Path(evaluator)
     if not path.is_file():
-        raise FileNotFoundError(path)
+        raise FileNotFoundError('評価器のアセンブリがありません: ' + str(path))
+    return path
+
+
+def evaluator_command(repo, evaluator=None):
+    path = evaluator_file(repo, evaluator)
     if path.suffix == '.dll':
         return ['dotnet', str(path.resolve())]
     if path.suffix == '.py':
@@ -117,6 +126,12 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     version = evaluation_version or evaluation.get('evaluation_version')
     if not version:
         raise RuntimeError('評価版が条件にありません')
+    evaluator_path = evaluator_file(repo, evaluator)
+    evaluator_sha256 = util.sha256_file(evaluator_path)
+    pinned_evaluator = evaluation.get('evaluator_sha256')
+    if pinned_evaluator and evaluator_sha256 != pinned_evaluator:
+        raise RuntimeError('評価器が条件に固定したハッシュと一致しません。採点を拒否します: '
+                           + evaluator_sha256)
     evaluations = run_dir / 'evaluations'
     evaluations.mkdir(exist_ok=True)
     existing = read_index(run_dir)
@@ -139,10 +154,12 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     produced = temporary / 'evaluation.json'
     if timed_out or not produced.is_file():
         target = evaluations / ('fault-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
-        temporary.rename(target)
         record = _base_record(run_id, sequence, version, exit_code, independent_hash,
                               spec_sha256, 'evaluator_fault', None, [], command,
+                              evaluator_sha256=evaluator_sha256,
+                              evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
                               timed_out=timed_out, timeout_seconds=timeout)
+        temporary.rename(target)
         record['reason'] = ('評価器の実行が上限を超えたため停止しました'
                             if timed_out else '評価器が evaluation.json を出力しませんでした')
         _write_record(target, record)
@@ -157,6 +174,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
         state = 'rejected_mismatch' if mismatches else 'scored'
     record = _base_record(run_id, sequence, version, exit_code, independent_hash,
                           spec_sha256, state, output, mismatches, command,
+                          evaluator_sha256=evaluator_sha256,
+                          evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
                           timeout_seconds=timeout)
     if state == 'scored':
         evaluation_id = output.get('evaluationId')
@@ -204,8 +223,17 @@ def check_mismatches(output, condition, version, frozen, independent_hash, spec,
     return checks
 
 
+def _reported_evaluator_sha256(directory):
+    """The evaluator's own statement about which build it is, when it made one."""
+    path = Path(directory) / 'evaluator-manifest.json'
+    if not path.is_file():
+        return None
+    return util.read_json(path).get('evaluatorSha256')
+
+
 def _base_record(run_id, sequence, version, exit_code, independent_hash, spec_sha256,
-                 state, output, mismatches, command, *, timed_out=False,
+                 state, output, mismatches, command, *, evaluator_sha256=None,
+                 evaluator_sha256_reported=None, timed_out=False,
                  timeout_seconds=None):
     return {
         'schema_version': 1,
@@ -217,6 +245,8 @@ def _base_record(run_id, sequence, version, exit_code, independent_hash, spec_sh
         'adopted': state == 'scored',
         'evaluator_exit_code': exit_code,
         'evaluator_command': command,
+        'evaluator_sha256': evaluator_sha256,
+        'evaluator_sha256_reported': evaluator_sha256_reported,
         'evaluator_timed_out': timed_out,
         'timeout_seconds': timeout_seconds,
         'spec_sha256': spec_sha256,
@@ -245,9 +275,10 @@ def _append_index(run_dir, record):
     util.append_line(Path(run_dir) / 'evaluations' / 'index.jsonl',
                      {key: record[key] for key in
                       ('run_id', 'evaluation_id', 'sequence', 'evaluation_version',
-                       'scoring_state', 'adopted', 'evaluator_exit_code', 'verdict',
-                       'quality', 'spec_sha256', 'artifact_sha256_outer', 'mismatches',
-                       'recorded_at', 'directory') if key in record})
+                        'scoring_state', 'adopted', 'evaluator_exit_code',
+                        'evaluator_sha256', 'verdict',
+                        'quality', 'spec_sha256', 'artifact_sha256_outer', 'mismatches',
+                        'recorded_at', 'directory') if key in record})
 
 
 def publish_evaluator(repo):

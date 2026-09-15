@@ -178,6 +178,45 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.score('ok')
 
+    def test_scoring_records_which_evaluator_build_scored(self):
+        record = self.score('ok')
+        build = util.sha256_file(STUB)
+        self.assertEqual(build, record['evaluator_sha256'])
+        self.assertEqual(build, record['evaluator_sha256_reported'])
+        entry = evaluate.read_index(self.run_dir)[0]
+        self.assertEqual(build, entry['evaluator_sha256'])
+        row = aggregate.row_for(self.runs, self.manifest['run_id'])
+        self.assertEqual(build, row['scoring']['evaluator_sha256'])
+
+    def test_the_recorded_build_is_what_the_outer_invoked_not_what_was_claimed(self):
+        """A stand-in that lies about its own hash must not change the record."""
+        record = self.score('manifest-mismatch')
+        self.assertEqual(util.sha256_file(STUB), record['evaluator_sha256'])
+        self.assertEqual('f' * 64, record['evaluator_sha256_reported'])
+        self.assertEqual('scored', record['scoring_state'])
+
+    def test_a_pinned_evaluator_build_is_enforced(self):
+        support.pin_evaluator(self.run_dir, util.sha256_file(STUB))
+        self.assertEqual('scored', self.score('ok')['scoring_state'])
+
+    def test_a_different_evaluator_build_is_refused_when_the_condition_pins_one(self):
+        support.pin_evaluator(self.run_dir, '0' * 64)
+        with self.assertRaises(RuntimeError):
+            self.score('ok')
+        self.assertEqual([], evaluate.read_index(self.run_dir))
+
+    def test_an_unpinned_condition_still_records_the_build(self):
+        support.pin_evaluator(self.run_dir, None)
+        record = self.score('ok')
+        self.assertEqual('scored', record['scoring_state'])
+        self.assertEqual(util.sha256_file(STUB), record['evaluator_sha256'])
+
+    def test_the_fault_path_also_records_the_build(self):
+        record = self.score('no-output')
+        self.assertEqual('evaluator_fault', record['scoring_state'])
+        self.assertEqual(util.sha256_file(STUB), record['evaluator_sha256'])
+        self.assertIsNone(record['evaluator_sha256_reported'])
+
 
 class ScoringTimeoutTests(RunFixture, unittest.TestCase):
     """A scoring run that never returns must not leave the app behind."""

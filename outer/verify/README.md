@@ -45,7 +45,7 @@ python outer\verify\verify.py --repo .
 | --- | --- | --- | --- |
 | V-0 | measured | 評価器がビルドできる（`bin` `obj` を消してから。終了コード `0`） | 一致 |
 | V-0b | measured | `bin` `obj` を消したビルドが 2 回続けて同じ評価器ビルドになる | 一致 |
-| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 80 件） | 一致 |
+| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 81 件） | 一致 |
 | V-1b | scripted | 取り違え 5 検査のテストが存在して緑である（**代替評価器**） | 一致 |
 | V-2 | measured | 正例を実行し、**実評価器**で採点する | 一致 |
 | V-3 | measured | CRLF と BOM の作業ツリーでも同じ成果物ハッシュと同じ評価 ID になる | 一致 |
@@ -227,7 +227,11 @@ python outer\verify\verify.py --repo .
 **代替評価器でしか**確認していない（限界 17）。
 
 - 固定値があって `evaluation.evaluator_build` が欠けていれば、採点のディレクトリを作る前に拒否する
-  （`test_pinning_without_provenance_is_refused`）。固定値とその出所が離れないようにするため。
+  （`test_pinning_without_provenance_is_refused`）。必須は
+  `source_path` `command` `sdk_version` `sha256_origin` `clean_worktree` の 5 つであり、
+  `clean_worktree` は `true` でなければ拒否する
+  （`test_pinning_a_build_measured_outside_the_procedure_is_refused`）。
+  固定値とその出所が離れないようにするため。
 - 固定値と一致しないビルドでの採点は、例外で捨てずに `rejected_mismatch` の記録として残す
   （`test_a_different_evaluator_build_is_refused_when_the_condition_pins_one`）。
   固定値と実測値の両方が `mismatches` に入るので、**静かに通ることも、診断できないまま消えることもない**。

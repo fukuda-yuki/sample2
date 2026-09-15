@@ -34,7 +34,8 @@ def condition(spec_sha256):
                        'evaluator_sha256': None,
                        'evaluator_build': {'source_path': None, 'source_commit': None,
                                            'assembly': None, 'command': None,
-                                           'sdk_version': None, 'sha256_origin': None}},
+                                           'sdk_version': None, 'sha256_origin': None,
+                                           'clean_worktree': None}},
     }
 
 
@@ -54,7 +55,8 @@ def pin_evaluator(run_dir, sha256, origin=None, command=None):
         'assembly': 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll' if sha256 else None,
         'command': (command or 'dotnet build inner/evaluator/MusicStore.Evaluator/MusicStore.Evaluator.csproj -c Release') if sha256 else None,
         'sdk_version': 'test' if sha256 else None,
-        'sha256_origin': (origin or 'test fixture') if sha256 else None}
+        'sha256_origin': (origin or 'test fixture') if sha256 else None,
+        'clean_worktree': True if sha256 else None}
     util.write_json_atomic(path, data)
     return path
 

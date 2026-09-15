@@ -133,11 +133,18 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     if pinned_evaluator:
         # A pinned hash without its build provenance cannot be diagnosed later,
         # so it is refused as a condition error rather than scored and rejected.
-        missing = [key for key in ('source_path', 'command', 'sdk_version', 'sha256_origin')
+        # `clean_worktree` is the source bytes: the hash moves with the line
+        # endings of the evaluator sources, and a clean worktree is what makes
+        # those bytes the recorded commit's bytes.
+        missing = [key for key in ('source_path', 'command', 'sdk_version', 'sha256_origin',
+                                   'clean_worktree')
                    if not pinned_build.get(key)]
         if missing:
             raise RuntimeError('評価器ビルドを固定するときは出所も条件に入れてください。'
-                               '欠けている項目: ' + ', '.join(missing))
+                               '欠けている項目: ' + ', '.join(missing)
+                               + '（clean_worktree は、固定値が .gitattributes の eol=lf のままの'
+                                 'クリーンな作業ツリーで測られ、bin obj を消して作り直しても'
+                                 '同じ値になったことを示す）')
     evaluations = run_dir / 'evaluations'
     evaluations.mkdir(exist_ok=True)
     existing = read_index(run_dir)

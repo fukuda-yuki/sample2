@@ -193,7 +193,7 @@ Windows PowerShell 5.1 で実行すると、評価側の障害 2 件の `stderr`
 **ソースファイルのバイト列（改行コード）も値に効く**（§4.2 の実測）。
 固定値を使う場合は条件の `evaluation.evaluator_sha256` に入れるが、そのときは
 **`evaluation.evaluator_build` にソースの位置・アセンブリ・ビルドコマンド・ビルドに使った SDK の版・
-固定値の出所も書く**（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
+固定値の出所・クリーンな作業ツリーで測ったこと（`clean_worktree`）も書く**（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
 **別のマシンや別のパスでの一致は期待しない**（§5-13）。
 
 ### 4.2 ビルドの同一性からコミットを外した後の再実行
@@ -295,8 +295,11 @@ sourcelink が有効なビルドでは値がコミットをまたいで変わる
 `artifacts.evaluator_sha256` であり、測ったのは
 `inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll`、
 ビルドは `dotnet build inner/evaluator/MusicStore.Evaluator/MusicStore.Evaluator.csproj -c Release` である。
-固定値を条件に入れるときは、この 4 つ（値の出所・アセンブリ・コマンド・ビルドに使った SDK）を
-`evaluation.evaluator_build` に書く（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
+固定値を条件に入れるときは、これに測った前提（`clean_worktree`）を加えた 5 つ
+（値の出所・ソースの位置・コマンド・ビルドに使った SDK・クリーンな作業ツリーで測ったこと）を
+`evaluation.evaluator_build` に書く。`source_path` と `command` があっても、その作業ツリーの
+ソースのバイト列（改行コード）が記録と違えば値は再現しないため、前提そのものを必須にしている
+（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
 
 ## 5. 校正の限界（隠さず記録する）
 

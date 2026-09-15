@@ -278,8 +278,9 @@
 | `command` | 実際に実行したビルドのコマンド |
 | `sdk_version` | **ビルドに使った** `dotnet` の版。実行環境の版とは別でありうる |
 | `sha256_origin` | 固定値の出所（どの記録の `artifacts.evaluator_sha256` から採ったか） |
+| `clean_worktree` | **`true`** であること。固定値を、追跡ファイルを書き換えていないクリーンな作業ツリーで測ったという主張 |
 
-必須は `source_path` `command` `sdk_version` `sha256_origin` の 4 つである。
+必須は `source_path` `command` `sdk_version` `sha256_origin` `clean_worktree` の 5 つである。
 `assembly` と `source_commit` は無くても拒否しない。
 
 これは、この値が**ソースの版ではなくビルドした場所と SDK に依存する**ためである。
@@ -296,6 +297,11 @@
 2 経路を切る前の計測であり、**現在の値ではない**）。`.csproj` のバイト列は効かない。
 基準は**チェックアウトしたままの作業ツリー**（`.gitattributes` が `eol=lf` を固定している）であり、
 記録に使う値は**追跡ファイルを書き換えていないクリーンな作業ツリー**で測る。
+**`source_path` と `command` を書いても、この前提が欠けていれば足りない。**
+同じパス・同じコマンドでも、そのパスの作業ツリーが CRLF でチェックアウトされていれば値は変わる
+（PDB に文書の checksum が入るため）。だから `clean_worktree` を必須にし、`true` でなければ拒否する。
+この 5 つは**同じ穴**（固定値だけでは再現しない）を、パス・SDK・ソースのバイト列のそれぞれについて
+閉じるためのものである。
 
 **測って記録するだけでは足りない。** 記録した値は、**記録を書いたコミットの後でも同じになることを
 確かめてから**使う。手順は [`inner/calibration/README.md`](../inner/calibration/README.md) §4.3 に置く

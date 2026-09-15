@@ -223,7 +223,7 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
     def test_pinning_without_provenance_is_refused(self):
         """A pinned hash with no stated origin cannot be diagnosed later."""
         path = Path(self.run_dir) / 'condition.json'
-        for key in ('source_path', 'command', 'sdk_version', 'sha256_origin'):
+        for key in ('source_path', 'command', 'sdk_version', 'sha256_origin', 'clean_worktree'):
             with self.subTest(missing=key):
                 support.pin_evaluator(self.run_dir, '0' * 64)
                 data = util.read_json(path)
@@ -233,6 +233,21 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
                     self.score('ok')
                 self.assertEqual([], evaluate.read_index(self.run_dir))
                 self.assertFalse((Path(self.run_dir) / 'evaluations').exists())
+
+    def test_pinning_a_build_measured_outside_the_procedure_is_refused(self):
+        """`clean_worktree` is a claim, not a detail: a false one is refused.
+
+        The hash moves with the line endings of the evaluator sources, so a
+        value measured on a rewritten worktree is not the recorded commit's.
+        """
+        path = Path(self.run_dir) / 'condition.json'
+        support.pin_evaluator(self.run_dir, '0' * 64)
+        data = util.read_json(path)
+        data['evaluation']['evaluator_build']['clean_worktree'] = False
+        util.write_json_atomic(path, data)
+        with self.assertRaises(RuntimeError):
+            self.score('ok')
+        self.assertFalse((Path(self.run_dir) / 'evaluations').exists())
 
     def test_an_unpinned_condition_still_records_the_build(self):
         support.pin_evaluator(self.run_dir, None)

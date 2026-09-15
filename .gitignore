@@ -1,0 +1,24 @@
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+
+# Local tooling
+.vs/
+.vscode/
+.idea/
+
+# Implementation-agent work areas and run data are research material, not source.
+# Only schemas/templates under outer/ are tracked.
+runs/
+artifacts/
+work/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Evaluator scratch
+tmp/
+*.tmp

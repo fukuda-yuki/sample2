@@ -160,6 +160,18 @@ error が 1 つでもある            → verdict = error, quality = null
 別のマシンや別のパスでの一致は期待しない。
 **この値の一致を「同じ意味の判定をする評価器である」ことの根拠に使わない。**
 
+**ビルドしたコミットは値に混ぜない。** .NET SDK は既定で、ビルドした作業ツリーのコミットを
+`AssemblyInformationalVersion` に埋め込む。その既定のままでは、**文書だけのコミットでも
+値が変わる**（実際に `45a2b4a` で測った値と `6675e19` で測った値が食い違い、
+アセンブリに `6675e19` が埋まっていることを確認した）。
+すると測定値を記録するコミット自身が次のビルドの値を変えてしまい、
+**記録した値と、その記録を含むコミットが一致しえない**。
+評価器はこの属性を読まないため、`MusicStore.Evaluator.csproj` で
+`IncludeSourceRevisionInInformationalVersion` を `false` にして、
+値がソース・パス・SDK だけで決まるようにした。
+**この変更は判定の意味を変えないので `evaluation_version` は据え置く**（本節の規則）。
+ビルドしたコミットは、条件の `evaluation.evaluator_build.source_commit` に追跡用として残す。
+
 `evaluation_version` は `evaluationId` に入るが、`evaluatorSha256` は入らない。
 **評価器を差し替えて評価版を据え置くことは許すが、無言で続けてはならない。**
 据え置くときは、意味が変わっていないことを校正の再実行で示し、
@@ -167,8 +179,19 @@ error が 1 つでもある            → verdict = error, quality = null
 
 外側の実行基盤は、採点のたびに**呼び出した評価器のハッシュを自分で実測**し、
 `record.json` と `evaluations/index.jsonl`、集計表の `scoring.evaluator_sha256` に残す。
-条件の `evaluation.evaluator_sha256` に値を入れておくと、食い違うビルドでの採点を拒否する
+条件の `evaluation.evaluator_sha256` に値を入れておくと、固定値が使われる
 （`null` は「固定しない」。固定しなくても実測値は毎回記録される）。
+
+**固定するときは、値だけを入れてはならない。** この値はビルドしたパスと SDK に依存するため
+（[`inner/calibration/README.md`](../inner/calibration/README.md) §5-13、本節の実測）、別のパスで
+ビルドした評価器ではすべての採点が一致しなくなる。
+条件の `evaluation.evaluator_build` に、ソースの位置・アセンブリ・ビルドコマンド・
+**ビルドに使った SDK の版**・固定値の出所を書く。固定値があって `evaluator_build` が
+欠けている場合、外側は採点を始める前に条件の誤りとして拒否する。
+
+固定値と一致しないビルドでの採点も、例外で捨てずに `rejected_mismatch` の記録として残す。
+`record.json` の `mismatches` に固定値と実測値の両方が入るため、
+**静かに通ることも、診断できないまま消えることもない**。
 詳細は [`docs/outer-harness.md`](outer-harness.md) §6.4。
 
 ## 7. 終了コード

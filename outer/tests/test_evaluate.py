@@ -201,15 +201,45 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
 
     def test_a_different_evaluator_build_is_refused_when_the_condition_pins_one(self):
         support.pin_evaluator(self.run_dir, '0' * 64)
-        with self.assertRaises(RuntimeError):
-            self.score('ok')
-        self.assertEqual([], evaluate.read_index(self.run_dir))
+        record = self.score('ok')
+        self.assertEqual('rejected_mismatch', record['scoring_state'])
+        self.assertFalse(record['adopted'])
+        self.assertIsNone(record['verdict'])
+        self.assertIsNone(record['quality'])
+        self.assertEqual([{'check': 'evaluator_sha256', 'expected': '0' * 64,
+                           'actual': util.sha256_file(STUB)}], record['mismatches'])
+        self.assertEqual('0' * 64, record['evaluator_sha256_pinned'])
+        self.assertEqual(util.sha256_file(STUB), record['evaluator_sha256'])
+
+    def test_the_refused_build_is_kept_in_the_index(self):
+        """A refusal must be diagnosable from the record alone."""
+        support.pin_evaluator(self.run_dir, '0' * 64)
+        self.score('ok')
+        rows = evaluate.read_index(self.run_dir)
+        self.assertEqual(1, len(rows))
+        self.assertEqual('rejected_mismatch', rows[0]['scoring_state'])
+        self.assertEqual('0' * 64, rows[0]['evaluator_sha256_pinned'])
+
+    def test_pinning_without_provenance_is_refused(self):
+        """A pinned hash with no stated origin cannot be diagnosed later."""
+        path = Path(self.run_dir) / 'condition.json'
+        for key in ('source_path', 'command', 'sdk_version', 'sha256_origin'):
+            with self.subTest(missing=key):
+                support.pin_evaluator(self.run_dir, '0' * 64)
+                data = util.read_json(path)
+                data['evaluation']['evaluator_build'][key] = None
+                util.write_json_atomic(path, data)
+                with self.assertRaises(RuntimeError):
+                    self.score('ok')
+                self.assertEqual([], evaluate.read_index(self.run_dir))
+                self.assertFalse((Path(self.run_dir) / 'evaluations').exists())
 
     def test_an_unpinned_condition_still_records_the_build(self):
         support.pin_evaluator(self.run_dir, None)
         record = self.score('ok')
         self.assertEqual('scored', record['scoring_state'])
         self.assertEqual(util.sha256_file(STUB), record['evaluator_sha256'])
+        self.assertIsNone(record['evaluator_sha256_pinned'])
 
     def test_the_fault_path_also_records_the_build(self):
         record = self.score('no-output')

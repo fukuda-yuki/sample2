@@ -1,493 +1,395 @@
 [
-    {
-        "caseId":  "cal-ref-001",
-        "exitCode":  0,
-        "verdict":  "pass",
-        "quality":  100,
-        "evaluationId":  "MS1-001-9a6de335c982-1.0.0-001",
-        "failed":  [
-
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-9a6de335c982-1.0.0-001\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 9a6de335c982)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
-        "stderr":  "",
-        "expectedVerdict":  "pass",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "正例",
-        "note":  "自己作成の正例。29 要件すべてが通ることを期待する。"
-    },
-    {
-        "caseId":  "cal-ref-002",
-        "exitCode":  0,
-        "verdict":  "pass",
-        "quality":  100,
-        "evaluationId":  "MS1-001-9a6de335c982-1.0.0-002",
-        "failed":  [
-
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-9a6de335c982-1.0.0-002\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 9a6de335c982)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
-        "stderr":  "",
-        "expectedVerdict":  "pass",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "正例",
-        "note":  "同じ成果物を 2 回評価し、判定と品質点が一致することを確認する。"
-    },
-    {
-        "caseId":  "cal-alt-001",
-        "exitCode":  0,
-        "verdict":  "pass",
-        "quality":  100,
-        "evaluationId":  "MS1-001-a4a3f8acf2ad-1.0.0-003",
-        "failed":  [
-
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-a4a3f8acf2ad-1.0.0-003\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 a4a3f8acf2ad)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
-        "stderr":  "",
-        "expectedVerdict":  "pass",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "妥当な別実装",
-        "note":  "最小 API と素の SQLite で書き直した別実装。正例と同じ要件を満たすことを期待する。"
-    },
-    {
-        "caseId":  "cal-alt-002",
-        "exitCode":  0,
-        "verdict":  "pass",
-        "quality":  100,
-        "evaluationId":  "MS1-001-a4a3f8acf2ad-1.0.0-004",
-        "failed":  [
-
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-a4a3f8acf2ad-1.0.0-004\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 a4a3f8acf2ad)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
-        "stderr":  "",
-        "expectedVerdict":  "pass",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "妥当な別実装",
-        "note":  "別実装の 2 回目。判定と品質点の一致を確認する。"
-    },
-    {
-        "caseId":  "neg-remove-count-pre-decrement",
-        "exitCode":  0,
-        "verdict":  "fail",
-        "quality":  96.55,
-        "evaluationId":  "MS1-001-5dc3f2a5ad81-1.0.0-010",
-        "failed":  [
-                       "R-014"
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-5dc3f2a5ad81-1.0.0-010\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\artifact (sha256 5dc3f2a5ad81)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
-        "stderr":  "",
-        "expectedVerdict":  "fail",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-                               "R-014"
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "重要な負例",
-        "note":  "削除応答の数量を減算前に読む。R-014 だけが落ちることを期待する。"
-    },
-    {
-        "caseId":  "neg-no-quantity-multiply",
-        "exitCode":  0,
-        "verdict":  "fail_critical",
-        "quality":  93.1,
-        "evaluationId":  "MS1-001-eca552dfe0d1-1.0.0-011",
-        "failed":  [
-                       "R-013",
-                       "R-016"
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-eca552dfe0d1-1.0.0-011\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\artifact (sha256 eca552dfe0d1)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\work\r\n[evaluator] verdict: fail_critical, quality: 93.10\r\n[evaluator] requirements: pass 27 / fail 2 / blocked 0 / error 0\r\n[evaluator] critical failed: R-013",
-        "stderr":  "",
-        "expectedVerdict":  "fail_critical",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-                               "R-013",
-                               "R-016"
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "重要な負例",
-        "note":  "かご合計で数量を掛けない。金額を見る R-013 と R-016 が落ちることを期待する。"
-    },
-    {
-        "caseId":  "neg-duplicate-cart-lines",
-        "exitCode":  0,
-        "verdict":  "fail_critical",
-        "quality":  82.76,
-        "evaluationId":  "MS1-001-68bd495e68c4-1.0.0-012",
-        "failed":  [
-                       "R-012",
-                       "R-013",
-                       "R-014",
-                       "R-015",
-                       "R-016"
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-68bd495e68c4-1.0.0-012\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\artifact (sha256 68bd495e68c4)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\work\r\n[evaluator] verdict: fail_critical, quality: 82.76\r\n[evaluator] requirements: pass 24 / fail 5 / blocked 0 / error 0\r\n[evaluator] critical failed: R-012, R-013",
-        "stderr":  "",
-        "expectedVerdict":  "fail_critical",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-                               "R-012",
-                               "R-013",
-                               "R-014",
-                               "R-015",
-                               "R-016"
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "重要な負例",
-        "note":  "同じアルバムでも明細を増やす。明細構成を見る R-012 R-014 R-015 R-016 と金額の R-013 が落ちることを期待する。"
-    },
-    {
-        "caseId":  "neg-no-seed",
-        "exitCode":  0,
-        "verdict":  "fail_critical",
-        "quality":  48.28,
-        "evaluationId":  "MS1-001-623bee9b1abd-1.0.0-013",
-        "failed":  [
-                       "R-002",
-                       "R-003",
-                       "R-004",
-                       "R-005",
-                       "R-006",
-                       "R-008",
-                       "R-010",
-                       "R-011",
-                       "R-012",
-                       "R-013",
-                       "R-014",
-                       "R-016",
-                       "R-017"
-                   ],
-        "blocked":  [
-                        "R-023",
-                        "R-024"
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-623bee9b1abd-1.0.0-013\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\artifact (sha256 623bee9b1abd)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 48.28\r\n[evaluator] requirements: pass 14 / fail 13 / blocked 2 / error 0\r\n[evaluator] critical failed: R-002, R-005, R-012, R-013",
-        "stderr":  "",
-        "expectedVerdict":  "fail_critical",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-                               "R-002",
-                               "R-003",
-                               "R-004",
-                               "R-005",
-                               "R-006",
-                               "R-008",
-                               "R-010",
-                               "R-011",
-                               "R-012",
-                               "R-013",
-                               "R-014",
-                               "R-016",
-                               "R-017"
-                           ],
-        "expectedBlocked":  [
-                                "R-023",
-                                "R-024"
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "重要な負例",
-        "note":  "初期カタログを投入しない。カタログを前提とする要件が連鎖して落ち、404 系と注文系は落ちないことを期待する。かごに明細を入れられないため入力検証の 2 要件は未評価を期待する。"
-    },
-    {
-        "caseId":  "neg-destructive-seed",
-        "exitCode":  0,
-        "verdict":  "fail_critical",
-        "quality":  96.55,
-        "evaluationId":  "MS1-001-5f65778d7b2a-1.0.0-014",
-        "failed":  [
-                       "R-005"
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-5f65778d7b2a-1.0.0-014\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\artifact (sha256 5f65778d7b2a)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0\r\n[evaluator] critical failed: R-005",
-        "stderr":  "",
-        "expectedVerdict":  "fail_critical",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-                               "R-005"
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "重要な負例",
-        "note":  "起動のたびに DB を作り直す。注文が保持されない R-005 だけが落ちることを期待する。"
-    },
-    {
-        "caseId":  "neg-unknown-album-500",
-        "exitCode":  0,
-        "verdict":  "fail",
-        "quality":  96.55,
-        "evaluationId":  "MS1-001-90da6f047c55-1.0.0-015",
-        "failed":  [
-                       "R-009"
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-90da6f047c55-1.0.0-015\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\artifact (sha256 90da6f047c55)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
-        "stderr":  "",
-        "expectedVerdict":  "fail",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-                               "R-009"
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "重要な負例",
-        "note":  "存在しないアルバムで 500 を返す。R-009 だけが落ちることを期待する。"
-    },
-    {
-        "caseId":  "neg-legacy-wrapper",
-        "exitCode":  0,
-        "verdict":  "fail",
-        "quality":  96.55,
-        "evaluationId":  "MS1-001-5adff2f6252a-1.0.0-016",
-        "failed":  [
-                       "R-029"
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "[evaluator] evaluation id: MS1-001-5adff2f6252a-1.0.0-016\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\artifact (sha256 5adff2f6252a)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
-        "stderr":  "",
-        "expectedVerdict":  "fail",
-        "expectedExitCode":  0,
-        "expectedQualityNull":  false,
-        "expectedFailed":  [
-                               "R-029"
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "重要な負例",
-        "note":  "旧実装を起動する記述を残す。静的検査の R-029 だけが落ちることを期待する。"
-    },
-    {
-        "caseId":  "fault-missing-artifact",
-        "exitCode":  2,
-        "verdict":  "error",
-        "quality":  null,
-        "evaluationId":  "MS1-001-000000000000-1.0.0-090",
-        "failed":  [
-
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "",
-        "stderr":  "dotnet.exe : 評価側の障害: 成果物ディレクトリが存在しません: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\no-such-artifact\r\nAt C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\calibration\\run-calibration.ps1:229 char:9\r\n+         \u0026 dotnet @arguments 1\u003e $stdoutPath 2\u003e $stderrPath\r\n+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : NotSpecified: (評価側の障害: 成果物ディレク...o-such-artifact:String) [], RemoteException\r\n    + FullyQualifiedErrorId : NativeCommandError",
-        "expectedVerdict":  "error",
-        "expectedExitCode":  2,
-        "expectedQualityNull":  true,
-        "expectedFailed":  [
-
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "評価側の障害",
-        "note":  "成果物ディレクトリが無い。成果物の欠陥ではなく評価側の障害として error になることを期待する。"
-    },
-    {
-        "caseId":  "fault-unimplemented-check",
-        "exitCode":  2,
-        "verdict":  "error",
-        "quality":  null,
-        "evaluationId":  "MS1-001-9a6de335c982-1.0.0-091",
-        "failed":  [
-
-                   ],
-        "blocked":  [
-
-                    ],
-        "errored":  [
-
-                    ],
-        "stdout":  "",
-        "stderr":  "dotnet.exe : 評価側の障害: 台帳の検査が実装されていません: C-999\r\nAt C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\calibration\\run-calibration.ps1:229 char:9\r\n+         \u0026 dotnet @arguments 1\u003e $stdoutPath 2\u003e $stderrPath\r\n+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : NotSpecified: (評価側の障害: 台帳の検査が実装されていません: C-999:String) [], RemoteException\r\n    + FullyQualifiedErrorId : NativeCommandError",
-        "expectedVerdict":  "error",
-        "expectedExitCode":  2,
-        "expectedQualityNull":  true,
-        "expectedFailed":  [
-
-                           ],
-        "expectedBlocked":  [
-
-                            ],
-        "verdictMatch":  true,
-        "exitMatch":  true,
-        "qualityMatch":  true,
-        "failedMatch":  true,
-        "blockedMatch":  true,
-        "expectationMet":  true,
-        "kind":  "評価側の障害",
-        "note":  "台帳に実装のない検査 ID がある。成果物を採点せず error になることを期待する。"
-    }
+  {
+    "caseId": "cal-ref-001",
+    "exitCode": 0,
+    "verdict": "pass",
+    "quality": 100,
+    "evaluationId": "MS1-001-9a6de335c982-1.0.0-001",
+    "failed": [],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-9a6de335c982-1.0.0-001\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 9a6de335c982)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+    "stderr": "",
+    "expectedVerdict": "pass",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "正例",
+    "note": "自己作成の正例。29 要件すべてが通ることを期待する。"
+  },
+  {
+    "caseId": "cal-ref-002",
+    "exitCode": 0,
+    "verdict": "pass",
+    "quality": 100,
+    "evaluationId": "MS1-001-9a6de335c982-1.0.0-002",
+    "failed": [],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-9a6de335c982-1.0.0-002\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\reference (sha256 9a6de335c982)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-ref-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+    "stderr": "",
+    "expectedVerdict": "pass",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "正例",
+    "note": "同じ成果物を 2 回評価し、判定と品質点が一致することを確認する。"
+  },
+  {
+    "caseId": "cal-alt-001",
+    "exitCode": 0,
+    "verdict": "pass",
+    "quality": 100,
+    "evaluationId": "MS1-001-a4a3f8acf2ad-1.0.0-003",
+    "failed": [],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-a4a3f8acf2ad-1.0.0-003\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 a4a3f8acf2ad)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-001\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+    "stderr": "",
+    "expectedVerdict": "pass",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "妥当な別実装",
+    "note": "最小 API と素の SQLite で書き直した別実装。正例と同じ要件を満たすことを期待する。"
+  },
+  {
+    "caseId": "cal-alt-002",
+    "exitCode": 0,
+    "verdict": "pass",
+    "quality": 100,
+    "evaluationId": "MS1-001-a4a3f8acf2ad-1.0.0-004",
+    "failed": [],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-a4a3f8acf2ad-1.0.0-004\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\fixtures\\alternative (sha256 a4a3f8acf2ad)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\cal-alt-002\\work\r\n[evaluator] verdict: pass, quality: 100.00\r\n[evaluator] requirements: pass 29 / fail 0 / blocked 0 / error 0",
+    "stderr": "",
+    "expectedVerdict": "pass",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "妥当な別実装",
+    "note": "別実装の 2 回目。判定と品質点の一致を確認する。"
+  },
+  {
+    "caseId": "neg-remove-count-pre-decrement",
+    "exitCode": 0,
+    "verdict": "fail",
+    "quality": 96.55,
+    "evaluationId": "MS1-001-5dc3f2a5ad81-1.0.0-010",
+    "failed": [
+      "R-014"
+    ],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-5dc3f2a5ad81-1.0.0-010\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\artifact (sha256 5dc3f2a5ad81)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-remove-count-pre-decrement\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
+    "stderr": "",
+    "expectedVerdict": "fail",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [
+      "R-014"
+    ],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "重要な負例",
+    "note": "削除応答の数量を減算前に読む。R-014 だけが落ちることを期待する。"
+  },
+  {
+    "caseId": "neg-no-quantity-multiply",
+    "exitCode": 0,
+    "verdict": "fail_critical",
+    "quality": 93.1,
+    "evaluationId": "MS1-001-eca552dfe0d1-1.0.0-011",
+    "failed": [
+      "R-013",
+      "R-016"
+    ],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-eca552dfe0d1-1.0.0-011\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\artifact (sha256 eca552dfe0d1)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-quantity-multiply\\work\r\n[evaluator] verdict: fail_critical, quality: 93.10\r\n[evaluator] requirements: pass 27 / fail 2 / blocked 0 / error 0\r\n[evaluator] critical failed: R-013",
+    "stderr": "",
+    "expectedVerdict": "fail_critical",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [
+      "R-013",
+      "R-016"
+    ],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "重要な負例",
+    "note": "かご合計で数量を掛けない。金額を見る R-013 と R-016 が落ちることを期待する。"
+  },
+  {
+    "caseId": "neg-duplicate-cart-lines",
+    "exitCode": 0,
+    "verdict": "fail_critical",
+    "quality": 82.76,
+    "evaluationId": "MS1-001-68bd495e68c4-1.0.0-012",
+    "failed": [
+      "R-012",
+      "R-013",
+      "R-014",
+      "R-015",
+      "R-016"
+    ],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-68bd495e68c4-1.0.0-012\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\artifact (sha256 68bd495e68c4)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-duplicate-cart-lines\\work\r\n[evaluator] verdict: fail_critical, quality: 82.76\r\n[evaluator] requirements: pass 24 / fail 5 / blocked 0 / error 0\r\n[evaluator] critical failed: R-012, R-013",
+    "stderr": "",
+    "expectedVerdict": "fail_critical",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [
+      "R-012",
+      "R-013",
+      "R-014",
+      "R-015",
+      "R-016"
+    ],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "重要な負例",
+    "note": "同じアルバムでも明細を増やす。明細構成を見る R-012 R-014 R-015 R-016 と金額の R-013 が落ちることを期待する。"
+  },
+  {
+    "caseId": "neg-no-seed",
+    "exitCode": 0,
+    "verdict": "fail_critical",
+    "quality": 48.28,
+    "evaluationId": "MS1-001-623bee9b1abd-1.0.0-013",
+    "failed": [
+      "R-002",
+      "R-003",
+      "R-004",
+      "R-005",
+      "R-006",
+      "R-008",
+      "R-010",
+      "R-011",
+      "R-012",
+      "R-013",
+      "R-014",
+      "R-016",
+      "R-017"
+    ],
+    "blocked": [
+      "R-023",
+      "R-024"
+    ],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-623bee9b1abd-1.0.0-013\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\artifact (sha256 623bee9b1abd)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-no-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 48.28\r\n[evaluator] requirements: pass 14 / fail 13 / blocked 2 / error 0\r\n[evaluator] critical failed: R-002, R-005, R-012, R-013",
+    "stderr": "",
+    "expectedVerdict": "fail_critical",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [
+      "R-002",
+      "R-003",
+      "R-004",
+      "R-005",
+      "R-006",
+      "R-008",
+      "R-010",
+      "R-011",
+      "R-012",
+      "R-013",
+      "R-014",
+      "R-016",
+      "R-017"
+    ],
+    "expectedBlocked": [
+      "R-023",
+      "R-024"
+    ],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "重要な負例",
+    "note": "初期カタログを投入しない。カタログを前提とする要件が連鎖して落ち、404 系と注文系は落ちないことを期待する。かごに明細を入れられないため入力検証の 2 要件は未評価を期待する。"
+  },
+  {
+    "caseId": "neg-destructive-seed",
+    "exitCode": 0,
+    "verdict": "fail_critical",
+    "quality": 96.55,
+    "evaluationId": "MS1-001-5f65778d7b2a-1.0.0-014",
+    "failed": [
+      "R-005"
+    ],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-5f65778d7b2a-1.0.0-014\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\artifact (sha256 5f65778d7b2a)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-destructive-seed\\work\r\n[evaluator] verdict: fail_critical, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0\r\n[evaluator] critical failed: R-005",
+    "stderr": "",
+    "expectedVerdict": "fail_critical",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [
+      "R-005"
+    ],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "重要な負例",
+    "note": "起動のたびに DB を作り直す。注文が保持されない R-005 だけが落ちることを期待する。"
+  },
+  {
+    "caseId": "neg-unknown-album-500",
+    "exitCode": 0,
+    "verdict": "fail",
+    "quality": 96.55,
+    "evaluationId": "MS1-001-90da6f047c55-1.0.0-015",
+    "failed": [
+      "R-009"
+    ],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-90da6f047c55-1.0.0-015\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\artifact (sha256 90da6f047c55)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-unknown-album-500\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
+    "stderr": "",
+    "expectedVerdict": "fail",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [
+      "R-009"
+    ],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "重要な負例",
+    "note": "存在しないアルバムで 500 を返す。R-009 だけが落ちることを期待する。"
+  },
+  {
+    "caseId": "neg-legacy-wrapper",
+    "exitCode": 0,
+    "verdict": "fail",
+    "quality": 96.55,
+    "evaluationId": "MS1-001-5adff2f6252a-1.0.0-016",
+    "failed": [
+      "R-029"
+    ],
+    "blocked": [],
+    "errored": [],
+    "stdout": "[evaluator] evaluation id: MS1-001-5adff2f6252a-1.0.0-016\r\n[evaluator] artifact: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\artifact (sha256 5adff2f6252a)\r\n[evaluator] work dir: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\neg-legacy-wrapper\\work\r\n[evaluator] verdict: fail, quality: 96.55\r\n[evaluator] requirements: pass 28 / fail 1 / blocked 0 / error 0",
+    "stderr": "",
+    "expectedVerdict": "fail",
+    "expectedExitCode": 0,
+    "expectedQualityNull": false,
+    "expectedFailed": [
+      "R-029"
+    ],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "重要な負例",
+    "note": "旧実装を起動する記述を残す。静的検査の R-029 だけが落ちることを期待する。"
+  },
+  {
+    "caseId": "fault-missing-artifact",
+    "exitCode": 2,
+    "verdict": "error",
+    "quality": null,
+    "evaluationId": "MS1-001-000000000000-1.0.0-090",
+    "failed": [],
+    "blocked": [],
+    "errored": [],
+    "stdout": "",
+    "stderr": "評価側の障害: 成果物ディレクトリが存在しません: C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\no-such-artifact",
+    "expectedVerdict": "error",
+    "expectedExitCode": 2,
+    "expectedQualityNull": true,
+    "expectedFailed": [],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "評価側の障害",
+    "note": "成果物ディレクトリが無い。成果物の欠陥ではなく評価側の障害として error になることを期待する。"
+  },
+  {
+    "caseId": "fault-unimplemented-check",
+    "exitCode": 2,
+    "verdict": "error",
+    "quality": null,
+    "evaluationId": "MS1-001-9a6de335c982-1.0.0-091",
+    "failed": [],
+    "blocked": [],
+    "errored": [],
+    "stdout": "",
+    "stderr": "評価側の障害: 台帳の検査が実装されていません: C-999",
+    "expectedVerdict": "error",
+    "expectedExitCode": 2,
+    "expectedQualityNull": true,
+    "expectedFailed": [],
+    "expectedBlocked": [],
+    "verdictMatch": true,
+    "exitMatch": true,
+    "qualityMatch": true,
+    "failedMatch": true,
+    "blockedMatch": true,
+    "expectationMet": true,
+    "kind": "評価側の障害",
+    "note": "台帳に実装のない検査 ID がある。成果物を採点せず error になることを期待する。"
+  }
 ]

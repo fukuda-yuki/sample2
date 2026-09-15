@@ -8,6 +8,14 @@
     <RootNamespace>MusicStore.Evaluator</RootNamespace>
     <AssemblyName>MusicStore.Evaluator</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      The SDK embeds the working tree's commit into AssemblyInformationalVersion by
+      default. That makes the built assembly's sha256 change on every commit, even a
+      documentation-only one, so the recorded "which build scored this" value could
+      never match the commit that records it. The evaluator does not read this
+      attribute; turning it off keeps the identity a function of source, path and SDK.
+    -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
 </Project>

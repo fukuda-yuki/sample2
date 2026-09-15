@@ -25,8 +25,9 @@ def build(runs_dir):
         'columns_note': ('quality と total_tokens は別の列である。未採点は 0 ではなく null。'
                          'blocked は分母から落とさない。scoring.evaluation_version は判定の'
                          '意味の版、scoring.evaluator_sha256 は採点した評価器ビルドの同一性。'
-                         '後者はソースの版ではなくビルドした場所を含むため、別環境での一致を'
-                         '前提にしない。'),
+                         '後者はソースの版ではなくビルドした場所と SDK を含むため、別環境での'
+                         '一致を前提にしない。scoring.evaluator_sha256_pinned は条件が固定した'
+                         '値で、固定していなければ null である。'),
         'runs': rows,
     }
 
@@ -90,7 +91,8 @@ def row_for(runs_dir, run_id):
                     'evaluation_id': (scoring or {}).get('evaluation_id'),
                     'sequence': (scoring or {}).get('sequence'),
                     'evaluation_version': (scoring or {}).get('evaluation_version'),
-                    'evaluator_sha256': (scoring or {}).get('evaluator_sha256')},
+                    'evaluator_sha256': (scoring or {}).get('evaluator_sha256'),
+                    'evaluator_sha256_pinned': (scoring or {}).get('evaluator_sha256_pinned')},
         'quality': scoring.get('quality') if scored else None,
         'verdict': scoring.get('verdict') if scored else None,
         'usage': {'state': usage.get('state'),

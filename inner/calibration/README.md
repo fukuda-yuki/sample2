@@ -160,27 +160,67 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 （実際に 1 つ残っていた）。評価器の `Stop()` はプロセスツリーごと止めるが、
 評価器自身が道連れにされると `Stop()` に到達しない。残骸を後から特定できるよう、
 `evidence/app-process.log` の先頭行と `evaluator-manifest.json` にアプリのプロセス ID を
-残すようにした（[`docs/evaluator.md`](../docs/evaluator.md) §6.1）。
+残すようにした（[`docs/evaluator.md`](../../docs/evaluator.md) §6.1）。
 
 これは**証跡の形式の変更であり、判定の意味を変えない**。確認のため校正を再実行し、
 13 ケースすべてが**同じ判定・同じ品質点・同じ評価 ID・同じ不合格の集合**で一致した。
-[`calibration-summary.json`](calibration-summary.json) の内容は変更前と
+そのときの [`calibration-summary.json`](calibration-summary.json) は変更前と
 **改行コードを除いて完全一致**した（本ファイルの表の値もそのままである）。
+このファイルはのちに §4.2 の再実行の出力へ入れ替えてある。
 
 このとき、**評価版は `1.0.0` のままである**。判定の意味は変わっていないためである。
 ただし**評価器のビルドは変わっている**ので、`evaluatorSha256` は変更前と異なる。
 判定の意味（`evaluation_version`）とビルドの同一性（`evaluatorSha256`）を分けて扱う規則は
-[`docs/decision-log.md`](../docs/decision-log.md) D-15 と
-[`docs/outer-harness.md`](../docs/outer-harness.md) §6.4 にある。
+[`docs/decision-log.md`](../../docs/decision-log.md) D-15 と
+[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4 にある。
 証跡形式の変更後のビルドの `sha256` は `76ae726991b44b7bbf3c07bbd6416dd4988f1f614ab912e0a227a307e6305e24`
-（`bin/Release/net8.0/MusicStore.Evaluator.dll`）。
+（`bin/Release/net8.0/MusicStore.Evaluator.dll`、評価器ソースの最終更新は `6abe36e`）。
+**この値の正は [`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
+`artifacts.evaluator_sha256` であり、この本文の値はそれを写したものである。**
+評価器のソースを変えるとこの値は陳腐化するため、本文の値だけを根拠にしない。
+**この値は下の §4.2 の変更で更新されている。**
 
 この値の再現性は 2 通り測った。**同じソースを同じパスで作り直すと同じ値になる**
 （`bin` と `obj` を消して 2 回ビルドし、2 回とも同じ値）。**ソースを別のパスに置いてビルドすると値が変わる**
 （`%TEMP%` に同じ `.cs` と `.csproj` を置いてビルドすると `9f1bbdf5f4cdade2…` になった）。
 つまりこの値は「そのソース」ではなく「**そのソースをその場所でビルドしたもの**」の識別子である。
-固定値を使う場合は条件の `evaluation.evaluator_sha256` に入れるが、
+固定値を使う場合は条件の `evaluation.evaluator_sha256` に入れるが、そのときは
+**`evaluation.evaluator_build` にソースの位置・アセンブリ・ビルドコマンド・ビルドに使った SDK の版・
+固定値の出所も書く**（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
 **別のマシンや別のパスでの一致は期待しない**（§5-13）。
+
+### 4.2 ビルドの同一性からコミットを外した後の再実行
+
+`evaluatorSha256` は「ソースの版」ではなく「ビルドしたもの」の識別子だと整理したが、
+その値が**ビルドしたコミットにも依存していた**。.NET SDK は既定で、ビルドした作業ツリーの
+コミットを `AssemblyInformationalVersion` に埋め込むためである。実測で確認した。
+
+| ビルドした時点の `HEAD` | `MusicStore.Evaluator.dll` の `sha256` |
+| --- | --- |
+| `45a2b4a` | `76ae726991b44b7b…` |
+| `6675e19`（文書だけのコミット） | `60c8fbd406ad6484…` |
+
+アセンブリの中に `6675e19` の文字列があることも確認した（`45a2b4a` のビルドには無い）。
+この状態では、**測定値を記録するコミット自身が次のビルドの値を変えてしまう**ため、
+記録した値とその記録を含むコミットが一致しえない。そこで評価器の `.csproj` で
+`IncludeSourceRevisionInInformationalVersion` を `false` にし、**値がソース・パス・SDK だけ**で
+決まるようにした（評価器はこの属性を読まないため、判定の意味は変わらない）。
+
+校正を再実行し、13 ケースすべてが**同じ判定・同じ品質点・同じ評価 ID・同じ不合格の集合**で
+一致した。[`calibration-summary.json`](calibration-summary.json) はこの実行の出力に入れ替えてある。
+入れ替えで前の記録と差が出たのは**評価側の障害 2 件の `stderr` の書き方だけ**である
+（PowerShell がネイティブコマンドの標準エラーをどのように記録するかで変わる。
+前の記録は 6 行、今の記録は 1 行。判定・品質点・終了コードは同じ）。
+この差は評価器の出力ではなく、実行のしかたに依存する。
+
+この変更でも**評価版は `1.0.0` のままである**。判定の意味は変えていない。
+変更後のビルドの `sha256` は
+`09679d524befd9cb1b29e6041adb6b3395b806797000a3cab7979f4bda764a55`
+（`bin/Release/net8.0/MusicStore.Evaluator.dll`）。
+**この値も [`outer/verify/verification-summary.json`](../../outer/verify/verification-summary.json) の
+`artifacts.evaluator_sha256` を正とする。**
+ビルドしたコミットは、条件の `evaluation.evaluator_build.source_commit` に追跡用として残す
+（値には影響しない）。
 
 ## 5. 校正の限界（隠さず記録する）
 
@@ -211,8 +251,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\inner\calibration\run-cali
 12. **評価版 `1.0.0` は判定の意味の版である。** 校正が確認しているのは「この評価版の意味の下で
     期待と一致すること」であり、**評価器のビルドの同一性は確認していない**。
     ビルドの同一性は `evaluator-manifest.json` の `evaluatorSha256` が表す
-    （[`docs/evaluator.md`](../docs/evaluator.md) §6.2、[`docs/outer-harness.md`](../docs/outer-harness.md) §6.4）。
-13. **`evaluatorSha256` はソースの版ではなく、ビルドした場所を含む。** 同じソースでも置き場所を
+    （[`docs/evaluator.md`](../../docs/evaluator.md) §6.2、[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.4）。
+13. **`evaluatorSha256` はソースの版ではなく、ビルドした場所と SDK を含む。** 同じソースでも置き場所を
     変えると値が変わる（§4.1）。同じソース・同じパスなら作り直しても同じ値になることは
     このマシンで確認したが、**別のマシン・別のパス・別の SDK での一致は確認していない**。
     この値の一致を「同じ意味の判定をする評価器である」ことの根拠に使わない。
+14. **ビルドしたコミットは値に混ぜていない**（§4.2）。混ぜていた間は文書だけのコミットでも値が
+    変わっており、**値を記録するコミット自身が次のビルドの値を変えていた**。
+    `.csproj` で埋め込みを切った後も、**この切り方を知らない別のビルド手順では値が変わりうる**
+    （手で `AssemblyInformationalVersion` を指定する、別の SDK を使うなど）。
+    固定値の出所にコマンドと SDK を書くのはこのためである。
+15. **`calibration-summary.json` の「評価側の障害」2 件の `stderr` は実行のしかたに依存する。**
+    評価器の出力ではなく、PowerShell がネイティブコマンドの標準エラーをどう記録するかの差である
+    （§4.2）。この 2 フィールドは同一性の比較に使わない。

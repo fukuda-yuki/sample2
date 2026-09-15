@@ -53,6 +53,15 @@
     "catalog_path": "inner/spec/catalog.json",
     "spec_sha256": "2209bbf18b1990ac69d131909bc1961eb5c84ef25b95215dc4add6acefbe8951",
     "evaluator_sha256": null,
-    "note": "spec_sha256 は台帳のハッシュ。採点時に評価結果と突き合わせ、食い違えば有効な採点として記録しない。evaluator_sha256 は採点する評価器ビルドのハッシュで、null は「固定しない」を意味する。null の間も採点のたびに外側が実測して記録に残す。evaluation_version は判定の意味（検査集合・合否規則・配点）の版であり、ビルドの同一性は evaluator_sha256 が表す。evaluator_sha256 はソースの版ではなくビルドした場所を含むため、別のマシンや別のパスで同じ値になることを前提にしない。実モデル比較の前に、この 2 つと D-7 の公開範囲を確定する。"
+    "evaluator_build": {
+      "source_path": null,
+      "source_commit": null,
+      "assembly": null,
+      "command": null,
+      "sdk_version": null,
+      "sha256_origin": null,
+      "note": "evaluator_sha256 を固定するときは、その値がどのビルドのものかをここに書く。source_path と assembly はリポジトリ相対、command は実行したビルドのコマンド、sdk_version はビルドに使った dotnet の版、sha256_origin は固定値の出所（どの記録の artifacts.evaluator_sha256 から採ったか）、source_commit はビルドした作業ツリーのコミット（追跡用。値には影響しない）。source_path・command・sdk_version・sha256_origin が欠けたまま evaluator_sha256 を固定すると、採点せずに条件の誤りとして拒否する。evaluator_sha256 はソースの版ではなく、ビルドした場所と SDK に依存するため、固定値だけを書くと別のパスや別の SDK でビルドした評価器では採点がすべて rejected_mismatch になる。"
+    },
+    "note": "spec_sha256 は台帳のハッシュ。採点時に評価結果と突き合わせ、食い違えば有効な採点として記録しない。evaluator_sha256 は採点する評価器ビルドのハッシュで、null は「固定しない」を意味する。null の間も採点のたびに外側が実測して記録に残す。evaluation_version は判定の意味（検査集合・合否規則・配点）の版であり、ビルドの同一性は evaluator_sha256 が表す。evaluator_sha256 はソースの版ではなくビルドした場所と SDK を含むため、別のマシンや別のパスで同じ値になることを前提にしない。実モデル比較の前に、この 2 つと D-7 の公開範囲を確定する。"
   }
 }

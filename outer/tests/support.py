@@ -31,15 +31,30 @@ def condition(spec_sha256):
                        'spec_path': 'inner/spec/requirements.json',
                        'catalog_path': 'inner/spec/catalog.json',
                        'spec_sha256': spec_sha256,
-                       'evaluator_sha256': None},
+                       'evaluator_sha256': None,
+                       'evaluator_build': {'source_path': None, 'source_commit': None,
+                                           'assembly': None, 'command': None,
+                                           'sdk_version': None, 'sha256_origin': None}},
     }
 
 
-def pin_evaluator(run_dir, sha256):
-    """Set (or clear) the evaluator build pinned by the run's condition copy."""
+def pin_evaluator(run_dir, sha256, origin=None, command=None):
+    """Set (or clear) the evaluator build pinned by the run's condition copy.
+
+    Pinning a hash also pins where it came from, so the condition carries the
+    provenance the outer requires.
+    """
     path = Path(run_dir) / 'condition.json'
     data = util.read_json(path)
-    data['evaluation']['evaluator_sha256'] = sha256
+    entry = data['evaluation']
+    entry['evaluator_sha256'] = sha256
+    entry['evaluator_build'] = {
+        'source_path': 'inner/evaluator/MusicStore.Evaluator' if sha256 else None,
+        'source_commit': 'test' if sha256 else None,
+        'assembly': 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll' if sha256 else None,
+        'command': (command or 'dotnet build inner/evaluator/MusicStore.Evaluator/MusicStore.Evaluator.csproj -c Release') if sha256 else None,
+        'sdk_version': 'test' if sha256 else None,
+        'sha256_origin': (origin or 'test fixture') if sha256 else None}
     util.write_json_atomic(path, data)
     return path
 

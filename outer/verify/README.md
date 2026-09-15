@@ -44,7 +44,7 @@ python outer\verify\verify.py --repo .
 | ID | 種別 | 何を確認するか | 結果 |
 | --- | --- | --- | --- |
 | V-0 | measured | 評価器がビルドできる（終了コード `0`） | 一致 |
-| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 78 件） | 一致 |
+| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 80 件） | 一致 |
 | V-1b | scripted | 取り違え 5 検査のテストが存在して緑である（**代替評価器**） | 一致 |
 | V-2 | measured | 正例を実行し、**実評価器**で採点する | 一致 |
 | V-3 | measured | CRLF と BOM の作業ツリーでも同じ成果物ハッシュと同じ評価 ID になる | 一致 |
@@ -207,13 +207,24 @@ python outer\verify\verify.py --repo .
 | `index.jsonl` の全行（2 行）の `evaluator_sha256` が同じ値と一致 | `true` |
 | 集計表の `scoring.evaluator_sha256` が同じ値と一致 | `true` |
 | `evaluation_version`（`1.0.0`）がビルドのハッシュと異なる | `true` |
+| 条件が固定していないとき、`evaluator_sha256_pinned` が `null` で記録される | `true` |
 
 実測した値は `verification-summary.json` の `artifacts.evaluator_sha256` にある
-（本記録では `76ae726991b44b7b…`）。**「外側が呼び出したものを実測している」ことの確認であり、
+（本記録では `09679d524befd9cb…`）。**「外側が呼び出したものを実測している」ことの確認であり、
 その値が別のマシンや別のパスで再現することの確認ではない**（限界 15）。
 「評価器が申告した値をそのまま写していない」ことは、代替評価器が別の値を申告する
 `outer/tests` の `test_the_recorded_build_is_what_the_outer_invoked_not_what_was_claimed`
 で確認している。
+
+条件の `evaluation.evaluator_sha256` に固定値を入れたときの扱いは、この検証では
+**代替評価器でしか**確認していない（限界 16）。
+
+- 固定値があって `evaluation.evaluator_build` が欠けていれば、採点のディレクトリを作る前に拒否する
+  （`test_pinning_without_provenance_is_refused`）。固定値とその出所が離れないようにするため。
+- 固定値と一致しないビルドでの採点は、例外で捨てずに `rejected_mismatch` の記録として残す
+  （`test_a_different_evaluator_build_is_refused_when_the_condition_pins_one`）。
+  固定値と実測値の両方が `mismatches` に入るので、**静かに通ることも、診断できないまま消えることもない**。
+  この記録は `index.jsonl` にも載る（`test_the_refused_build_is_kept_in_the_index`）。
 
 ### V-12 検証の前後でアプリのプロセスが増えていない
 
@@ -237,7 +248,7 @@ python outer\verify\verify.py --repo .
 | OS | `win32` |
 | Python | `3.14.4` |
 | `dotnet --version` | `10.0.300-preview.0.26177.108` |
-| 採点した評価器ビルドの `sha256` | `76ae726991b44b7bbf3c07bbd6416dd4988f1f614ab912e0a227a307e6305e24`（`verification-summary.json` の `artifacts` と同じ値） |
+| 採点した評価器ビルドの `sha256` | `09679d524befd9cb1b29e6041adb6b3395b806797000a3cab7979f4bda764a55`（`verification-summary.json` の `artifacts` と同じ値） |
 
 実行したコマンドは `verification-summary.json` の `commands` に残る。
 
@@ -280,10 +291,19 @@ python outer\verify\verify.py --repo .
     `V-12` が `[]` であることは「この検証が新たに残さなかった」ことの確認である。
 14. **`V-9` は 3 種類の入力でしか確認していない。** 許可リストの名前の綴り違い、
     シンボリックリンク経由の脱出、大文字小文字の違いは確認していない。
-15. **`evaluator_sha256` はソースの版ではなく、ビルドした場所を含む。** 同じソースを
+15. **`evaluator_sha256` はソースの版ではなく、ビルドした場所と SDK を含む。** 同じソースを
     同じパスで作り直すと同じ値になることは確認した（`bin` `obj` を消して 2 回ビルド）が、
     **同じソースを別のパスに置いてビルドすると値が変わる**ことも確認した
     （[`inner/calibration/README.md`](../../inner/calibration/README.md) §4.1）。
     したがって `V-11` の一致は「外側が呼び出したファイルを実測している」ことの確認であり、
     **別マシン・別パス・別 SDK で同じ値になることの確認ではない**。
     この値の一致を「同じ意味の判定をする評価器である」ことの根拠に使わない。
+    **ビルドしたコミットは値に混ぜていない**（同 §4.2）。.NET SDK は既定で作業ツリーのコミットを
+    アセンブリに埋め込むため、以前は文書だけのコミットでも値が変わっていた。
+    埋め込みを切った今も、**この切り方を知らない別のビルド手順では値が変わりうる**。
+    だから固定するときは条件にビルドのコマンドと SDK を書く（§6.4）。
+16. **固定値による採点の拒否は、代替評価器でしか確認していない。** `V-11` で実評価器を
+    使っているのは**固定していない**場合であり、`evaluation.evaluator_sha256` に固定値を
+    入れたときの経路（`evaluator_build` が欠けたときの拒否、固定値と一致しないビルドの
+    `rejected_mismatch` 記録）は `outer/tests` の `stub_evaluator.py` に対する確認である。
+    **実評価器を固定値で採点する経路は、この検証では走っていない。**

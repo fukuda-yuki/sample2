@@ -375,7 +375,7 @@ def evaluator_build_path(repo, runs, run_id, record, rows, report):
                 '採点した評価器ビルドを外側が測って記録する',
                 {'record_matches_file': True, 'reported_matches_file': True,
                  'every_index_row_matches_file': True, 'index_row_count': 2,
-                 'aggregate_matches_file': True,
+                 'aggregate_matches_file': True, 'unpinned_is_recorded_as_null': True,
                  'version_is_not_the_build': True},
                 {'record_matches_file': record['evaluator_sha256'] == measured,
                  'reported_matches_file': record['evaluator_sha256_reported'] == measured,
@@ -383,6 +383,7 @@ def evaluator_build_path(repo, runs, run_id, record, rows, report):
                      row['evaluator_sha256'] == measured for row in index_rows),
                  'index_row_count': len(index_rows),
                  'aggregate_matches_file': scoring['evaluator_sha256'] == measured,
+                 'unpinned_is_recorded_as_null': record['evaluator_sha256_pinned'] is None,
                  'version_is_not_the_build': record['evaluation_version'] == '1.0.0'
                  and record['evaluation_version'] != measured})
 

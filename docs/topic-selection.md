@@ -1,7 +1,7 @@
 # 題材・移行課題の選定（第 1 課題）
 
 対応 Issue: [#3](https://github.com/fukuda-yuki/sample2/issues/3)
-状態: **採用確定（.NET 候補）／移行課題 `MS1-001` の範囲は仮決定**。ユーザー指示（D-6「対象は `.NET` で良い」）により候補の採用は確定した。§2 の移行範囲は、[quality-spec.md](quality-spec.md) の評価仕様と校正で妥当性を確認するまで仮決定として扱う。
+状態: **採用確定（.NET 候補）／移行課題 `MS1-001` の範囲も確定**（[decision-log.md](decision-log.md) D-10）。§2 の移行範囲は、[quality-spec.md](quality-spec.md) の校正 13 ケースが期待と完全一致したことをもって確定した（[inner/calibration/README.md](../inner/calibration/README.md) §2）。ただし校正は部分検証である（同 §5）。
 関連: [docs/plan.md](plan.md) の D-4・D-6、[docs/decision-log.md](decision-log.md)、[docs/sample1-inventory.md](sample1-inventory.md)、[docs/quality-spec.md](quality-spec.md)
 
 ## 0. この文書の事実区分
@@ -30,7 +30,7 @@
 | 正解の根拠 | 中。既存テストが 0 件。コード読解 + チュートリアル文書（CC BY 3.0）+ 独立に確認する要求で作る必要がある | 中。`config/mysql/02-seed-data.sql` と画面仕様が根拠候補 | 中〜高。`db/migration` と `tests/` が根拠候補 |
 | 評価準備の負担（推測） | 中。HTTP の黒箱評価で足りる範囲に切れる | 中〜大。環境構築の比重が大きい | 大。業務規則の正解基準を新規に作る必要がある |
 
-## 2. 第 1 課題の推奨案（仮）
+## 2. 第 1 課題の推奨案（確定）
 
 ユーザー指示（D-4）に従い **Lv.1 .NET 候補** を第 1 課題の対象とする。
 
@@ -88,7 +88,7 @@
 - [x] 最初の 1 課題の推奨案、選定理由、評価可能な品質の範囲、主なリスクを示した（§2〜§4）
 - [x] 必要情報の探索・依存関係を残せているかと、評価準備の負担の両方を説明した（§3 の 3、§4）
 - [x] ユーザー判断が記録されている（[decision-log.md](decision-log.md) の D-4・D-6。`.NET` 候補の採用は確定）
-- [ ] `MS1-001` の移行範囲（§2）は仮決定のまま。[quality-spec.md](quality-spec.md) の校正（正例・負例・別実装・評価側障害）で妥当性を確認してから確定する
+- [x] `MS1-001` の移行範囲（§2）を確定した。[quality-spec.md](quality-spec.md) の校正（正例・負例・別実装・評価側障害）13 ケースが期待と完全一致したため（[inner/calibration/README.md](../inner/calibration/README.md) §2、判断は [decision-log.md](decision-log.md) D-10）。ただし校正は部分検証であり（同 §5）、この確定は「評価器がこの範囲で使える」ことの確認であって「範囲が研究に十分」ことの証明ではない。
 
 ## 7. 参照
 

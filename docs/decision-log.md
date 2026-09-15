@@ -4,6 +4,8 @@
 
 | 日付 | ID | 判断 | 根拠・備考 |
 | --- | --- | --- | --- |
+| 2026-09-15 | D-11 | 成果物ディレクトリには成果物そのものだけを置く。研究用の文書・メモは成果物ディレクトリの外に置く。 | 成果物ハッシュが中の文書の編集で変わることが校正で実際に起きた（[inner/calibration/README.md](../inner/calibration/README.md) §2.1 §4-5） |
+| 2026-09-15 | D-10 | 課題 `MS1-001` の移行範囲（[topic-selection.md](topic-selection.md) §2）を仮決定から**確定**する。`StoreManager`（管理 CRUD・画像アップロード）と `Account`（会員登録・ログイン）は引き続き対象外。 | [topic-selection.md](topic-selection.md) §6 が「校正（正例・負例・別実装・評価側障害）で妥当性を確認してから確定する」としていた条件を満たした。校正 13 ケースが期待と完全一致（[inner/calibration/README.md](../inner/calibration/README.md) §2）。ただし校正は部分検証であり（同 §5）、この確定は「評価器がこの範囲で使える」ことの確認であって「範囲が研究に十分」ことの証明ではない |
 | 2026-09-15 | D-9 | 検査を決定的にするため、金額は `0.00` 形式（小数点は `.`）とし、旧 JavaScript が依存する表示識別子（`row-{id}` `item-count-{id}` `data-id` `cart-total` `cart-status`）を外部契約として維持する。 | Issue #4。[quality-spec.md](quality-spec.md) §4.5 |
 | 2026-09-15 | D-8 | 旧実装の不具合は保持しない。存在しないジャンル・アルバムは 404、モデル変更で DB を破棄しない、削除時の残数量は 0、住所項目は必須。 | Issue #4。[quality-spec.md](quality-spec.md) §1.1 |
 | 2026-09-15 | D-7 | `sample2` は後日 private 化する（ユーザー判断）。private 化されるまでは、採点コード（`inner/evaluator/`）と fixture（`inner/fixtures/`）を含む本リポジトリを実装エージェントへ配布しない。実装役へは旧リポジトリの固定コミットのみを渡す。 | Issue #4「研究者用の最終評価ケースと採点コードは、実装エージェントが取得・変更できない領域に分ける」「公開リポジトリへ非公開資材をコミットしない」への対処。ユーザー回答: 後日 private にする |

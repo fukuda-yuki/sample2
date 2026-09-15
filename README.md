@@ -15,7 +15,10 @@
 | [#2](https://github.com/fukuda-yuki/sample2/issues/2) | sample1 再利用資産の棚卸し | [docs/sample1-inventory.md](docs/sample1-inventory.md) |
 | [#3](https://github.com/fukuda-yuki/sample2/issues/3) | 題材・移行課題の選定 | [docs/topic-selection.md](docs/topic-selection.md) |
 | [#4](https://github.com/fukuda-yuki/sample2/issues/4) | 内側: 品質評価仕様と評価器 | [docs/quality-spec.md](docs/quality-spec.md), [docs/evaluator.md](docs/evaluator.md), [inner/](inner/) |
-| [#5](https://github.com/fukuda-yuki/sample2/issues/5) | 外側: 実験実行基盤 | [docs/outer-harness.md](docs/outer-harness.md), [outer/](outer/) |
+| [#5](https://github.com/fukuda-yuki/sample2/issues/5) | 外側: 実験実行基盤 | [docs/outer-harness.md](docs/outer-harness.md), [outer/](outer/)（**未作成**） |
+
+表の「成果物」は各 Issue で作る予定のもの。**未作成のものは上のように明示する。**
+`docs/outer-harness.md` と `outer/` は #5 で作る。
 
 ## リポジトリ構成
 

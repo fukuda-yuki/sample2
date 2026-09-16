@@ -100,6 +100,18 @@ class NormalizeTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             usage.normalize(events, ['a'], True)
 
+    def test_events_from_another_run_are_rejected(self):
+        """A single foreign run id is not "mixed": it is simply not this Run."""
+        with self.assertRaises(ValueError):
+            usage.normalize([event('a', 'e1', 'r1', 1, 1, run_id='r1')], ['a'], True,
+                            run_id='r2')
+
+    def test_matching_run_id_is_accepted(self):
+        result = usage.normalize([event('a', 'e1', 'r1', 1, 1, run_id='r1')], ['a'], True,
+                                 run_id='r1')
+        self.assertTrue(result['usage_complete'])
+        self.assertEqual('r1', result['run_id'])
+
     def test_negative_counts_are_rejected(self):
         with self.assertRaises(ValueError):
             usage.normalize([event('a', 'e1', 'r1', -1, 1)], ['a'], True)

@@ -18,6 +18,9 @@ public sealed class AppHost : IDisposable
 
     public string PublishDir { get; private set; }
 
+    /// <summary>成果物の複製。発行はこの複製に対して行う（成果物を書き換えないため）。</summary>
+    public string SourceDir { get; private set; }
+
     public string DatabasePath { get; private set; }
 
     public string WorkDir { get; private set; }
@@ -47,6 +50,7 @@ public sealed class AppHost : IDisposable
         ArtifactPath = Path.GetFullPath(artifactPath);
         WorkDir = Path.GetFullPath(workDir);
         EvidenceDir = Path.GetFullPath(evidenceDir);
+        SourceDir = Path.Combine(WorkDir, "source");
         PublishDir = Path.Combine(WorkDir, "publish");
         DatabasePath = Path.Combine(WorkDir, "store.sqlite");
         Port = FreePort();
@@ -103,11 +107,49 @@ public sealed class AppHost : IDisposable
     public (int ExitCode, string StdOut, string StdErr) Publish()
     {
         Directory.CreateDirectory(PublishDir);
+        // 成果物は読み取り専用として扱う。`dotnet publish` の既定では中間ファイルと
+        // ビルド出力がプロジェクトの下（`obj/` `bin/`）に書かれるため、成果物を直接発行すると
+        // 採点の前後で成果物の中身が変わる。作業ディレクトリに複製してから発行する。
+        var project = CopySourceProject();
         return RunProcess(
             "dotnet",
-            $"publish \"{WebProjectPath}\" -c Release -o \"{PublishDir}\" --nologo",
-            Path.GetDirectoryName(WebProjectPath),
+            $"publish \"{project}\" -c Release -o \"{PublishDir}\" --nologo",
+            Path.GetDirectoryName(project),
             600);
+    }
+
+    /// <summary>
+    /// 成果物を作業ディレクトリへ複製し、選んだプロジェクトの複製先を返す。
+    /// リンクは辿らない（成果物には含まれない。回収が特殊ファイルを拒否する）。
+    /// </summary>
+    public string CopySourceProject()
+    {
+        if (Directory.Exists(SourceDir))
+        {
+            Directory.Delete(SourceDir, true);
+        }
+
+        CopyTree(ArtifactPath, SourceDir);
+        return Path.Combine(SourceDir, Path.GetRelativePath(ArtifactPath, WebProjectPath));
+    }
+
+    private static void CopyTree(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var directory in Directory.GetDirectories(source))
+        {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            {
+                continue;
+            }
+
+            CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        }
+
+        foreach (var file in Directory.GetFiles(source))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), true);
+        }
     }
 
     public string FindEntryAssembly()

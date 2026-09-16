@@ -4,7 +4,8 @@ It produces the same hand-over shape so the outer harness's own rules
 (duplicate refusal, mismatch rejection, fault classification, timeout and
 process-tree teardown) can be tested without running the real evaluator.
 The mode comes from HARNESS_STUB_MODE. Modes: ok, fault, no-output, sleep,
-blocked, fail-critical, mismatch-{task,spec,artifact,version,path},
+blocked, fail-critical, mismatch-{task,spec,artifact,version,path}, work-marker
+(leaves a file in the work directory, like a scoring run's database),
 manifest-mismatch (claims a different evaluator build than the one invoked).
 """
 import json
@@ -52,6 +53,12 @@ def main():
             index += 1
     out = Path(options['out'])
     artifact = Path(options['artifact'])
+    # The same rule the real evaluator enforces: a scoring run starts from an
+    # empty work directory, so a reused one is a contract violation, not a score.
+    work = Path(options['work'])
+    if work.exists() and any(work.iterdir()):
+        sys.stderr.write('stub: work directory is not empty\n')
+        return 2
     if mode == 'no-output':
         sys.stderr.write('stub: produced nothing\n')
         return 1
@@ -115,6 +122,9 @@ def main():
     write_json(out / 'evaluation.json', output)
     (out / 'results.jsonl').write_text('', encoding='utf-8')
     write_manifest(out, version, artifact_hash, claimed_build)
+    if mode == 'work-marker':
+        # Leaves something behind, like a scoring run's SQLite file would.
+        (work / 'store.sqlite').write_text('leftover\n', encoding='utf-8')
     return 0
 
 

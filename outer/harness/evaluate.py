@@ -150,29 +150,42 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     existing = read_index(run_dir)
     sequence = int(sequence) if sequence is not None else len(existing) + 1
     independent_hash = util.artifact_hash(frozen)
+    # 採点ごとに空の作業ディレクトリを使う。前の採点の SQLite ファイルや生成物を
+    # 引き継ぐと「毎回空のデータベースから始める」という初期条件を満たさない
+    # （docs/quality-spec.md §4.1）。
+    work_dir = run_dir / 'evaluation-work' / '{:03d}'.format(sequence)
     command = evaluator_command(repo, evaluator) + [
         '--artifact', str(frozen), '--out', '', '--spec', str(spec),
         '--catalog', str(catalog), '--evaluation-version', str(version),
-        '--sequence', str(sequence), '--work', str(run_dir / 'evaluation-work')]
-    temporary = evaluations / ('.tmp-{}-{}'.format(sequence, uuid.uuid4().hex))
-    temporary.mkdir(parents=True)
-    command[command.index('--out') + 1] = str(temporary)
+        '--sequence', str(sequence), '--work', str(work_dir)]
+    frozen_hash = run_mod.read_snapshot(run_dir).get('artifact_sha256')
+    if frozen_hash != independent_hash:
+        # 回収の時点で固定した成果物と frozen/ が違う。固定後の書き換えを採点して
+        # 採用すると、固定した成果物に対する判定ではなくなる（docs/outer-harness.md §6.5）。
+        return _refuse_scoring(
+            run_dir, evaluations, sequence,
+            [{'check': 'artifact_sha256', 'expected': frozen_hash, 'actual': independent_hash}],
+            '回収時に固定した成果物と frozen/ の内容が一致しないため採点しません',
+            run_id=run_id, version=version, independent_hash=independent_hash,
+            spec_sha256=spec_sha256, command=command,
+            evaluator_sha256=evaluator_sha256, artifact_sha256_frozen=frozen_hash)
     if pinned_evaluator and evaluator_sha256 != pinned_evaluator:
         # Refuse to score, but keep the attempt so the refusal is diagnosable
         # from the record alone (both values are in the mismatch entry).
-        target = evaluations / ('rejected_mismatch-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
-        record = _base_record(run_id, sequence, version, None, independent_hash,
-                              spec_sha256, 'rejected_mismatch', None,
-                              [{'check': 'evaluator_sha256', 'expected': pinned_evaluator,
-                                'actual': evaluator_sha256}], command,
-                              evaluator_sha256=evaluator_sha256,
-                              evaluator_sha256_pinned=pinned_evaluator)
-        record['reason'] = '評価器が条件に固定したビルドと一致しないため採点しません'
-        temporary.rename(target)
-        record['directory'] = 'evaluations/' + target.name
-        _write_record(target, record)
-        _append_index(run_dir, record)
-        return record
+        return _refuse_scoring(
+            run_dir, evaluations, sequence,
+            [{'check': 'evaluator_sha256', 'expected': pinned_evaluator,
+              'actual': evaluator_sha256}],
+            '評価器が条件に固定したビルドと一致しないため採点しません',
+            run_id=run_id, version=version, independent_hash=independent_hash,
+            spec_sha256=spec_sha256, command=command,
+            evaluator_sha256=evaluator_sha256, evaluator_sha256_pinned=pinned_evaluator)
+    temporary = evaluations / ('.tmp-{}-{}'.format(sequence, uuid.uuid4().hex))
+    temporary.mkdir(parents=True)
+    command[command.index('--out') + 1] = str(temporary)
+    if work_dir.exists():
+        shutil.rmtree(work_dir)
+    work_dir.mkdir(parents=True)
     evidence = run_dir / 'evidence'
     evidence.mkdir(exist_ok=True)
     environment = dict(os.environ)
@@ -187,7 +200,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                               spec_sha256, 'evaluator_fault', None, [], command,
                               evaluator_sha256=evaluator_sha256,
                               evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
-                              timed_out=timed_out, timeout_seconds=timeout)
+                              timed_out=timed_out, timeout_seconds=timeout,
+                              work_dir=str(work_dir), artifact_sha256_frozen=frozen_hash)
         temporary.rename(target)
         record['reason'] = ('評価器の実行が上限を超えたため停止しました'
                             if timed_out else '評価器が evaluation.json を出力しませんでした')
@@ -205,7 +219,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                           spec_sha256, state, output, mismatches, command,
                           evaluator_sha256=evaluator_sha256,
                           evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
-                          timeout_seconds=timeout)
+                          timeout_seconds=timeout, work_dir=str(work_dir),
+                          artifact_sha256_frozen=frozen_hash)
     if state == 'scored':
         evaluation_id = output.get('evaluationId')
         if not evaluation_id:
@@ -263,7 +278,8 @@ def _reported_evaluator_sha256(directory):
 def _base_record(run_id, sequence, version, exit_code, independent_hash, spec_sha256,
                  state, output, mismatches, command, *, evaluator_sha256=None,
                  evaluator_sha256_reported=None, evaluator_sha256_pinned=None,
-                 timed_out=False, timeout_seconds=None):
+                 timed_out=False, timeout_seconds=None, work_dir=None,
+                 artifact_sha256_frozen=None):
     return {
         'schema_version': 1,
         'run_id': run_id,
@@ -282,6 +298,8 @@ def _base_record(run_id, sequence, version, exit_code, independent_hash, spec_sh
         'spec_sha256': spec_sha256,
         'artifact_sha256_outer': independent_hash,
         'artifact_sha256_reported': (output or {}).get('artifactSha256'),
+        'artifact_sha256_frozen': artifact_sha256_frozen,
+        'work_dir': work_dir,
         'verdict': (output or {}).get('verdict'),
         'quality': (output or {}).get('quality'),
         'requirement_count': (output or {}).get('requirementCount'),
@@ -301,6 +319,29 @@ def _write_record(target, record):
     util.write_new_json(target / 'record.json', record)
 
 
+def _refuse_scoring(run_dir, evaluations, sequence, mismatches, reason, *, run_id,
+                    version, independent_hash, spec_sha256, command,
+                    evaluator_sha256=None, evaluator_sha256_pinned=None,
+                    artifact_sha256_frozen=None):
+    """Record a refused scoring attempt without invoking the evaluator.
+
+    The attempt is kept so the refusal is diagnosable from the record alone:
+    both the expected and the actual value are in the mismatch entry.
+    """
+    target = evaluations / ('rejected_mismatch-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
+    target.mkdir(parents=True)
+    record = _base_record(run_id, sequence, version, None, independent_hash,
+                          spec_sha256, 'rejected_mismatch', None, mismatches, command,
+                          evaluator_sha256=evaluator_sha256,
+                          evaluator_sha256_pinned=evaluator_sha256_pinned,
+                          artifact_sha256_frozen=artifact_sha256_frozen)
+    record['reason'] = reason
+    record['directory'] = 'evaluations/' + target.name
+    _write_record(target, record)
+    _append_index(run_dir, record)
+    return record
+
+
 def _append_index(run_dir, record):
     util.append_line(Path(run_dir) / 'evaluations' / 'index.jsonl',
                      {key: record[key] for key in
@@ -308,7 +349,7 @@ def _append_index(run_dir, record):
                         'scoring_state', 'adopted', 'evaluator_exit_code',
                         'evaluator_sha256', 'evaluator_sha256_pinned', 'verdict',
                         'quality', 'spec_sha256', 'artifact_sha256_outer', 'mismatches',
-                        'recorded_at', 'directory') if key in record})
+                        'work_dir', 'recorded_at', 'directory') if key in record})
 
 
 def publish_evaluator(repo):

@@ -93,6 +93,34 @@ public static class Checks
         return null;
     }
 
+    /// <summary>
+    /// 静的検査（C-027〜C-030）の前提。成果物がビルド・起動していないために静的な観測が
+    /// 得られていない場合は、評価側の障害ではなく成果物の欠陥として未評価にする
+    /// （ビルドの失敗自体は R-001 が不合格になる）。評価側の障害は、dotnet が見つからない
+    /// 等の環境要因と評価器自身の内部エラーに限る（docs/evaluator.md §2）。
+    /// </summary>
+    private static CheckResult StaticPrecondition(RunState state, string requirementId, string checkId, string input)
+    {
+        if (state.EvaluatorFault != null)
+        {
+            return Make(state, requirementId, checkId, input, Judgement.Error, "評価側の障害: " + state.EvaluatorFault, string.Empty);
+        }
+
+        if (state.Static == null)
+        {
+            return Make(
+                state,
+                requirementId,
+                checkId,
+                input,
+                Judgement.Blocked,
+                "未評価: 成果物がビルド・起動していないため静的検査を実行できませんでした。" + state.PublishDetail,
+                string.Empty);
+        }
+
+        return null;
+    }
+
     private static CheckResult C001(RunState state)
     {
         const string input = "成果物ディレクトリを dotnet publish する";
@@ -791,6 +819,12 @@ public static class Checks
     private static CheckResult C027(RunState state)
     {
         const string input = "起動対象プロジェクトの csproj を読む";
+        var pre = StaticPrecondition(state, "R-026", "C-027", input);
+        if (pre != null)
+        {
+            return pre;
+        }
+
         var scenario = state.Static;
         if (!scenario.Ok)
         {
@@ -815,6 +849,12 @@ public static class Checks
     private static CheckResult C028(RunState state)
     {
         const string input = "起動対象プロジェクトの csproj に System.Web 参照がないこと";
+        var pre = StaticPrecondition(state, "R-027", "C-028", input);
+        if (pre != null)
+        {
+            return pre;
+        }
+
         var scenario = state.Static;
         if (!scenario.Ok)
         {
@@ -845,6 +885,12 @@ public static class Checks
             return pre;
         }
 
+        var staticPre = StaticPrecondition(state, "R-028", "C-029", input);
+        if (staticPre != null)
+        {
+            return staticPre;
+        }
+
         var scenario = state.Static;
         if (!scenario.Ok)
         {
@@ -864,6 +910,12 @@ public static class Checks
     private static CheckResult C030(RunState state)
     {
         const string input = "成果物ツリーを静的に走査する";
+        var pre = StaticPrecondition(state, "R-029", "C-030", input);
+        if (pre != null)
+        {
+            return pre;
+        }
+
         var scenario = state.Static;
         if (!scenario.Ok)
         {

@@ -12,6 +12,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from . import util
+
 RUNNERS = ('dummy', 'manual')
 
 # Scenarios the dummy runner can produce. Every one is a non-model situation the
@@ -92,6 +94,16 @@ def _to_crlf_with_bom(workspace):
     return changed
 
 
+def _ignored_directories(directory, names):
+    """Skip the directories that collection and hashing drop anyway.
+
+    The seed is a fixture on disk; a leftover `bin/` or `obj/` in it must not
+    leak into the recorded workspace.
+    """
+    return [name for name in names
+            if name.lower() in util.EXCLUDED_DIRECTORIES]
+
+
 def run_dummy(run_id, workspace, usage_dir, scenario, seed=None, timeout_note=None):
     workspace, usage_dir = Path(workspace), Path(usage_dir)
     if scenario not in DUMMY_SCENARIOS:
@@ -106,7 +118,7 @@ def run_dummy(run_id, workspace, usage_dir, scenario, seed=None, timeout_note=No
         for entry in sorted(seed.iterdir()):
             target = workspace / entry.name
             if entry.is_dir():
-                shutil.copytree(entry, target)
+                shutil.copytree(entry, target, ignore=_ignored_directories)
             else:
                 shutil.copy2(entry, target)
 

@@ -7,9 +7,12 @@
 
   校正の 4 分類（docs/quality-spec.md §7.1）をすべて含む。
     1. 正例            : inner/fixtures/reference
-    2. 重要な負例      : inner/fixtures/negatives の 7 種
-    3. 妥当な別実装    : inner/fixtures/alternative
+    2. 重要な負例      : inner/fixtures/negatives の 9 種
+    3. 妥当な別実装    : inner/fixtures/alternative と inner/fixtures/variants の 2 種
     4. 評価側の障害    : 成果物なし / 台帳に実装のない検査 ID
+
+  `wipe-orders-only` だけは期待が pass である。注文を消しても R-005 が落ちない
+  ことを固定し、見逃しを「直った」ことにしないための負例である（§5 の限界）。
 
   期待は実行前に宣言する。各ケースについて「期待する判定」「不合格になる要件の
   集合」「未評価になる要件の集合」「終了コード」「品質点の有無」を固定し、実結果と
@@ -30,6 +33,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent (Split-Path -Parent $here)
 $evaluator = Join-Path $repo 'inner\evaluator\MusicStore.Evaluator'
 $negatives = Join-Path $repo 'inner\fixtures\negatives\apply.ps1'
+$variants = Join-Path $repo 'inner\fixtures\variants\apply.ps1'
 $reference = Join-Path $repo 'inner\fixtures\reference'
 $alternative = Join-Path $repo 'inner\fixtures\alternative'
 $specSource = Join-Path $repo 'inner\spec\requirements.json'
@@ -48,12 +52,13 @@ if (-not (Test-Path $dll)) {
 }
 
 # 成果物ハッシュは bin/obj を無視するが、成果物の中身を追跡済みの状態に揃えておく。
+# 発行は成果物の複製に対して行うので校正が bin/obj を作ることはないが、以前の実行や
+# 手作業で残っていると、プロジェクト直下の `obj` が生成物を取り込み、二重定義で
+# ビルドに失敗する。プロジェクトの下にあるものを消す。
 foreach ($fixture in @($reference, $alternative)) {
-    foreach ($dir in @('bin', 'obj')) {
-        $path = Join-Path $fixture $dir
-        if (Test-Path $path) {
-            Remove-Item -Recurse -Force $path
-        }
+    foreach ($dir in Get-ChildItem -Path $fixture -Recurse -Directory -Force |
+        Where-Object { $_.Name -in @('bin', 'obj') }) {
+        Remove-Item -Recurse -Force $dir.FullName
     }
 }
 
@@ -106,6 +111,7 @@ function Add-Case {
         [string[]]$ExpectedFailed,
         [string[]]$ExpectedBlocked,
         [string]$Negative = $null,
+        [string]$Variant = $null,
         [string]$Spec = $null,
         [string]$Catalog = $null,
         [int]$ExpectedExitCode = 0,
@@ -119,6 +125,7 @@ function Add-Case {
             artifact            = $Artifact
             sequence            = $Sequence
             negative            = $Negative
+            variant             = $Variant
             spec                = $Spec
             catalog             = $Catalog
             expectedVerdict     = $ExpectedVerdict
@@ -175,6 +182,23 @@ Add-Case -CaseId 'neg-unknown-album-500' -Kind '重要な負例' -Artifact $null
 Add-Case -CaseId 'neg-legacy-wrapper' -Kind '重要な負例' -Artifact $null -Negative 'legacy-wrapper' -Sequence 16 `
     -ExpectedVerdict 'fail' -ExpectedFailed @('R-029') -ExpectedBlocked @() `
     -Note '旧実装を起動する記述を残す。静的検査の R-029 だけが落ちることを期待する。'
+
+Add-Case -CaseId 'neg-compile-error' -Kind '重要な負例' -Artifact $null -Negative 'compile-error' -Sequence 17 `
+    -ExpectedVerdict 'fail_critical' -ExpectedFailed @('R-001') `
+    -ExpectedBlocked @('R-002', 'R-003', 'R-004', 'R-005', 'R-006', 'R-007', 'R-008', 'R-009', 'R-010', 'R-011', 'R-012', 'R-013', 'R-014', 'R-015', 'R-016', 'R-017', 'R-018', 'R-019', 'R-020', 'R-021', 'R-022', 'R-023', 'R-024', 'R-025', 'R-028') `
+    -Note '成果物に構文エラーを入れる。ビルドの R-001 だけが不合格になり、起動できないために観測できない要件は未評価になることを期待する。評価側の障害（error）にしてはならない。'
+
+Add-Case -CaseId 'neg-wipe-orders-only' -Kind '重要な負例' -Artifact $null -Negative 'wipe-orders-only' -Sequence 18 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note '再起動のたびに注文を消す。注文番号が変わるため R-005 はこれを見逃す。**期待は pass** であり、見逃しを校正の限界として固定する（§5）。'
+
+Add-Case -CaseId 'var-single-quoted-attributes' -Kind '妥当な別実装' -Artifact $null -Variant 'single-quoted-attributes' -Sequence 20 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note '観測される識別子を等価な単一引用符で書く。引用符の種類で落とさないことを期待する。'
+
+Add-Case -CaseId 'var-legacy-name-kept' -Kind '妥当な別実装' -Artifact $null -Variant 'legacy-name-kept' -Sequence 21 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note '旧名称を名前空間・アセンブリ名に残す。名前の一致を旧実装への依存と誤認しないことを期待する。'
 
 $missingArtifact = Join-Path $runs 'no-such-artifact'
 Add-Case -CaseId 'fault-missing-artifact' -Kind '評価側の障害' -Artifact $missingArtifact -Sequence 90 `
@@ -273,6 +297,15 @@ foreach ($case in $plan) {
         & $negatives -Name $case.negative -Out $artifact
         if (-not (Test-Path $artifact)) {
             throw "負例 $($case.negative) の作成に失敗しました: $artifact"
+        }
+    }
+
+    if ($case.variant) {
+        $artifact = Join-Path $runs "var-$($case.variant)\artifact"
+        Write-Host "別表現 $($case.variant) を作成します。"
+        & $variants -Name $case.variant -Out $artifact
+        if (-not (Test-Path $artifact)) {
+            throw "別表現 $($case.variant) の作成に失敗しました: $artifact"
         }
     }
 

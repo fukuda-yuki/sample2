@@ -133,6 +133,33 @@ switch ($Name) {
             '存在しないアルバムを 404 にしない'
     }
 
+    'compile-error' {
+        # 成果物に構文エラーを入れる。publish が失敗して R-001 が不合格になる。
+        # 起動できないために観測できない要件は「未評価（blocked）」であり、
+        # 評価器の故障（error）にしてはならない（docs/quality-spec.md §4.1）。
+        Add-File 'MusicStore.Web\BrokenSyntax.cs' `
+            @'
+namespace MusicStore.Web;
+
+// 校正用: わざと構文エラーを含む。
+internal static class BrokenSyntax
+{
+    public static int Value => ;
+}
+'@ `
+            '成果物に構文エラーを入れる'
+    }
+
+    'wipe-orders-only' {
+        # 再起動のたびに注文だけを消す（カタログは残す）。**期待する判定は pass である。**
+        # 注文番号は AUTOINCREMENT で増えるため再起動後も番号が変わり、R-005 はこの欠落を見逃す。
+        # 見逃しを「直った」ことにせず、校正の限界として記録するための負例（docs/quality-spec.md §7.3）。
+        Edit-File 'MusicStore.Web\Program.cs' `
+            '    db.Database.EnsureCreated();' `
+            ('    db.Database.EnsureCreated();' + $nl + '    db.Orders.RemoveRange(db.Orders);' + $nl + '    db.SaveChanges();') `
+            '再起動時に注文を消す'
+    }
+
     'legacy-wrapper' {
         # 旧実装を起動する記述を残す。R-029 が不合格になる（静的な検査のみ）。
         Add-File 'MusicStore.Web\LegacyBridge.cs' `

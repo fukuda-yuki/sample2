@@ -930,8 +930,8 @@ public static class Checks
             input,
             ok,
             ok
-                ? "成果物ツリーに MvcMusicStore / iisexpress / System.Web の記述は見つかりませんでした。"
-                : $"旧実装を示す記述が {scenario.LegacyReferences.Count} 件見つかりました: {string.Join(", ", scenario.LegacyReferences.Take(10))}",
+                ? "成果物ツリーに旧実装を参照・起動する記述は見つかりませんでした。"
+                : $"旧実装を参照・起動する記述が {scenario.LegacyReferences.Count} 件見つかりました: {string.Join(", ", scenario.LegacyReferences.Take(10))}",
             string.Join(Environment.NewLine, scenario.LegacyReferences));
     }
 

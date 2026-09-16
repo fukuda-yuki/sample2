@@ -229,7 +229,11 @@ public sealed class StaticResult : ScenarioResult
 
     public bool HasSystemWeb { get; set; }
 
-    public bool DatabaseFileExists { get; set; }
+    /// <summary>
+    /// 指定パスに SQLite ファイルが作られたか。静的走査の時点ではアプリがまだ
+    /// 起動していないため、値ではなく参照のたびに測る（C-029）。
+    /// </summary>
+    public bool DatabaseFileExists => !string.IsNullOrEmpty(DatabasePath) && File.Exists(DatabasePath);
 
     public string DatabasePath { get; set; }
 
@@ -489,7 +493,6 @@ public static class Scenarios
         result.HasSystemWeb = Regex.IsMatch(result.ProjectText, "System\\.Web", RegexOptions.IgnoreCase);
 
         result.DatabasePath = state.Host.DatabasePath;
-        result.DatabaseFileExists = File.Exists(state.Host.DatabasePath);
 
         result.LegacyReferences = FindLegacyReferences(state.ArtifactPath);
 
@@ -498,11 +501,25 @@ public static class Scenarios
 
     private static readonly string[] ScannedExtensions = { ".csproj", ".sln", ".cs", ".cshtml", ".config", ".props", ".targets", ".json" };
 
-    private static readonly string[] LegacyTokens = { "MvcMusicStore", "iisexpress", "System.Web" };
+    /// <summary>
+    /// 旧実装を「参照または起動する」記述。名前空間やアセンブリ名に旧名称を使うこと自体は
+    /// 移行の妨げではないので、名前の一致ではなく参照・起動の記述を見る。
+    /// ヒューリスティックであり、間接的なラッパー化を証明しない（docs/quality-spec.md §7.2）。
+    /// </summary>
+    private static readonly Regex[] LegacySignals =
+    {
+        new Regex(@"MvcMusicStore\.(?:exe|dll|pdb|csproj|sln)\b", RegexOptions.IgnoreCase),
+        new Regex(@"\bMVC-Music-Store\b", RegexOptions.IgnoreCase),
+        new Regex(@"\biisexpress\b", RegexOptions.IgnoreCase),
+        new Regex(@"\bSystem\.Web\b", RegexOptions.IgnoreCase),
+        new Regex(@"\bnet4[0-9]{0,2}\b", RegexOptions.IgnoreCase),
+        new Regex(@"\bTargetFrameworkVersion\b", RegexOptions.IgnoreCase),
+        new Regex(@"\bGlobal\.asax\b", RegexOptions.IgnoreCase),
+        new Regex(@"\bpackages\.config\b", RegexOptions.IgnoreCase),
+    };
 
     /// <summary>
-    /// 成果物ツリーを静的に走査し、旧実装の名前・旧フレームワーク名を探す。
-    /// ヒューリスティックであり、間接的なラッパー化を証明しない（docs/quality-spec.md §7.2）。
+    /// 成果物ツリーを静的に走査し、旧実装への参照・起動の記述を探す。
     /// </summary>
     public static List<string> FindLegacyReferences(string artifactPath)
     {
@@ -532,11 +549,11 @@ public static class Scenarios
                 continue;
             }
 
-            foreach (var token in LegacyTokens)
+            foreach (var signal in LegacySignals)
             {
-                if (text.Contains(token, StringComparison.OrdinalIgnoreCase))
+                foreach (Match match in signal.Matches(text))
                 {
-                    found.Add(relative + " :: " + token);
+                    found.Add(relative + " :: " + match.Value);
                 }
             }
         }

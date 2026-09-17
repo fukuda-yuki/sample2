@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import util
+from .security import child_environment
 
 END_REASONS = ('completed', 'agent_error', 'timeout', 'stop_unconfirmed', 'environment_failure')
 EXECUTION_STATES = ('not_started', 'running') + END_REASONS
@@ -40,6 +41,9 @@ def run_id_for(task_id, condition_id, attempt):
 
 
 def run_dir_for(runs_dir, run_id):
+    import re
+    if not isinstance(run_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,195}', run_id):
+        raise ValueError('Invalid Run identifier')
     return Path(runs_dir) / run_id
 
 
@@ -95,13 +99,17 @@ def _copy_input(resolved, destination):
         shutil.copy2(resolved, destination)
 
 
-def create_run(repo, runs_dir, task_id, condition_id, attempt, inputs):
+def create_run(repo, runs_dir, task_id, condition_id, attempt, inputs, *, resolved_condition=None):
     """Create a run directory exclusively. Never overwrite an existing run.
 
     Every input is validated before the run directory exists, so a refused
     input leaves no half-made run behind.
     """
-    condition = load_condition(repo, task_id)
+    condition = resolved_condition or load_condition(repo, task_id)
+    import re
+    if not all(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,95}', x or '')
+               for x in (task_id, condition_id)) or type(attempt) is not int or attempt < 1:
+        raise ValueError('Invalid task, condition or attempt')
     if condition.get('condition_id') != condition_id:
         raise ValueError('条件の condition_id が一致しません: ' + str(condition.get('condition_id')))
     if condition.get('task_id') != task_id:
@@ -128,7 +136,7 @@ def create_run(repo, runs_dir, task_id, condition_id, attempt, inputs):
         total_bytes += size
         file_count += len(files)
     manifest = {
-        'schema_version': 1,
+        'schema_version': condition.get('schema_version', 1),
         'run_id': run_id,
         'task_id': task_id,
         'task_title': condition.get('task_title'),
@@ -230,7 +238,7 @@ def start_run(repo, runs_dir, run_id, runner, *, synthetic=False, scenario=None,
                '--run-id', run_id]
     if seed is not None:
         command += ['--seed', str(seed)]
-    environment = dict(os.environ)
+    environment = child_environment()
     # The harness package is imported from wherever this file lives, not from the
     # run's repository, so a test repository does not need to contain outer/.
     environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
@@ -339,7 +347,11 @@ def collect_run(runs_dir, run_id):
     util.write_new_json(run_dir / 'snapshot.json', snapshot)
     manifest['submission_fixed'] = True
     save_manifest(runs_dir, run_id, manifest)
-    _normalize_usage(run_dir, run_id)
+    if manifest.get('schema_version') == 2:
+        from .live_usage import collect as collect_usage
+        collect_usage(run_dir)
+    else:
+        _normalize_usage(run_dir, run_id)
     return manifest, snapshot
 
 

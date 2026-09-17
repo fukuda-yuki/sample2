@@ -62,6 +62,12 @@ class RunFixture:
 
 class ScoreTestCase(RunFixture, unittest.TestCase):
 
+    def test_success_json_from_a_failed_evaluator_is_not_adopted(self):
+        record = self.score('unexpected-exit')
+        self.assertEqual('evaluator_fault', record['scoring_state'])
+        self.assertFalse(record['adopted'])
+        self.assertIsNone(aggregate.row_for(self.runs, self.run_dir.name)['quality'])
+
     def test_scored_run_records_the_evaluator_output_unchanged(self):
         record = self.score('ok')
         self.assertEqual('scored', record['scoring_state'])

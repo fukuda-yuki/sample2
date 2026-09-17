@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Collection excludes. Must be a superset of the evaluator's exclusions
 # (bin, obj, .git) or the artifact hash the evaluator computes will differ.
-EXCLUDED_DIRECTORIES = ('bin', 'obj', '.git', '.vs', 'node_modules', 'TestResults')
+EXCLUDED_DIRECTORIES = ('bin', 'obj', '.git', '.vs', 'node_modules', 'testresults')
 EXCLUDED_SUFFIXES = ('.sqlite', '.sqlite3', '.db', '.db-shm', '.db-wal', '.user')
 
 # Text files whose line endings and BOM are fixed at collection time.
@@ -99,6 +99,7 @@ def artifact_files(root):
     the frozen directory never holds them, so the two hashes still agree.
     """
     root = Path(root)
+    reject_links(root)
     files = []
     for path in root.rglob('*'):
         if not path.is_file():
@@ -107,7 +108,14 @@ def artifact_files(root):
         if is_excluded(relative.parts) or path.suffix.lower() in EXCLUDED_SUFFIXES:
             continue
         files.append(str(relative))
-    return sorted(files)
+    return sorted(files, key=lambda name: name.replace('/', '\\').encode('utf-16-be'))
+
+
+def reject_links(root):
+    root = Path(root)
+    for path in [root, *root.rglob('*')]:
+        if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
+            raise ValueError('Links are not allowed in collected artifacts')
 
 
 def artifact_hash(root):
@@ -144,6 +152,7 @@ def normalize_text(data):
 def collect(workspace, frozen, *, normalize=True):
     """Copy workspace to frozen, excluding generated files and fixing text bytes."""
     workspace, frozen = Path(workspace), Path(frozen)
+    reject_links(workspace)
     if frozen.exists():
         raise FileExistsError(frozen)
     if not workspace.is_dir():
@@ -184,6 +193,7 @@ def collect(workspace, frozen, *, normalize=True):
 def tree_hashes(root):
     """Relative path -> {sha256, bytes} for every regular file under root."""
     root = Path(root)
+    reject_links(root)
     entries = {}
     for path in sorted(root.rglob('*'), key=lambda p: str(p.relative_to(root))):
         if path.is_file():

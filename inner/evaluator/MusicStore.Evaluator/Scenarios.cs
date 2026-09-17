@@ -514,11 +514,12 @@ public static class Scenarios
         }
 
         result.ProjectText = File.ReadAllText(result.ProjectFile);
-        var tfm = Regex.Match(result.ProjectText, "<TargetFramework>(?<tfm>[^<]+)</TargetFramework>", RegexOptions.IgnoreCase);
-        result.TargetFramework = tfm.Success ? tfm.Groups["tfm"].Value.Trim() : null;
-        var sdk = Regex.Match(result.ProjectText, "Sdk\\s*=\\s*\"(?<sdk>[^\"]+)\"", RegexOptions.IgnoreCase);
-        result.Sdk = sdk.Success ? sdk.Groups["sdk"].Value : null;
-        result.HasSystemWeb = Regex.IsMatch(result.ProjectText, "System\\.Web", RegexOptions.IgnoreCase);
+        var project = System.Xml.Linq.XDocument.Parse(result.ProjectText);
+        result.TargetFramework = project.Descendants().FirstOrDefault(e => e.Name.LocalName == "TargetFramework")?.Value.Trim();
+        result.Sdk = project.Root?.Attribute("Sdk")?.Value
+            ?? project.Descendants().FirstOrDefault(e => e.Name.LocalName == "Sdk")?.Attribute("Name")?.Value;
+        result.HasSystemWeb = project.Descendants().Where(e => e.Name.LocalName is "Reference" or "PackageReference")
+            .Any(e => (e.Attribute("Include")?.Value ?? "").StartsWith("System.Web", StringComparison.OrdinalIgnoreCase));
 
         result.DatabasePath = state.Host.DatabasePath;
 

@@ -42,7 +42,7 @@ $reference = Join-Path $repo 'inner\fixtures\reference'
 $alternative = Join-Path $repo 'inner\fixtures\alternative'
 $specSource = Join-Path $repo 'inner\spec\requirements.json'
 $catalogSource = Join-Path $repo 'inner\spec\catalog.json'
-$runs = Join-Path $repo 'runs'
+$runs = Join-Path $repo ('runs/_calibration/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss') + '-' + [guid]::NewGuid().ToString('N'))
 $dll = Join-Path $evaluator 'bin\Release\net8.0\MusicStore.Evaluator.dll'
 
 Write-Host '評価器をビルドします。'
@@ -55,21 +55,7 @@ if (-not (Test-Path $dll)) {
     throw "評価器のアセンブリがありません: $dll"
 }
 
-# 成果物ハッシュは bin/obj を無視するが、成果物の中身を追跡済みの状態に揃えておく。
-# 発行は成果物の複製に対して行うので校正が bin/obj を作ることはないが、以前の実行や
-# 手作業で残っていると、プロジェクト直下の `obj` が生成物を取り込み、二重定義で
-# ビルドに失敗する。プロジェクトの下にあるものを消す。
-foreach ($fixture in @($reference, $alternative)) {
-    foreach ($dir in Get-ChildItem -Path $fixture -Recurse -Directory -Force |
-        Where-Object { $_.Name -in @('bin', 'obj') }) {
-        Remove-Item -Recurse -Force $dir.FullName
-    }
-}
-
-if (Test-Path $runs) {
-    Remove-Item -Recurse -Force $runs
-}
-
+# Every invocation owns a new directory. Never remove past Runs or fixtures.
 New-Item -ItemType Directory -Force -Path $runs | Out-Null
 
 $spec = [System.IO.File]::ReadAllText($specSource, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -216,6 +202,14 @@ Add-Case -CaseId 'var-legacy-comment-mention' -Kind '妥当な別実装' -Artifa
     -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
     -Note '旧実装への言及を説明コメントに残す。実際の参照・起動がないため R-029 が落ちないことを期待する。'
 
+Add-Case -CaseId 'var-xml-sdk-notation' -Kind '妥当な別実装' -Artifact $null -Variant 'xml-sdk-notation' -Sequence 24 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note 'Equivalent XML quoting and commented legacy references must preserve all verdicts.'
+
+Add-Case -CaseId 'var-html-entity-nesting' -Kind '妥当な別実装' -Artifact $null -Variant 'html-entity-nesting' -Sequence 25 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note 'HTML entities, nested quantity text and misleading comments must preserve all verdicts.'
+
 $missingArtifact = Join-Path $runs 'no-such-artifact'
 Add-Case -CaseId 'fault-missing-artifact' -Kind '評価側の障害' -Artifact $missingArtifact -Sequence 90 `
     -ExpectedVerdict 'error' -ExpectedFailed @() -ExpectedBlocked @() -ExpectedExitCode 2 -ExpectedQualityNull $true `
@@ -237,6 +231,7 @@ Add-Case -CaseId 'fault-unimplemented-check' -Kind '評価側の障害' -Artifac
 # ---------------------------------------------------------------------------
 # 実行
 # ---------------------------------------------------------------------------
+$plan | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $runs 'calibration-plan.json')
 function Invoke-Evaluation {
     param(
         [string]$CaseId,

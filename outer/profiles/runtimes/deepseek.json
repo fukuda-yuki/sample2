@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "deepseek",
+  "model_id": "deepseek-v4.1-flash",
+  "provider": "opencode-go",
+  "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+  "opencode_version": "1.17.11",
+  "timeout_seconds": 1800,
+  "model_context_tokens": 1000000,
+  "model_output_tokens": 32768,
+  "concurrency": 1,
+  "compaction": {
+    "auto": true,
+    "prune": false
+  },
+  "subagents": false
+}

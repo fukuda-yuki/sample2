@@ -1,5 +1,7 @@
 # sample2
 
+実モデル対応CLIの操作は [検証機ガイド](docs/verification-machine.md)、実測済み・未確認の境界は [検証記録](docs/verification-evidence-20260918.md) にあります。現在は非モデル検証までで、実モデル6 Runの納品受入は未完了です。
+
 既存システムのモダナイズを題材に、**Context Engineering**（特にモデルが実際に受け取る Input コンテキスト）の効果を、品質と Run 全体の input/output token の両面から追う研究のための作業リポジトリ。
 
 `sample1` は旧実験の保存・参照元として残し、旧実験の前提（条件名 `normal` / `anti`、AP-001、旧要件ID、固定分母 57、旧実行許可など）は本リポジトリへ持ち込まない。

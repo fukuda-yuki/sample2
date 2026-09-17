@@ -1,0 +1,10 @@
+{
+  "task_id": "NEW-001",
+  "evaluation_version": "1.0.0",
+  "cases": [
+    {"id":"reference", "kind":"positive", "verdict":"pass", "failed":[], "blocked":[], "exit_code":0, "quality_null":false},
+    {"id":"independent-valid", "kind":"alternative", "verdict":"pass", "failed":[], "blocked":[], "exit_code":0, "quality_null":false},
+    {"id":"critical-defect", "kind":"negative", "verdict":"fail_critical", "failed":["REPLACE-REQUIREMENT-ID"], "blocked":[], "exit_code":0, "quality_null":false},
+    {"id":"environment-unavailable", "kind":"evaluator_fault", "verdict":"error", "failed":[], "blocked":[], "exit_code":2, "quality_null":true}
+  ]
+}

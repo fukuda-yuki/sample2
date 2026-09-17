@@ -26,7 +26,7 @@ if (-not (Test-Path $reference)) {
 }
 
 if (Test-Path $Out) {
-    Remove-Item -Recurse -Force $Out
+    throw 'Fixture output already exists; choose a new path to preserve prior evidence.'
 }
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null

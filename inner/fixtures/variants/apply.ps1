@@ -27,7 +27,7 @@ if (-not (Test-Path $reference)) {
 }
 
 if (Test-Path $Out) {
-    Remove-Item -Recurse -Force $Out
+    throw 'Fixture output already exists; choose a new path to preserve prior evidence.'
 }
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
@@ -86,6 +86,27 @@ function Add-File {
 }
 
 switch ($Name) {
+    'xml-sdk-notation' {
+        Edit-File 'MusicStore.Web\MusicStore.Web.csproj' `
+            '<Project Sdk="Microsoft.NET.Sdk.Web">' `
+            ("<Project Sdk = 'Microsoft.NET.Sdk.Web'>" + $nl + '<!-- <TargetFramework>net48</TargetFramework><Reference Include="System.Web" /> -->') `
+            'Equivalent XML quoting and an inert legacy comment'
+    }
+
+    'html-entity-nesting' {
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<tr id="row-@item.RecordId">' `
+            '<tr id="row&#45;@item.RecordId">' `
+            'HTML entity in an equivalent row identifier'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '@item.Count' '<span>@item.Count</span>' `
+            'Quantity inside a text-preserving child element'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<td id="cart-total">' `
+            '<!-- <td id="cart-total">9999.00</td> --><td id="cart-total">' `
+            'Commented markup must not replace the real total'
+    }
+
     'single-quoted-attributes' {
         # 観測される識別子の属性値を、等価な単一引用符へ変える。
         # 引用符の種類は HTML として等価であり、判定に影響させてはならない（docs/quality-spec.md §4.6）。

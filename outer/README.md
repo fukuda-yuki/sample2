@@ -1,5 +1,7 @@
 # 外側：実験実行基盤（最小経路）
 
+Schema 2 adds the OpenCode/gateway execution path: see the [operator guide](../docs/verification-machine.md) and [acceptance evidence](../docs/verification-evidence-20260918.md). The sections below describe the original schema 1 path. Live delivery acceptance is still pending.
+
 対応 Issue: [#5](https://github.com/fukuda-yuki/sample2/issues/5)。仕様は [docs/outer-harness.md](../docs/outer-harness.md)。
 
 ## 何をするか
@@ -11,7 +13,7 @@
 
 ## 何をしないか
 
-- **モデルを呼ばない。** 実行器は `dummy` と `manual` だけを実装する。モデルを呼ぶ経路は無い。
+- Schema 1 の `dummy` / `manual` 経路はモデルを呼ばない。実モデルの新経路は上記の Schema 2 ガイドを参照する。
 - 評価器の出力を書き換えない。既存の評価ディレクトリを上書きしない。
 - `blocked` `error` を 0 や合格に読み替えない。
 - 並列実行、複数課題、クラウド配備、専用ダッシュボード。これらは #5 の初期範囲に含まれない。

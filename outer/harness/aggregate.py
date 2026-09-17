@@ -77,6 +77,7 @@ def row_for(runs_dir, run_id):
         'run_id': run_id,
         'task_id': manifest.get('task_id'),
         'condition_id': manifest.get('condition_id'),
+        'intervention_id': manifest.get('intervention_id'),
         'attempt': manifest.get('attempt'),
         'runner': (manifest.get('runner') or {}).get('id'),
         'synthetic': manifest.get('synthetic'),
@@ -96,8 +97,40 @@ def row_for(runs_dir, run_id):
         'quality': scoring.get('quality') if scored else None,
         'verdict': scoring.get('verdict') if scored else None,
         'usage': {'state': usage.get('state'),
+                  'usage_complete': usage.get('usage_complete'),
+                  'input_reached': usage.get('input_reached'),
+                  'input_tokens': usage.get('input_tokens'),
+                  'output_tokens': usage.get('output_tokens'),
+                  'cache_read_tokens': usage.get('cache_read_tokens'),
+                  'cache_write_tokens': usage.get('cache_write_tokens'),
+                  'reasoning_tokens': usage.get('reasoning_tokens'),
                   'total_tokens': usage.get('total_tokens'),
                   'observed_tokens': usage.get('observed_tokens'),
                   'observed_request_count': usage.get('observed_request_count')},
         'issues': issues,
     }
+
+
+def compare(runs_dir):
+    """Descriptive comparisons only; never pool changed tasks or runtimes."""
+    import json
+    groups = {}
+    for row in build(runs_dir)['runs']:
+        manifest = run_mod.load_manifest(runs_dir, row['run_id'])
+        profile_files = manifest.get('profile_files', {})
+        identity = {'task': row['task_id'], 'intervention': row['condition_id'],
+                    'profiles': {k: v['sha256'] for k, v in profile_files.items()},
+                    'evaluator_sha256': row['scoring'].get('evaluator_sha256')}
+        key = json.dumps(identity, sort_keys=True)
+        group = groups.setdefault(key, {'identity': identity, 'run_ids': [], 'quality': [],
+            'verdicts': [], 'usage': [], 'execution_states': [], 'measured_count': 0})
+        group['run_ids'].append(row['run_id'])
+        group['quality'].append(row['quality'])
+        group['verdicts'].append(row['verdict'])
+        group['usage'].append(row['usage'])
+        group['execution_states'].append(row['execution']['state'])
+        if row['usage'].get('usage_complete'):
+            group['measured_count'] += 1
+    return {'source': 'saved Runs only; no model or evaluator was invoked',
+            'groups': list(groups.values()),
+            'note': 'Unscored quality and missing usage remain null. These small samples do not establish intervention effects.'}

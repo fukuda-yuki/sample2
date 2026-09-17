@@ -453,7 +453,7 @@ public static class Program
                 .Any(p => p.Equals("bin", StringComparison.OrdinalIgnoreCase)
                     || p.Equals("obj", StringComparison.OrdinalIgnoreCase)
                     || p.Equals(".git", StringComparison.OrdinalIgnoreCase)))
-            .OrderBy(rel => rel, StringComparer.Ordinal)
+            .OrderBy(rel => rel.Replace('/', '\\'), StringComparer.Ordinal)
             .ToList();
 
         foreach (var rel in files)

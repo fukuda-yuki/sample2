@@ -7,10 +7,12 @@ Usage: python outer/verify/verify.py --repo <repo root>
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +34,12 @@ BROKEN_PROJECT = ('<Project Sdk="Microsoft.NET.Sdk.Web">\n'
                   '    <TargetFramework>net8.0</TargetFramework>\n'
                   '  </PropertyGroup>\n'
                   '</Project>\n')
+
+# 保存と復元の作業場所。パッケージの一時ディレクトリは深いので、リポジトリの下に
+# 置くと Windows のパス長上限（260）を超える。短い一時ディレクトリに置く。
+PRESERVE_ROOT_NAME = 'musicstore-verify-preserve'
+
+STUB_EVALUATOR = Path(__file__).resolve().parent.parent / 'tests' / 'stub_evaluator.py'
 
 
 class Report:
@@ -290,23 +298,143 @@ def rescore_path(repo, runs, run_id, first, report):
                 '連番を進めた再採点で判定・品質・成果物ハッシュが一致し、差が連番だけになる',
                 {'verdict': first['verdict'], 'quality': first['quality'],
                  'artifact_sha256_outer': first['artifact_sha256_outer'],
-                 'prefix_equal': True, 'sequence_delta': 1, 'index_lines': 2},
+                 'prefix_equal': True, 'sequence_delta': 1, 'index_lines': 2,
+                 'work_dir_differs': True, 'work_dir_names': ['001', '002'],
+                 'work_dirs_with_db': 2},
                 {'verdict': second['verdict'], 'quality': second['quality'],
                  'artifact_sha256_outer': second['artifact_sha256_outer'],
                  'prefix_equal': (first['evaluation_id'].rsplit('-', 1)[0]
                                   == second['evaluation_id'].rsplit('-', 1)[0]),
                  'sequence_delta': second['sequence'] - first['sequence'],
-                 'index_lines': len(entries)})
+                 'index_lines': len(entries),
+                 'work_dir_differs': first['work_dir'] != second['work_dir'],
+                 'work_dir_names': sorted(Path(record['work_dir']).name
+                                          for record in (first, second)),
+                 'work_dirs_with_db': sum(1 for record in (first, second)
+                                          if _db_files(record['work_dir']))})
     return second
 
 
+def _db_files(work_dir):
+    """The SQLite files a scoring created in its own work directory.
+
+    Each scoring must create its own: a shared directory would let the second
+    scoring read the first one's orders, so the "empty database every time"
+    condition (docs/quality-spec.md §4.1) would not hold.
+    """
+    path = Path(work_dir)
+    if not path.is_dir():
+        return []
+    return sorted(item.name for item in path.iterdir()
+                  if item.suffix in {'.sqlite', '.db'})
+
+
+def frozen_tamper_path(repo, runs, source, reference, report):
+    """A frozen artifact changed after collection must not be scored."""
+    manifest, snapshot = create_start_collect(repo, runs, 4, source, reference)
+    run_id = manifest['run_id']
+    run_dir = run_mod.run_dir_for(runs, run_id)
+    victim = sorted((run_dir / 'frozen').rglob('*.cshtml'))[0]
+    victim.write_text(victim.read_text(encoding='utf-8') + '\n<!-- tampered -->\n',
+                      encoding='utf-8', newline='\n')
+    record = score(repo, runs, run_id)
+    report.case('V-13', 'measured',
+                '回収の後に変更された成果物を採点せず、拒否として記録する',
+                {'scoring_state': 'rejected_mismatch', 'adopted': False,
+                 'evaluator_exit_code': None, 'quality': None,
+                 'mismatch_check': 'artifact_sha256', 'mismatch_expected_is_snapshot': True,
+                 'hash_matches_snapshot': False, 'reported_hash': None,
+                 'index_lines': 1},
+                {'scoring_state': record['scoring_state'],
+                 'adopted': record['adopted'],
+                 'evaluator_exit_code': record['evaluator_exit_code'],
+                 'quality': record['quality'],
+                 'mismatch_check': record['mismatches'][0]['check'],
+                 'mismatch_expected_is_snapshot':
+                     record['mismatches'][0]['expected'] == snapshot['artifact_sha256'],
+                 'hash_matches_snapshot':
+                     record['artifact_sha256_outer'] == snapshot['artifact_sha256'],
+                 'reported_hash': record['artifact_sha256_reported'],
+                 'index_lines': len(evaluate.read_index(run_dir))})
+    return run_id
+
+
+def artifact_immutability_path(runs, run_id, report):
+    """Scoring must not write into the artifact it scored.
+
+    `dotnet publish` defaults to writing `obj/` and `bin/` inside the project it
+    publishes, which changes the frozen artifact while it is being scored.
+    """
+    run_dir = run_mod.run_dir_for(runs, run_id)
+    snapshot = run_mod.read_snapshot(run_dir)
+    declared = set(snapshot['frozen'])
+    frozen = run_dir / 'frozen'
+    actual = {str(path.relative_to(frozen)).replace('\\', '/')
+              for path in frozen.rglob('*') if path.is_file()}
+    report.case('V-14', 'measured', '採点が成果物ディレクトリを書き換えない',
+                {'extra_files': [], 'missing_files': [], 'file_count': len(declared)},
+                {'extra_files': sorted(actual - declared),
+                 'missing_files': sorted(declared - actual),
+                 'file_count': len(actual)})
+
+
 def fault_path(repo, runs, source, broken, report):
+    """A submission that cannot be built is scored, not turned into a fault.
+
+    `dotnet publish` failing on the submission's own sources is the submission's
+    defect: R-001 must fail while the evaluator keeps running (the old behaviour
+    reported an evaluator fault, which hid the defect).
+    """
     manifest, _ = create_start_collect(repo, runs, 3, source, broken)
-    record = score(repo, runs, manifest['run_id'])
-    manifest = run_mod.load_manifest(runs, manifest['run_id'])
-    row = aggregate.row_for(runs, manifest['run_id'])
+    run_id = manifest['run_id']
+    record = score(repo, runs, run_id)
+    produced = util.read_json(run_mod.run_dir_for(runs, run_id)
+                              / record['directory'] / 'evaluation.json')
+    failed = sorted(item['id'] for item in produced['requirements']
+                    if item['judgement'] == 'fail')
+    manifest = run_mod.load_manifest(runs, run_id)
+    row = aggregate.row_for(runs, run_id)
     report.case('V-6', 'measured',
-                '実評価器の障害を実行の失敗として扱わない',
+                '成果物がビルドできない場合を評価器の障害にせず、要件の不合格として採点する',
+                {'scoring_state': 'scored', 'evaluator_exit_code': 0,
+                 'quality': 10.34, 'verdict': 'fail_critical', 'adopted': True,
+                 'failed_requirements': ['R-001'], 'blocked_count': 25,
+                 'end_reason': 'completed', 'stop_confirmed': True,
+                 'row_quality': 10.34, 'row_verdict': 'fail_critical',
+                 'row_issue_kinds': ['quality', 'synthetic']},
+                {'scoring_state': record['scoring_state'],
+                 'evaluator_exit_code': record['evaluator_exit_code'],
+                 'quality': record['quality'], 'verdict': record['verdict'],
+                 'adopted': record['adopted'], 'failed_requirements': failed,
+                 'blocked_count': record['blocked_count'],
+                 'end_reason': manifest['end_reason'],
+                 'stop_confirmed': manifest['stop_confirmed'],
+                 'row_quality': row['quality'], 'row_verdict': row['verdict'],
+                 'row_issue_kinds': [issue['kind'] for issue in row['issues']]})
+    return manifest
+
+
+def evaluator_fault_path(repo, runs, source, reference, report):
+    """A real evaluator fault is not the run's failure.
+
+    Classifying a fault is the outer harness's own rule, so it is measured with
+    the stand-in evaluator (as V-1b does), not with the real one.
+    """
+    manifest, _ = create_start_collect(repo, runs, 5, source, reference)
+    run_id = manifest['run_id']
+    previous = os.environ.get('HARNESS_STUB_MODE')
+    os.environ['HARNESS_STUB_MODE'] = 'fault'
+    try:
+        record = score(repo, runs, run_id, evaluator=STUB_EVALUATOR)
+    finally:
+        if previous is None:
+            os.environ.pop('HARNESS_STUB_MODE', None)
+        else:
+            os.environ['HARNESS_STUB_MODE'] = previous
+    manifest = run_mod.load_manifest(runs, run_id)
+    row = aggregate.row_for(runs, run_id)
+    report.case('V-6b', 'scripted',
+                '評価器の障害を実行の失敗として扱わず、Run を残す（代替評価器で確認）',
                 {'scoring_state': 'evaluator_fault', 'evaluator_exit_code': 2,
                  'quality': None, 'adopted': False, 'end_reason': 'completed',
                  'stop_confirmed': True, 'row_quality': None, 'row_verdict': None,
@@ -325,14 +453,16 @@ def aggregate_path(runs, report):
     table = aggregate.build(runs)
     rows = {row['run_id']: row for row in table['runs']}
     report.case('V-7', 'measured', '保存済み資材だけから集計し、失敗した Run も残す',
-                {'run_count': 3, 'scored_rows': 2, 'fault_rows': 1,
-                 'unscored_quality_is_null': True, 'unscored_verdict_is_null': True,
-                 'synthetic_rows': 3},
+                {'run_count': 5, 'scored_rows': 3, 'fault_rows': 1,
+                 'rejected_rows': 1, 'unscored_quality_is_null': True,
+                 'unscored_verdict_is_null': True, 'synthetic_rows': 5},
                 {'run_count': table['run_count'],
                  'scored_rows': sum(1 for r in rows.values()
                                     if r['scoring']['state'] == 'scored'),
                  'fault_rows': sum(1 for r in rows.values()
                                    if r['scoring']['state'] == 'evaluator_fault'),
+                 'rejected_rows': sum(1 for r in rows.values()
+                                      if r['scoring']['state'] == 'rejected_mismatch'),
                  'unscored_quality_is_null': all(r['quality'] is None for r in rows.values()
                                                  if r['scoring']['state'] != 'scored'),
                  'unscored_verdict_is_null': all(r['verdict'] is None for r in rows.values()
@@ -438,11 +568,15 @@ def main(argv=None):
     repo = args.repo.resolve()
     runs = repo / 'runs' / '_verify'
     scratch = repo / 'outer' / 'verify' / '.scratch'
+    preserve_root = Path(tempfile.gettempdir()) / PRESERVE_ROOT_NAME
     if runs.exists():
         shutil.rmtree(runs)
     if scratch.exists():
         shutil.rmtree(scratch)
+    if preserve_root.exists():
+        shutil.rmtree(preserve_root)
     runs.mkdir(parents=True)
+    preserve_root.mkdir(parents=True)
     reference = repo / 'inner' / 'fixtures' / 'reference'
     source = make_stand_in(scratch)
     broken = make_broken_project(scratch)
@@ -457,10 +591,13 @@ def main(argv=None):
     line_ending_path(repo, runs, source, reference, report)
     duplicate_path(runs, RUN_ID, report)
     rescore_path(repo, runs, RUN_ID, first, report)
+    frozen_tamper_path(repo, runs, source, reference, report)
+    artifact_immutability_path(runs, RUN_ID, report)
     fault_path(repo, runs, source, broken, report)
+    evaluator_fault_path(repo, runs, source, reference, report)
     _, rows = aggregate_path(runs, report)
     preservation_path(runs, RUN_ID, rows[RUN_ID],
-                      scratch / 'archive', scratch / 'restored', report)
+                      preserve_root / 'archive', preserve_root / 'restored', report)
     input_policy_path(repo, runs, scratch, report)
     app_process_path(runs, RUN_ID, report)
     evaluator_build_path(repo, runs, RUN_ID, first, rows, report)
@@ -475,6 +612,8 @@ def main(argv=None):
     print('summary: ' + str(out))
     if scratch.exists():
         shutil.rmtree(scratch)
+    if preserve_root.exists():
+        shutil.rmtree(preserve_root)
     return 0 if report.matched() else 1
 
 

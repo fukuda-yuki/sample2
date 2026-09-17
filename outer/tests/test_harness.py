@@ -267,6 +267,30 @@ class UsageLinkTests(HarnessTestCase):
         self.assertEqual('missing', usage['state'])
         self.assertEqual('usage_provenance_missing', usage['error'])
 
+    def test_usage_from_another_run_is_not_this_run_s_usage(self):
+        """Copying Run A's usage into Run B must not credit Run B with it.
+
+        A single foreign run id is not a mixture, so nothing but an explicit
+        check against this Run's id catches it.
+        """
+        first = self.create(attempt=1)
+        self.start(first['run_id'])
+        run_mod.collect_run(self.runs, first['run_id'])
+        donor = self.runs / first['run_id'] / 'usage'
+
+        second = self.create(attempt=2)
+        self.start(second['run_id'])
+        target = self.runs / second['run_id'] / 'usage'
+        shutil.rmtree(target)
+        shutil.copytree(donor, target)
+        run_mod.collect_run(self.runs, second['run_id'])
+
+        usage = util.read_json(target / 'normalized.json')
+        self.assertEqual('missing', usage['state'])
+        self.assertIsNone(usage['total_tokens'])
+        self.assertIn('usage_provenance_run_mismatch', usage['error'])
+        self.assertEqual(second['run_id'], usage['run_id'])
+
     def test_raw_usage_is_kept_unchanged(self):
         manifest = self.create()
         self.start(manifest['run_id'])

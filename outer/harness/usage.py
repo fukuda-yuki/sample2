@@ -11,12 +11,18 @@ from pathlib import Path
 VERSION = '1'
 
 
-def normalize(events, expected_sessions, inventory_complete=False):
+def normalize(events, expected_sessions, inventory_complete=False, run_id=None):
     totals, last, seen, modes, missing = {}, {}, {}, {}, []
     calls = 0
     run_ids = {e['run_id'] for e in events}
     if len(run_ids) > 1:
         raise ValueError('Cannot combine runs')
+    if run_id is not None:
+        # 原本が別の Run のものであっても、run_id が混ざっていなければ
+        # `Cannot combine runs` では捕まらない。この Run のものか確かめる。
+        for e in events:
+            if e.get('run_id') != run_id:
+                raise ValueError('Usage events belong to another run')
     for e in events:
         session = e['session_id']
         key = (session, e['event_id'])
@@ -63,6 +69,7 @@ def normalize(events, expected_sessions, inventory_complete=False):
     complete = not missing
     observed = sum(totals.values())
     return {'normalizer_version': VERSION, 'usage_complete': complete,
+            'run_id': run_id,
             'total_tokens': observed if complete else None, 'observed_tokens': observed,
             'observed_request_count': calls, 'sessions': totals, 'missing': missing,
             'cumulative_sessions': [s for s, m in modes.items() if m == 'cumulative']}
@@ -74,5 +81,6 @@ if __name__ == '__main__':
     p.add_argument('output', type=Path)
     a = p.parse_args()
     data = json.loads(a.input.read_text(encoding='utf-8'))
-    result = normalize(data['events'], data['expected_sessions'], data.get('inventory_complete', False))
+    result = normalize(data['events'], data['expected_sessions'],
+                       data.get('inventory_complete', False), run_id=data.get('run_id'))
     a.output.write_text(json.dumps(result, indent=2), encoding='utf-8')

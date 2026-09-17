@@ -134,6 +134,50 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
         self.assertEqual('pass', record['verdict'])
         self.assertEqual(100.0, record['quality'])
 
+    def test_an_artifact_changed_after_collection_is_refused(self):
+        """frozen/ is the artifact that was fixed; rewriting it is not that artifact."""
+        frozen = self.run_dir / 'frozen' / 'MusicStore.Web' / 'Program.cs'
+        frozen.write_text('// rewritten after collection\n', encoding='utf-8')
+        record = self.score('ok')
+        self.assertEqual('rejected_mismatch', record['scoring_state'])
+        self.assertFalse(record['adopted'])
+        self.assertIsNone(record['verdict'])
+        self.assertIsNone(record['quality'])
+        self.assertEqual(['artifact_sha256'],
+                         [item['check'] for item in record['mismatches']])
+        entry = record['mismatches'][0]
+        self.assertEqual(entry['actual'], record['artifact_sha256_outer'])
+        self.assertEqual(entry['expected'], record['artifact_sha256_frozen'])
+        self.assertNotEqual(entry['expected'], entry['actual'])
+        # 採点していないので評価器の出力は無い。拒否は index に残る。
+        self.assertFalse((self.run_dir / record['directory'] / 'evaluation.json').is_file())
+        rows = evaluate.read_index(self.run_dir)
+        self.assertEqual(1, len(rows))
+        self.assertEqual('rejected_mismatch', rows[0]['scoring_state'])
+        self.assertEqual(record['mismatches'], rows[0]['mismatches'])
+
+    def test_an_untouched_frozen_artifact_still_scores(self):
+        record = self.score('ok')
+        self.assertEqual(record['artifact_sha256_outer'], record['artifact_sha256_frozen'])
+
+    def test_each_scoring_starts_from_an_empty_work_directory(self):
+        """Two scorings must not share one work directory or its database.
+
+        The stand-in refuses to score on a non-empty work directory, exactly as
+        the real evaluator does, so the second scoring only succeeds when it was
+        given a directory of its own.
+        """
+        first = self.score('work-marker')
+        second = self.score('work-marker')
+        self.assertEqual('scored', first['scoring_state'])
+        self.assertEqual('scored', second['scoring_state'])
+        self.assertNotEqual(first['work_dir'], second['work_dir'])
+        self.assertEqual('001', Path(first['work_dir']).name)
+        self.assertEqual('002', Path(second['work_dir']).name)
+        self.assertEqual(self.run_dir / 'evaluation-work',
+                         Path(first['work_dir']).parent)
+        self.assertTrue((Path(first['work_dir']) / 'store.sqlite').is_file())
+
     def test_rejected_mismatch_is_not_used_in_the_aggregate(self):
         self.score('mismatch-artifact')
         row = aggregate.row_for(self.runs, self.manifest['run_id'])

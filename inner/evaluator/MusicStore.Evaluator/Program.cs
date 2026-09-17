@@ -53,6 +53,16 @@ public static class Program
             faults.Add("成果物ディレクトリが存在しません: " + options.ArtifactPath);
         }
 
+        // 作業ディレクトリは採点ごとに空でなければならない。前の採点の SQLite
+        // ファイルや生成物が残っていると、「毎回空のデータベースから始める」という
+        // 初期条件を満たしたことにならないため、黙って採点せず障害として記録する。
+        if (Directory.Exists(options.WorkDir)
+            && Directory.EnumerateFileSystemEntries(options.WorkDir).Any())
+        {
+            faults.Add("作業ディレクトリが空ではありません。採点ごとに空の作業ディレクトリを"
+                       + "用意してください: " + options.WorkDir);
+        }
+
         if (faults.Count > 0)
         {
             // 成果物の品質を判定できない状態。品質点を返さず error とし、
@@ -185,7 +195,22 @@ public static class Program
         File.WriteAllText(Path.Combine(options.OutDir, "results.jsonl"), string.Empty, new UTF8Encoding(false));
     }
 
+    /// <summary>
+    /// 成果物を起動して観測する。証跡はビルドや起動に失敗した場合も残す。
+    /// </summary>
     private static void PrepareAndRun(RunState state, CliOptions options, Ledger ledger, string evidenceDir)
+    {
+        try
+        {
+            RunScenarios(state, options, evidenceDir);
+        }
+        finally
+        {
+            WriteEvidence(state, evidenceDir);
+        }
+    }
+
+    private static void RunScenarios(RunState state, CliOptions options, string evidenceDir)
     {
         var candidates = AppHost.FindWebProjects(options.ArtifactPath);
         state.WebProjectFound = candidates.Count > 0;
@@ -197,11 +222,18 @@ public static class Program
 
         state.Host.SelectProject(candidates[0]);
 
+        // 静的検査は csproj・成果物ツリー・DB パスしか見ないので publish より先に実行する。
+        // ビルドできない成果物でも R-026 / R-027 / R-029 は観測でき、ビルドの失敗は
+        // 評価側の障害ではなく R-001 の不合格として残る（docs/evaluator.md §3）。
+        state.Static = Scenarios.RunStatic(state);
+
         var (exit, stdout, stderr) = state.Host.Publish();
         state.PublishExitCode = exit;
         state.PublishOk = exit == 0;
         state.PublishDetail = $"dotnet publish の終了コード {exit}。標準出力末尾: {AppHost.Tail(stdout, 600)} 標準エラー末尾: {AppHost.Tail(stderr, 1200)}";
-        File.WriteAllText(Path.Combine(evidenceDir, "publish.log"), "STDOUT\n" + stdout + "\nSTDERR\n" + stderr, new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(evidenceDir, "publish.log"),
+            "SOURCE\n" + state.Host.SourceDir + "（成果物 " + options.ArtifactPath + " の複製）\n"
+            + "STDOUT\n" + stdout + "\nSTDERR\n" + stderr, new UTF8Encoding(false));
 
         if (!state.PublishOk)
         {
@@ -236,7 +268,6 @@ public static class Program
         state.InvalidCheckout = Scenarios.RunInvalidCheckout(state);
         state.Isolation = Scenarios.RunIsolation(state);
         state.Restart = Scenarios.RunRestart(state, state.Order.OrderId);
-        state.Static = Scenarios.RunStatic(state);
 
         foreach (var fault in new ScenarioResult[] { state.Browse, state.Cart, state.Order, state.InvalidCheckout, state.Isolation, state.Restart, state.Static })
         {
@@ -245,8 +276,6 @@ public static class Program
                 state.Faults.Add(fault.FaultDetail);
             }
         }
-
-        WriteEvidence(state, evidenceDir);
     }
 
     private static void WriteEvidence(RunState state, string evidenceDir)

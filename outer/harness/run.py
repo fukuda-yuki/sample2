@@ -364,17 +364,19 @@ def _normalize_usage(run_dir, run_id):
         for line in events_path.read_text(encoding='utf-8').splitlines():
             if line.strip():
                 events.append(json.loads(line))
+    # 原本が別の Run のものなら、この Run の使用量として記録しない。
+    declared = provenance.get('run_id')
+    if declared is not None and declared != run_id:
+        _reject_usage(usage_dir, run_id, expected, inventory_complete, provenance_path,
+                      events_path,
+                      'usage_provenance_run_mismatch: 出所の run_id {} がこの Run {} と一致しません'
+                      .format(declared, run_id))
+        return
     try:
-        result = usage_mod.normalize(events, expected, inventory_complete)
+        result = usage_mod.normalize(events, expected, inventory_complete, run_id=run_id)
     except ValueError as error:
-        util.write_json_atomic(usage_dir / 'normalized.json', {
-            'schema_version': 1, 'run_id': run_id, 'state': 'missing',
-            'error': 'usage_events_rejected: ' + str(error),
-            'total_tokens': None, 'observed_tokens': 0,
-            'expected_sessions': expected,
-            'inventory_complete': inventory_complete,
-            'provenance_sha256': util.sha256_file(provenance_path),
-            'note': '原本が規則に合わないため数値を出さない。0 に置き換えない。'})
+        _reject_usage(usage_dir, run_id, expected, inventory_complete, provenance_path,
+                      events_path, 'usage_events_rejected: ' + str(error))
         return
     result.update({'schema_version': 1, 'run_id': run_id,
                    'state': 'complete' if result['usage_complete'] else 'missing',
@@ -387,6 +389,24 @@ def _normalize_usage(run_dir, run_id):
                    'observable': provenance.get('observable'),
                    'not_observable': provenance.get('not_observable')})
     util.write_json_atomic(usage_dir / 'normalized.json', result)
+
+
+def _reject_usage(usage_dir, run_id, expected, inventory_complete, provenance_path,
+                  events_path, error):
+    """Record a usage original that this Run must not be credited with.
+
+    The events are kept on disk as evidence but are not turned into a number:
+    a Run whose usage could not be attributed to it is a missing measurement,
+    not a Run that used zero tokens.
+    """
+    util.write_json_atomic(usage_dir / 'normalized.json', {
+        'schema_version': 1, 'run_id': run_id, 'state': 'missing', 'error': error,
+        'total_tokens': None, 'observed_tokens': 0,
+        'expected_sessions': expected, 'inventory_complete': inventory_complete,
+        'provenance_sha256': util.sha256_file(provenance_path),
+        'events_sha256': util.sha256_file(events_path) if events_path.is_file() else None,
+        'note': 'この Run の使用量として採用できない原本のため、欠測として記録する。'
+                '0 で置き換えない。'})
 
 
 def read_usage(run_dir):

@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | [`reference/`](reference/) | 正例 | 要件を満たす成果物を落とさない |
 | [`alternative/`](alternative/) | 妥当な別実装 | 構造・表現の違いで不当に落とさない |
+| [`variants/`](variants/) | 等価な別表現（生成スクリプト） | 引用符の種類・旧名称の保持で不当に落とさない |
 | [`negatives/`](negatives/) | 重要な負例（生成スクリプト） | 内容の取り違え・欠落・二重処理を実際に不合格にする |
 
 **成果物ディレクトリの中に本ファイルのような研究用の文書を置かない。** 成果物ハッシュは成果物ディレクトリ配下の
@@ -63,6 +64,24 @@ EF Core を使わない素の `Microsoft.Data.Sqlite`、Razor ビューを使わ
 **別実装は 1 つだけである。** 構造・表現の違いのうち、この 1 つが示す範囲でしか
 「不当に落とさない」ことを確認していない（`inner/calibration/README.md` §5）。
 
+## 2.1 等価な別表現（`variants`）
+
+正例と同じ要件を、**等価な別表現**で満たす成果物。`alternative/` が構造の違いを見るのに対し、
+こちらは「同じ意味の書き方が 1 つに固定されていないか」を見る。負例と同じく
+[`apply.ps1`](variants/apply.ps1) が正例のコピーに差分を与えるが、**期待する判定はすべて `pass`** である。
+
+```powershell
+.\inner\fixtures\variants\apply.ps1 -Name single-quoted-attributes -Out .\runs\var-001\artifact
+```
+
+| 別表現 | 変える内容 | 落としてはいけない要件 |
+| --- | --- | --- |
+| `single-quoted-attributes` | 観測される識別子の属性値を単一引用符にする | かご・注文・表示を見るすべて（`R-010` `R-012` `R-013` `R-014` `R-015` `R-016` `R-017` `R-020`） |
+| `legacy-name-kept` | アセンブリ名・ルート名前空間・名前空間に旧名称 `MvcMusicStore` を使う | 移行の静的検査（`R-026` `R-027` `R-029`） |
+
+どちらも観測される値（識別子・金額・件数）は変えない。**この 2 つが示す範囲でしか
+「表現の違いで落とさない」ことを確認していない**（`inner/calibration/README.md` §5）。
+
 ## 3. 負例（`negatives`）
 
 負例は成果物そのものではなく「**正例 + 差分**」として表現する。差分は
@@ -85,6 +104,12 @@ EF Core を使わない素の `Microsoft.Data.Sqlite`、Razor ビューを使わ
 | `destructive-seed` | 起動のたびに DB を作り直す | `R-005` |
 | `unknown-album-500` | 存在しないアルバムを 404 にしない | `R-009` |
 | `legacy-wrapper` | 旧実装を起動する記述を残す | `R-029` |
+| `compile-error` | 成果物に構文エラーを入れる | `R-001`（起動できないため他は未評価。評価側の障害にしてはならない） |
+| `wipe-orders-only` | 再起動のたびに注文を消す | **なし。見逃す（期待する判定は `pass`）** |
+
+`wipe-orders-only` だけは期待が `pass` である。注文を消しても注文番号は変わるため `R-005` が落ちず、
+**見逃しを「直った」ことにしないため**に期待値として固定している（`docs/quality-spec.md` §7.3、
+`inner/calibration/README.md` §5）。
 
 期待どおりに落ちなかった負例（見逃し）と、負例で予期せず落ちた要件（誤検出）の記録は
 [`inner/calibration/README.md`](../calibration/README.md) §4 にある。

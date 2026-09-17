@@ -107,24 +107,26 @@ public sealed class WebSession : IDisposable
 
 public static class Html
 {
+    // 属性値の引用符は " と ' のどちらも等価な HTML である（docs/quality-spec.md §4.6）。
+    // 契約は識別子と値であり、引用符の種類は判定に影響させない。
     public static readonly Regex CartRowRegex = new Regex(
-        "<tr[^>]*id=\"row-(?<recordId>\\d+)\"[^>]*>(?<inner>.*?)</tr>",
+        "<tr[^>]*id=[\"']row-(?<recordId>\\d+)[\"'][^>]*>(?<inner>.*?)</tr>",
         RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
     public static readonly Regex AlbumLinkRegex = new Regex(
-        "href=\"(?:[^\"]*?)?/Store/Details/(?<albumId>\\d+)\"",
+        "href=[\"'](?:[^\"']*?)?/Store/Details/(?<albumId>\\d+)[\"']",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex ItemCountRegex = new Regex(
-        "id=\"item-count-(?<recordId>\\d+)\"[^>]*>\\s*(?<count>\\d+)\\s*<",
+        "id=[\"']item-count-(?<recordId>\\d+)[\"'][^>]*>\\s*(?<count>\\d+)\\s*<",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex CartTotalRegex = new Regex(
-        "id=\"cart-total\"[^>]*>\\s*(?<total>-?[0-9][0-9,]*(?:\\.[0-9]+)?)\\s*<",
+        "id=[\"']cart-total[\"'][^>]*>\\s*(?<total>-?[0-9][0-9,]*(?:\\.[0-9]+)?)\\s*<",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex CartStatusRegex = new Regex(
-        "id=\"cart-status\"[^>]*>(?<text>[^<]*)<",
+        "id=[\"']cart-status[\"'][^>]*>(?<text>[^<]*)<",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex OrderNumberRegex = new Regex(

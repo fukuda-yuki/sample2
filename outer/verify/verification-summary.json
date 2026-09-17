@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-15T16:16:30.310878+00:00",
-  "started_at": "2026-09-15T16:15:52.853268+00:00",
-  "repo": "C:\\Users\\mwam0\\.copilot\\repos\\sample2",
+  "generated_at": "2026-09-16T00:17:23.808734+00:00",
+  "started_at": "2026-09-16T00:16:46.117859+00:00",
+  "repo": "C:\\Users\\mwam0\\.copilot\\repos\\copilot-worktrees\\sample2\\fukuda-yuki-issue-6-10-2-21fab1",
   "note": "外側の実験実行基盤の非モデル検証の生記録。モデルは一切呼び出していない。期待は実行前に宣言し、観測値と完全一致で突き合わせる。",
   "environment": {
     "platform": "win32",
@@ -10,17 +10,17 @@
     "dotnet": "10.0.300-preview.0.26177.108"
   },
   "commands": [
-    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
-    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
+    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\copilot-worktrees\\sample2\\fukuda-yuki-issue-6-10-2-21fab1\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
+    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\copilot-worktrees\\sample2\\fukuda-yuki-issue-6-10-2-21fab1\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
     "C:\\Python314\\python.exe -m unittest discover -p test_*.py -v",
-    "harness.cli preserve --run MS1-001-C01-001 --archive C:\\Users\\mwam0\\.copilot\\repos\\sample2\\outer\\verify\\.scratch\\archive"
+    "harness.cli preserve --run MS1-001-C01-001 --archive C:\\Users\\mwam0\\AppData\\Local\\Temp\\musicstore-verify-preserve\\archive"
   ],
   "artifacts": {
-    "evaluator_sha256_rebuild": "06fa548cad3be2c1e2a4bbdd1e97687fb333864661cc4ab478dc3ee673cef388",
+    "evaluator_sha256_rebuild": "4eeca67bd2206b78aec96a56072b9cf8ccebc8081406565d22584b275ab3caa2",
     "evaluator_dll": "inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll",
-    "evaluator_sha256": "06fa548cad3be2c1e2a4bbdd1e97687fb333864661cc4ab478dc3ee673cef388"
+    "evaluator_sha256": "4eeca67bd2206b78aec96a56072b9cf8ccebc8081406565d22584b275ab3caa2"
   },
-  "case_count": 15,
+  "case_count": 18,
   "mismatched": [],
   "cases": [
     {
@@ -171,7 +171,13 @@
         "artifact_sha256_outer": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
         "prefix_equal": true,
         "sequence_delta": 1,
-        "index_lines": 2
+        "index_lines": 2,
+        "work_dir_differs": true,
+        "work_dir_names": [
+          "001",
+          "002"
+        ],
+        "work_dirs_with_db": 2
       },
       "observed": {
         "verdict": "pass",
@@ -179,14 +185,108 @@
         "artifact_sha256_outer": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
         "prefix_equal": true,
         "sequence_delta": 1,
-        "index_lines": 2
+        "index_lines": 2,
+        "work_dir_differs": true,
+        "work_dir_names": [
+          "001",
+          "002"
+        ],
+        "work_dirs_with_db": 2
+      },
+      "matched": true
+    },
+    {
+      "id": "V-13",
+      "kind": "measured",
+      "what": "回収の後に変更された成果物を採点せず、拒否として記録する",
+      "expected": {
+        "scoring_state": "rejected_mismatch",
+        "adopted": false,
+        "evaluator_exit_code": null,
+        "quality": null,
+        "mismatch_check": "artifact_sha256",
+        "mismatch_expected_is_snapshot": true,
+        "hash_matches_snapshot": false,
+        "reported_hash": null,
+        "index_lines": 1
+      },
+      "observed": {
+        "scoring_state": "rejected_mismatch",
+        "adopted": false,
+        "evaluator_exit_code": null,
+        "quality": null,
+        "mismatch_check": "artifact_sha256",
+        "mismatch_expected_is_snapshot": true,
+        "hash_matches_snapshot": false,
+        "reported_hash": null,
+        "index_lines": 1
+      },
+      "matched": true
+    },
+    {
+      "id": "V-14",
+      "kind": "measured",
+      "what": "採点が成果物ディレクトリを書き換えない",
+      "expected": {
+        "extra_files": [],
+        "missing_files": [],
+        "file_count": 29
+      },
+      "observed": {
+        "extra_files": [],
+        "missing_files": [],
+        "file_count": 29
       },
       "matched": true
     },
     {
       "id": "V-6",
       "kind": "measured",
-      "what": "実評価器の障害を実行の失敗として扱わない",
+      "what": "成果物がビルドできない場合を評価器の障害にせず、要件の不合格として採点する",
+      "expected": {
+        "scoring_state": "scored",
+        "evaluator_exit_code": 0,
+        "quality": 10.34,
+        "verdict": "fail_critical",
+        "adopted": true,
+        "failed_requirements": [
+          "R-001"
+        ],
+        "blocked_count": 25,
+        "end_reason": "completed",
+        "stop_confirmed": true,
+        "row_quality": 10.34,
+        "row_verdict": "fail_critical",
+        "row_issue_kinds": [
+          "quality",
+          "synthetic"
+        ]
+      },
+      "observed": {
+        "scoring_state": "scored",
+        "evaluator_exit_code": 0,
+        "quality": 10.34,
+        "verdict": "fail_critical",
+        "adopted": true,
+        "failed_requirements": [
+          "R-001"
+        ],
+        "blocked_count": 25,
+        "end_reason": "completed",
+        "stop_confirmed": true,
+        "row_quality": 10.34,
+        "row_verdict": "fail_critical",
+        "row_issue_kinds": [
+          "quality",
+          "synthetic"
+        ]
+      },
+      "matched": true
+    },
+    {
+      "id": "V-6b",
+      "kind": "scripted",
+      "what": "評価器の障害を実行の失敗として扱わず、Run を残す（代替評価器で確認）",
       "expected": {
         "scoring_state": "evaluator_fault",
         "evaluator_exit_code": 2,
@@ -222,20 +322,22 @@
       "kind": "measured",
       "what": "保存済み資材だけから集計し、失敗した Run も残す",
       "expected": {
-        "run_count": 3,
-        "scored_rows": 2,
+        "run_count": 5,
+        "scored_rows": 3,
         "fault_rows": 1,
+        "rejected_rows": 1,
         "unscored_quality_is_null": true,
         "unscored_verdict_is_null": true,
-        "synthetic_rows": 3
+        "synthetic_rows": 5
       },
       "observed": {
-        "run_count": 3,
-        "scored_rows": 2,
+        "run_count": 5,
+        "scored_rows": 3,
         "fault_rows": 1,
+        "rejected_rows": 1,
         "unscored_quality_is_null": true,
         "unscored_verdict_is_null": true,
-        "synthetic_rows": 3
+        "synthetic_rows": 5
       },
       "matched": true
     },
@@ -245,7 +347,7 @@
       "what": "保存したパッケージを検証・復元し、復元した資材で再集計できる",
       "expected": {
         "package_id": "run-MS1-001-C01-001",
-        "package_files": 152,
+        "package_files": 69,
         "restored_runs": 1,
         "quality": 100,
         "verdict": "pass",
@@ -254,7 +356,7 @@
       },
       "observed": {
         "package_id": "run-MS1-001-C01-001",
-        "package_files": 152,
+        "package_files": 69,
         "restored_runs": 1,
         "quality": 100,
         "verdict": "pass",

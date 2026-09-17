@@ -151,13 +151,27 @@ internal static class BrokenSyntax
     }
 
     'wipe-orders-only' {
-        # 再起動のたびに注文だけを消す（カタログは残す）。**期待する判定は pass である。**
-        # 注文番号は AUTOINCREMENT で増えるため再起動後も番号が変わり、R-005 はこの欠落を見逃す。
-        # 見逃しを「直った」ことにせず、校正の限界として記録するための負例（docs/quality-spec.md §7.3）。
-        Edit-File 'MusicStore.Web\Program.cs' `
-            '    db.Database.EnsureCreated();' `
-            ('    db.Database.EnsureCreated();' + $nl + '    db.Orders.RemoveRange(db.Orders);' + $nl + '    db.SaveChanges();') `
-            '再起動時に注文を消す'
+            # 再起動のたびに注文だけを消す（カタログは残す）。**期待する判定は fail_critical である。**
+            # 注文番号は AUTOINCREMENT で増えるため再起動後の番号は変わるが、再起動前の注文は
+            # 消えている。保存契約の Orders 表で再起動前の注文行を観測するため、R-005 が不合格に
+            # なる（docs/quality-spec.md §7.3）。
+            Edit-File 'MusicStore.Web\Program.cs' `
+                '    db.Database.EnsureCreated();' `
+                ('    db.Database.EnsureCreated();' + $nl + '    db.Orders.RemoveRange(db.Orders);' + $nl + '    db.SaveChanges();') `
+                '再起動時に注文を消す'
+        }
+
+        'whitespace-wrong-quantity' {
+        # 空白表記の許容が値の誤りを見逃す検査になってはならない（docs/quality-spec.md §4.6）。
+        # 数量セルを = の前後の空白付きで書き、同時に数量の値そのものを誤らせる。
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<td id="item-count-@item.RecordId">' `
+            "<td id = `"item-count-@item.RecordId`">" `
+            '数量セルの id を = の前後の空白で書く'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '@item.Count' `
+            '@(item.Count + 1)' `
+            '明細行の数量を実際と違う値にする'
     }
 
     'legacy-wrapper' {

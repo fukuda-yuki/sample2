@@ -9,6 +9,10 @@
 
 - 生データ: [`verification-summary.json`](verification-summary.json)
 - 本ファイル: その読み方と、**測っていないこと**の記録
+- 本記録の評価版は `1.1.0`、採点した評価器ビルドは `210205b9fe6aae35…`（§「環境」）。
+  評価版の意味の変更は [`docs/decision-log.md`](../../docs/decision-log.md) `D-25` にある。
+  **評価器を修正したので、以前の記録の `4eeca67b…` との一致は求めていない。**
+  この環境で作り直して同じ値になること（`V-0b`）だけを確認している。
 
 ## 何を主張し、何を主張しないか
 
@@ -45,11 +49,11 @@ python outer\verify\verify.py --repo .
 | --- | --- | --- | --- |
 | V-0 | measured | 評価器がビルドできる（`bin` `obj` を消してから。終了コード `0`） | 一致 |
 | V-0b | measured | `bin` `obj` を消したビルドが 2 回続けて同じ評価器ビルドになる | 一致 |
-| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 87 件） | 一致 |
+| V-1 | measured | `outer/tests` が 70 件以上走り、失敗 `0`（本記録では 90 件） | 一致 |
 | V-1b | scripted | 取り違え 5 検査のテストが存在して緑である（**代替評価器**） | 一致 |
 | V-2 | measured | 正例を実行し、**実評価器**で採点する | 一致 |
 | V-3 | measured | CRLF と BOM の作業ツリーでも同じ成果物ハッシュと同じ評価 ID になる | 一致 |
-| V-4 | measured | 同じ成果物・同じ評価版・同じ連番の再実行を重複として拒否する | 一致 |
+| V-4 | measured | 同じ成果物・同じ評価版・同じ連番の再実行を、**副作用の前に**重複として拒否し、以前の資材を変えない | 一致 |
 | V-5 | measured | 連番を進めた再採点で判定・品質・成果物ハッシュが一致し、差が連番と作業ディレクトリだけになる | 一致 |
 | V-13 | measured | 回収の後に変更された成果物を採点せず、拒否として記録する | 一致 |
 | V-14 | measured | 採点が成果物ディレクトリを書き換えない | 一致 |
@@ -76,7 +80,7 @@ python outer\verify\verify.py --repo .
 | `scoring_state` / `adopted` | `scored` / `true` |
 | `verdict` / `quality` | `pass` / `100` |
 | `mismatches` | `[]` |
-| `evaluation_id` | `MS1-001-9a6de335c982-1.0.0-001` |
+| `evaluation_id` | `MS1-001-9a6de335c982-1.1.0-001` |
 | 評価器が報告した `artifactSha256` | 外側の値と一致 |
 
 `artifact_sha256_collected` が `artifact_sha256` と一致したことは、
@@ -92,7 +96,7 @@ python outer\verify\verify.py --repo .
 | 回収前後で成果物ハッシュが変わったか | `true`（生の作業ツリーのままでは別物） |
 | 正規化の種類 | `['bom_removed', 'crlf_to_lf']` |
 | 固定後の `artifact_sha256` | `9a6de335c982…`（V-2 と同一） |
-| 評価 ID | `MS1-001-9a6de335c982-1.0.0-001`（V-2 と同一） |
+| 評価 ID | `MS1-001-9a6de335c982-1.1.0-001`（V-2 と同一） |
 
 これは仕様 §4.2・D-13 の「回収時に LF・BOM なしへ揃える」が、
 **同じ実装に対して同じハッシュと同じ評価 ID を再現する**ことの確認である。
@@ -103,14 +107,38 @@ python outer\verify\verify.py --repo .
 
 | 観測項目 | 値 |
 | --- | --- |
-| 送出された例外 | `FileExistsError` |
-| `evaluations/` のディレクトリ数（前 → 後） | `1` → `1` |
+| `scoring_state` | `duplicate_sequence` |
+| `adopted` | `false` |
+| **評価器が呼ばれなかったか**（`evaluator_not_invoked`） | `true` |
+| **以前の証跡が変わっていないか**（DB・作業ファイル・標準出力ログの内容の `sha256`、`evidence_unchanged`） | `true` |
 | `evaluations/index.jsonl` が不変か | `true` |
+| 拒否が採用済みの採点記録と別に残ったか（`refusal_recorded_separately`） | `true` |
+| `duplicate-refusals.jsonl` の行数（`refusal_count`） | `1` |
 
 仕様 §6.1 の「同じ `evaluation_id` を 2 つ作らない」の確認である。
 **「同じ成果物を 2 回評価すると同じ評価 ID になる」ことは主張しない。**
 評価 ID は連番を含むため、同じ ID が再現するのは**同じ連番のときだけ**である（§6.1）。
 重複を防ぐのは外側の責務であり、評価器自身は履歴を持たない。
+
+**拒否は副作用の前に起きる。** 使用済み連番の確認は、作業領域の削除・作成、
+既存ログのオープン、評価器の起動より前に置く（[`docs/outer-harness.md`](../../docs/outer-harness.md) §6.6）。
+順序を守らないと、重複を拒否する前に前回の採点の DB とログを書き換えてしまい、
+`record.json`・`evaluation.json` が参照する資材との対応が壊れる。
+`evidence_unchanged` は、拒否の前後で証跡の内容を**ハッシュで**比べて確かめている。
+存在や件数だけでは、上書きされた同じ名前のファイルを見逃す。
+
+**拒否の記録は `index.jsonl` に書かない。** 書くと `last_scoring` と集計表の
+`scoring` が拒否の記録をその Run の採点として読み、採用済みの採点を覆い隠す。
+拒否は `evaluations/duplicate-refusals.jsonl` と
+`evaluations/duplicate_sequence-<連番>-<uuid>/record.json` から引く。
+
+**同じ連番を指定して採点し直すことはできない。** やり直す場合は新しい連番を使い、
+以前の作業領域を削除して再利用しない。
+インデックスに記録が無くても、作業領域や証跡が残っていれば使用済みとして扱う。
+中断された試行の痕跡は、それが起きたことを示す唯一の証拠である。
+`--sequence` を省略したときは**使用済みの最大の次**を使う（件数で数えない）。
+
+**並列実行は新設していない。** 同じ連番を同時に指定したときの競合は未確認である（限界 21）。
 
 ### V-5 再採点
 
@@ -285,11 +313,11 @@ HTTP を要する 25 要件が `blocked` になる。評価器は終了コード
 | `evaluator_sha256_reported`（評価器が `Assembly.Location` から出した申告）が同じ値と一致 | `true` |
 | `index.jsonl` の全行（2 行）の `evaluator_sha256` が同じ値と一致 | `true` |
 | 集計表の `scoring.evaluator_sha256` が同じ値と一致 | `true` |
-| `evaluation_version`（`1.0.0`）がビルドのハッシュと異なる | `true` |
+| `evaluation_version`（`1.1.0`）がビルドのハッシュと異なる | `true` |
 | 条件が固定していないとき、`evaluator_sha256_pinned` が `null` で記録される | `true` |
 
 実測した値は `verification-summary.json` の `artifacts.evaluator_sha256` にある
-（本記録では `4eeca67bd2206b78…`）。**「外側が呼び出したものを実測している」ことの確認であり、
+（本記録では `210205b9fe6aae35…`）。**「外側が呼び出したものを実測している」ことの確認であり、
 その値が別のマシンや別のパスで再現することの確認ではない**（限界 15）。
 採点に使う前に、**評価器を `bin` `obj` を消してからビルドし**（`V-0`）、
 **もう一度消して作り直して同じ値になること**を `V-0b` で確かめている
@@ -337,7 +365,7 @@ HTTP を要する 25 要件が `blocked` になる。評価器は終了コード
 | OS | `win32` |
 | Python | `3.14.4` |
 | `dotnet --version` | `10.0.300-preview.0.26177.108` |
-| 採点した評価器ビルドの `sha256` | `4eeca67bd2206b78aec96a56072b9cf8ccebc8081406565d22584b275ab3caa2`（`verification-summary.json` の `artifacts` と同じ値） |
+| 採点した評価器ビルドの `sha256` | `210205b9fe6aae351202524a9d9c37218fbf63924070696df63454c5593d3585`（`verification-summary.json` の `artifacts` と同じ値） |
 | 作り直した評価器ビルドの `sha256` | 同上（`V-0b`。`bin` `obj` を消して作り直したもの） |
 
 実行したコマンドは `verification-summary.json` の `commands` に残る。
@@ -423,3 +451,12 @@ HTTP を要する 25 要件が `blocked` になる。評価器は終了コード
     1 つ書き換えた場合のみ。ファイルの追加・削除、`frozen/` の外（`snapshot.json` や
     `record.json` など）の改変、シンボリックリンクの差し替えは確認していない。
     照合はハッシュのみであり、**ハッシュの一致は成果物の中身の同一性しか示さない**。
+21. **`V-4` は逐次の重複拒否である。** 同じ Run に対して**同時に**同じ連番を指定したときの
+    競合（両方が「未使用」と判定して作業領域を奪い合う経路）は確認していない。
+    使用済み判定は作業領域・証跡の存在にも依るため、判定と作成の間に隙間がある。
+    並列実行機構は新設していない（仕様 §1 の非目標）。重複の拒否は、
+    **同じ連番が順に来るとき**の保護である。
+22. **`V-4` の「証跡が不変」は、拒否の前後で観測できたファイルの範囲に限る。**
+    DB・作業ファイル・標準出力ログの内容ハッシュを比べている。
+    評価器が別の場所（OS の一時ディレクトリ、`%USERPROFILE%`、レジストリ）に
+    副作用を残していないことは確認していない。

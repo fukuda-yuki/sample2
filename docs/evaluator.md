@@ -3,8 +3,8 @@
 課題 `MS1-001` の成果物を入力に、[品質評価仕様](quality-spec.md) の要件台帳
 （[`inner/spec/requirements.json`](../inner/spec/requirements.json)）に従って判定と根拠を返す実行プログラム。
 
-- 実装: [`inner/evaluator/MusicStore.Evaluator/`](../inner/evaluator/MusicStore.Evaluator/)（C# / `net8.0` コンソール、NuGet 依存なし）
-- 版: `EvaluatorVersion = 1.0.0`（[`Program.cs`](../inner/evaluator/MusicStore.Evaluator/Program.cs)）
+- 実装: [`inner/evaluator/MusicStore.Evaluator/`](../inner/evaluator/MusicStore.Evaluator/)（C# / `net8.0` コンソール。NuGet 依存は `Microsoft.Data.Sqlite` のみ。§4.5.1 の保存契約を読み取り専用で観測するために使う）
+- 版: `EvaluatorVersion = 1.0.0`、既定の評価版 `DefaultEvaluationVersion = 1.1.0`（[`Program.cs`](../inner/evaluator/MusicStore.Evaluator/Program.cs)、§6.2）
 - 評価の妥当性の根拠と限界は [品質評価仕様 §7](quality-spec.md#7-評価器の妥当性の根拠と限界) に記録している。
 
 ## 1. 呼び出し方
@@ -21,7 +21,7 @@ MusicStore.Evaluator --artifact <dir> --out <dir>
 | `--out` | 必須 | — | 評価記録の出力先。無ければ作成する |
 | `--spec` | 任意 | 実行ファイルから上方探索して `inner/spec/requirements.json` | 要件台帳 |
 | `--catalog` | 任意 | `<spec のディレクトリ>/catalog.json` | 期待する初期カタログ |
-| `--evaluation-version` | 任意 | `1.0.0` | 評価版。評価 ID に含める |
+| `--evaluation-version` | 任意 | `1.1.0` | 評価版。評価 ID に含める |
 | `--sequence` | 任意 | `1` | 評価 ID の連番 |
 | `--work` | 任意 | `<out>/work` | 発行・DB・作業ディレクトリ |
 
@@ -78,6 +78,12 @@ dotnet .\inner\evaluator\MusicStore.Evaluator\bin\Release\net8.0\MusicStore.Eval
   [`outer/verify/verify.py`](../../outer/verify/verify.py) の `V-14` で確認する。
 - 起動時の環境変数で `ConnectionStrings__MusicStoreEntities` を `<work>/store.sqlite` に固定し、
   `ASPNETCORE_ENVIRONMENT=Production` にする。**成果物の保存先は採点側が与える**（仕様 §4.1）。
+- **`Restart` では、再起動の前後に注文行の存在を観測する。** 注文を作った後、`Stop()` の**前**に
+  保存契約（仕様 §4.5.1）の `Orders` 表を `OrderId` で読み取り専用に引き、**行の存在を記録する**。
+  同じ DB で起動し直して `GET /` が応答した後、**新しい注文を作る前**に同じ引き方でもう一度確認する。
+  両方で同じ注文行が見つかったときだけ `R-005` を合格にする。
+  表や列が無い場合は**保存契約違反**、評価器側の理由で読めない場合は**判定不能**（`error`）として
+  区別して記録する。**観測できなかったことを合格にしない。**
 - `--work` が既存で**中身がある場合は評価側の障害**として採点しない。前の実行の DB を引き継ぐと、
   「毎回空の DB から始める」という初期条件（仕様 §4.1）を満たさなくなるためである。
 - 各操作の HTTP 応答は `evidence/http-*.log`、起動ログは `evidence/app-process.log`、発行ログは `evidence/publish.log` に残す。
@@ -211,6 +217,12 @@ error が 1 つでもある            → verdict = error, quality = null
 据え置くときは、意味が変わっていないことを校正の再実行で示し、
 [`inner/calibration/README.md`](../inner/calibration/README.md) に記録する。
 
+**逆に、判定の意味が変わる改訂では評価版を上げる。** 本改訂（`1.0.0` → `1.1.0`）がそれにあたる。
+`R-005` の観測方法を「再起動前後の注文番号が異なること」から「保存契約（仕様 §4.5.1）の
+注文行が再起動の前後で残ること」に変えたため、**同じ成果物の判定が `pass` から `fail_critical` に
+変わりうる**。実装を仕様に合わせるだけの修正（同 §4.4 の 5 点）とは区別し、
+[`docs/decision-log.md`](decision-log.md) D-17 として記録している。
+
 外側の実行基盤は、採点のたびに**呼び出した評価器のハッシュを自分で実測**し、
 `record.json` と `evaluations/index.jsonl`、集計表の `scoring.evaluator_sha256` に残す。
 条件の `evaluation.evaluator_sha256` に値を入れておくと、固定値が使われる
@@ -253,19 +265,34 @@ error が 1 つでもある            → verdict = error, quality = null
    **旧実装の成果物名・旧ホスト・旧フレームワークの信号で判定し、名前空間やアセンブリ名の語だけでは判定しない。**
    名前を `MvcMusicStore` に保っただけの正常な実装は合格する
    （[`inner/calibration/README.md`](../inner/calibration/README.md) §4.4）。
+   **コメント・説明文の旧名称も判定の根拠にしない。** 走査の前にコメントを除去し、
+   残った旧名称は診断情報（`legacy_mentions`）として記録するだけにしている。
+   文字列リテラルは残すため、**旧実装を起動する記述は引き続き検出する**
+   （`neg-legacy-wrapper` は `fail`、`var-legacy-comment-mention` は `pass`。同 §4.5）。
+   この区別も字句解析に基づく近似であり、**動的な起動経路（リフレクション、外部コマンドの
+   文字列組み立て）は依然として検出しない。**
    `R-026` `R-027` は起動対象プロジェクトの `csproj` に限る（仕様 §7.2-3）。
 4. **観測範囲の限界。** 注文合計（`Order.Total`）は旧実装の HTTP 契約から観測できないため評価対象外とし、
    かご合計で代替している（仕様 §2.1、§7.2-4）。
-   **注文が消える実装を `R-005` は見逃す。** 再起動後に注文を読み出せて番号が変わらなければ合格になるためである
-   （[`inner/calibration/README.md`](../inner/calibration/README.md) §5-17）。
-   `R-005` の合格を「注文が失われない」ことの証明として使わない。
+   `R-005` は保存契約（仕様 §4.5.1）の `Orders` 表の行を**読み取り専用で**観測し、
+   再起動の**前**に存在した注文行が、同じ DB で再起動した**後**も存在することを確認する。
+   注文を削除して採番だけ継続する実装は `fail_critical` / `R-005` になる
+   （`neg-wipe-orders-only`。同 §4.5）。
+   **確認しているのは注文行の存在だけであり、金額・住所・明細の内容や複数注文の順序は確認していない。**
+   表や列が無い場合は「注文が消えた」事実と区別して**保存契約違反**として記録し、
+   評価器側の理由で読めない場合は**判定不能**（`error`）として別に記録する。
+   `R-005` の合格を「注文が失われない」ことの完全な証明として使わない。
 5. **校正は部分検証である。** 用意した fixture は課題の全誤りを網羅しない（仕様 §7.2-5）。
    校正の記録は [`inner/calibration/README.md`](../inner/calibration/README.md)。
-   負例のうち 1 件は**見逃すことを期待として固定している**（同 §5-17）。
+   評価版 `1.0.0` では負例のうち 1 件（`wipe-orders-only`）が**見逃すことを期待として固定されていた**。
+   その記録は履歴として残し、評価版 `1.1.0` では `fail_critical` になることを実測している（同 §5-17、§4.5）。
 6. **採点対象外の品質は測っていない。** 仕様 §2.1 の項目について、良いとも悪いとも主張しない。
-7. **表示の検査が正規化するのは、引用符の流儀までである。** 属性を `"` で書いても `'` で書いても
-   同じ結果になることは確認している（同 §4.4）。属性の順序、空白の入れ方、
-   要素の入れ子の変え方など、**他の等価な書き方については宣言したケースが無い**。
+7. **表示の検査が正規化するのは、引用符の流儀と `=` 前後の空白までである。** 属性を `"` で書いても `'` で書いても
+   同じ結果になること（同 §4.4）、`id="cart-total"` と `id = "cart-total"` が同じ結果になること、
+   属性の順序を変えても結果が変わらないことは確認している（同 §4.5）。
+   一方、要素の入れ子の変え方、改行の入れ方など、**他の等価な書き方については宣言したケースが無い**。
+   表記差を許容することと値の誤りを見逃すことは別であり、空白を許容した表記のまま数量を誤らせた
+   `neg-whitespace-wrong-quantity` は `fail_critical` になる（同 §4.5）。
 8. **発行が成果物を書き換えないことは、正例 1 件の成果物でしか確認していない。**
    `V-14` は `bin` `obj` をプロジェクト直下に置く既定の SDK 構成で測っている。
    出力先を変えた成果物、複数プロジェクトを含む成果物では確認していない

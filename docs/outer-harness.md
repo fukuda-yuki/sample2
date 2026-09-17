@@ -320,10 +320,13 @@
 （クリーンな作業ツリーで測る → 外側の検証が `bin` `obj` を消してビルドし `V-0b` で作り直しの一致を
 確かめる → 記録コミットを作る → そのコミットの後で作り直して一致を確かめる）。
 この手順を踏まずに固定すると、条件に**再現しない値**が入り、採点がすべて拒否される。
-現在の記録は `4eeca67b…` であり（[`outer/verify/verification-summary.json`](../outer/verify/verification-summary.json) の
-`artifacts.evaluator_sha256` が値の正）、この値は**評価器のソースを変えた後に測り直したもの**である。
-前の記録（`06fa548c…`、記録コミット `786bcfe`）は、この回の修正より前のソースに対する値である。
+現在の記録は `210205b9…` であり（[`outer/verify/verification-summary.json`](../outer/verify/verification-summary.json) の
+`artifacts.evaluator_sha256` が値の正）、この値は**評価器のソースを変えた後に測り直したもの**である
+（`V-0b` で同じ環境・同じビルド条件での作り直しの一致を確認済み）。
+前の記録（`4eeca67b…`）は、この回の修正より前のソースに対する値であり、
+**旧値との一致は求めない**（D-25）。
 **固定する前**には、§4.3 の手順で**記録コミットの後でも同じ値になること**を確かめる。
+**未固定（`evaluator_sha256` が `null`）のままでも、実測値は採点のたびに記録に残る。**
 
 **ビルドしたコミットは値に混ぜない。** コミットは**2 つの経路**で値に入っていた。
 `AssemblyInformationalVersion` への埋め込みと、sourcelink 文書（
@@ -359,6 +362,45 @@
 評価器も、作業ディレクトリが空でなければ**評価側の障害**として採点を拒否する（[evaluator.md](evaluator.md) §3）。
 外側の分離と内側の拒否の**両方**を置く。片方だけでは、呼び出し側を変えたときに静かに壊れる。
 
+### 6.6 重複した連番は、副作用の前に拒否する
+
+**使用済み連番の確認を、作業領域の削除・作成、既存ログのオープン、評価器の起動より前に置く。**
+順序を守らないと、重複を拒否する前に前回の採点の DB とログを書き換えてしまい、
+`record.json`・`evaluation.json` が参照する資材との対応が壊れる。
+**拒否は「採点しなかった」ことの記録であり、前回の採点を無効にしない。**
+
+連番が「使用済み」と見なされる条件（`used_sequences`）:
+
+| 痕跡 | 場所 | 意味 |
+| --- | --- | --- |
+| 採点の記録 | `evaluations/index.jsonl` の `sequence` | その連番で採点が採用された |
+| 重複拒否の記録 | `evaluations/duplicate-refusals.jsonl` の `sequence` | その連番は既に使用済みと判定された |
+| 作業ディレクトリ | `evaluation-work/<連番>/` | 採点または中断された試行が作業領域を作った |
+| 採点ログ | `evidence/scoring-<連番>-*.log` | 採点または中断された試行がログを残した |
+
+**インデックスに記録が無くても、作業領域や証跡が残っていれば使用済みとして扱う。**
+中断された試行の痕跡は、それが起きたことを示す唯一の証拠であり、無条件に削除しない。
+`--sequence` を省略した場合は**使用済みの最大の次**を使う。件数で数えると、
+中断された試行が残した痕跡と衝突する。
+
+**拒否の記録は、採用済みの採点記録と別に保存する。**
+
+| 出力 | 内容 |
+| --- | --- |
+| `evaluations/duplicate_sequence-<連番>-<uuid>/record.json` | `scoring_state = duplicate_sequence`、`adopted = false`、`evaluator_not_invoked = true`、`evidence_unchanged = true`、拒否の理由（`conflicting` に検出した痕跡の一覧） |
+| `evaluations/duplicate-refusals.jsonl` | 拒否の追記専用の索引（`run_id` `sequence` `detected` `evaluator_invoked` `timestamp`） |
+
+`index.jsonl` には書かない。書くと `last_scoring` と集計表の `scoring` が
+**拒否の記録をその Run の採点として読む**ためである（§7）。Run の採用済み採点は変わらない。
+再採点は**新しい連番**で行い、以前の作業領域を削除して再利用しない。
+
+同じ連番の再指定で**評価器が追加実行されない**こと、以前の DB・作業ファイル・
+標準出力ログの内容が変わらないこと（**内容のハッシュで確認する**）、
+以前の `record.json`・`evaluation.json`・証跡との対応が維持されることは、
+`outer/tests/test_evaluate.py` と [`outer/verify/verify.py`](../outer/verify/verify.py) の `V-4` が確認する。
+**並列実行機構は新設していない。** 重複の拒否は直列の判定であり、
+同時に同じ連番を指定する競合の扱いは未確認である（§11）。
+
 ## 7. 記録と再集計
 
 `runs/aggregate.json` を**保存済み資材だけから**作る。再集計は成果物を再評価しない。
@@ -368,7 +410,7 @@
 | --- | --- |
 | `execution.state` | `not_started` / `running` / `completed` / `agent_error` / `timeout` / `stop_unconfirmed` / `environment_failure` |
 | `artifact.state` | `fixed` / `not_fixed` / `missing_workspace` |
-| `scoring.state` | `not_attempted` / `scored` / `evaluator_fault` / `rejected_mismatch` |
+| `scoring.state` | `not_attempted` / `scored` / `evaluator_fault` / `rejected_mismatch` / `duplicate_sequence` |
 | `quality` | 評価器の `quality` をそのまま。未採点は `null` |
 | `verdict` | 評価器の `verdict` をそのまま |
 | `usage.state` | `complete` / `missing` |
@@ -379,6 +421,9 @@
 - **成功 Run だけに絞らない。** 失敗・未採点・欠測の Run も同じ表に出す。
 - 未採点を 0 点や合格にしない。`blocked` を分母から落とさない。
 - `observed_tokens` と `total_tokens` を同じ列にしない。
+- **重複した連番の拒否は `index.jsonl` に書かない。** 拒否は Run の採点ではないため、
+  `last_scoring` と集計表の `scoring` は採用済みの採点を指し続ける（§6.6）。
+  拒否は `duplicate-refusals.jsonl` と `duplicate_sequence-*` の `record.json` から引く。
 
 ### 7.1 原本の保全と復元
 
@@ -451,7 +496,7 @@ runs/<run_id>/
 | 確認したこと | ケース |
 | --- | --- |
 | 固定 → 採点 → 保存 → 再採点 → 再集計の経路 | V-2 V-5 V-7 V-8 |
-| **同一成果物・同一評価版・同一連番**の再実行を重複として拒否し、既存の評価ディレクトリを増やさないこと | V-4 |
+| **同一成果物・同一評価版・同一連番**の再実行を、**副作用の前に**重複として拒否し、以前の DB・作業ファイル・標準出力ログの内容（ハッシュ）と採点記録を変えないこと。拒否は採用済みの採点記録と別に残ること | V-4（[§6.6](#66-重複した連番は副作用の前に拒否する)） |
 | **連番を進めた再採点**で `verdict` `quality` 成果物ハッシュが一致し、`evaluation_id` の差が連番だけであること | V-5 |
 | 再採点が**前回の採点の作業ディレクトリと DB を引き継がない**こと | V-5 |
 | 識別・停止・回収・欠測・失敗状態の扱い（ダミー実行器・合成使用量） | V-2 V-3 V-6 V-6b V-7 |
@@ -460,6 +505,9 @@ runs/<run_id>/
 | **回収の後に変更された成果物を採点せず、拒否として記録すること** | V-13 |
 | **採点が成果物ディレクトリを書き換えないこと**（発行の出力が成果物の外にあること） | V-14 |
 | **成果物がビルドできない場合を評価器の障害にせず、要件の不合格として採点すること** | V-6 |
+| **再起動をまたぐ注文の保持を、保存契約の注文行で観測し、注文を消す成果物を `fail_critical` にすること** | 校正（[`inner/calibration/`](../inner/calibration/README.md) の `neg-wipe-orders-only`。**実評価器**） |
+| **HTML の属性表記の差（`=` 前後の空白・タブ・改行、属性順）で判定が変わらないこと** | 校正（`var-whitespace-notation`。**実評価器**） |
+| **コメント中の旧名称の言及で `R-029` を落とさず、実際に旧実装を起動する負例は落とすこと** | 校正（`var-legacy-comment-mention` と `neg-legacy-wrapper`。**実評価器**） |
 | 評価側障害を実装失敗として扱わないこと | V-6b（**代替評価器**。実評価器では未確認） |
 | 評価器の実行が上限を超えたとき、評価器とその子プロセスを道連れに停止すること | V-1（`ScoringTimeoutTests`。**代替評価器**。実評価器では未確認） |
 | 非公開情報を入力として配布できないこと | V-9 |
@@ -487,6 +535,9 @@ runs/<run_id>/
 ### 10.2 実モデル接続でしか確認できない残件
 
 `outer/` にモデルを呼ぶ経路は無い。次は**未確認**である。
+**2026-09-17 の評価器の修正（保存契約・重複連番の拒否・旧名称の区別・HTML 属性の空白）は、
+いずれも実モデルを呼ばない検査の修正であり、この節の未確認事項を解消しない。**
+**評価器の修正を、実モデル接続の確認完了として扱わない。**
 
 1. 実際のエージェント実行での起動・完了宣言・停止の確認（タイムアウトと子プロセスの残存を含む）
 2. 実際の使用量原本の形式と、`usage.py` の入力形式の対応。cache・reasoning の欄が原本にあるか

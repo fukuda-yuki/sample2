@@ -258,7 +258,7 @@ public static class Checks
 
     private static CheckResult C006(RunState state)
     {
-        const string input = "プロセスを再起動し、同じ DB で /Store と注文識別子を観測する";
+        const string input = "プロセスを再起動し、同じ DB で /Store と注文行の保持を観測する";
         var pre = Precondition(state, "R-005", "C-006", input);
         if (pre != null)
         {
@@ -273,16 +273,73 @@ public static class Checks
 
         var genreOk = scenario.GenreCount == state.Catalog.Genres.Count;
         var rockOk = scenario.RockCount == state.Catalog.CountByGenre("Rock");
-        var orderOk = scenario.OrderIdBefore.HasValue && scenario.OrderIdAfter.HasValue && scenario.OrderIdBefore.Value != scenario.OrderIdAfter.Value;
-        var ok = genreOk && rockOk && orderOk;
+        var catalogOk = genreOk && rockOk;
+
+        var before = scenario.OrderRowBeforeRestart;
+        var after = scenario.OrderRowAfterRestart;
 
         var observed =
             $"再起動後: ジャンル {scenario.GenreCount}/{state.Catalog.Genres.Count}、Rock のアルバム {scenario.RockCount}/{state.Catalog.CountByGenre("Rock")}。" +
             $"再起動前の注文番号 {Describe(scenario.OrderIdBefore)}、再起動後の注文番号 {Describe(scenario.OrderIdAfter)}。" +
+            $"再起動前の注文行: {DescribeProbe(before)} 再起動後の同じ注文行: {DescribeProbe(after)}。" +
             $"再起動: {scenario.RestartDetail}";
+
+        // 保存状態を読めない場合は、成果物の欠陥ではなく評価側の障害として記録する。
+        // 「注文が消えた」と「観測できなかった」を同じ判定にしない。
+        if (IsUnreadable(before) || IsUnreadable(after))
+        {
+            return Make(
+                state,
+                "R-005",
+                "C-006",
+                input,
+                Judgement.Error,
+                "評価側の障害: 保存状態を読めませんでした。" + observed,
+                state.Transcript("restart"));
+        }
+
+        // 注文の保持を確認できたことにしない条件を、理由ごとに分けて残す。
+        string orderFailure = null;
+        if (!scenario.OrderIdBefore.HasValue)
+        {
+            orderFailure = "再起動前の注文番号が得られないため、注文の保持を確認できません。";
+        }
+        else if (before == null || after == null)
+        {
+            orderFailure = "注文行の観測を実施できませんでした。保持を確認できたことにしません。";
+        }
+        else if (before.Status == OrderStore.ProbeStatus.ContractViolation
+                 || after.Status == OrderStore.ProbeStatus.ContractViolation)
+        {
+            orderFailure = "保存契約（Orders 表の OrderId 列）を満たしていないため、注文の保持を確認できません。";
+        }
+        else if (!before.Found)
+        {
+            orderFailure = "注文確定の直後に、その注文行が保存されていません。";
+        }
+        else if (!after.Found)
+        {
+            orderFailure = "再起動後に、再起動前の注文行が残っていません（注文が保持されていません）。";
+        }
+        else if (!scenario.OrderIdAfter.HasValue || scenario.OrderIdBefore.Value == scenario.OrderIdAfter.Value)
+        {
+            orderFailure = "再起動後の注文番号が得られないか、再起動前の注文番号と同じです。";
+        }
+
+        var ok = catalogOk && orderFailure == null;
+        if (orderFailure != null)
+        {
+            observed = orderFailure + observed;
+        }
 
         return Verdict(state, "R-005", "C-006", input, ok, observed, state.Transcript("restart"));
     }
+
+    private static bool IsUnreadable(OrderStore.Probe probe) =>
+        probe != null && probe.Status == OrderStore.ProbeStatus.Unreadable;
+
+    private static string DescribeProbe(OrderStore.Probe probe) =>
+        probe == null ? "未観測" : probe.Status + "（" + probe.Detail + "）";
 
     private static CheckResult C007(RunState state)
     {
@@ -923,6 +980,9 @@ public static class Checks
         }
 
         var ok = scenario.LegacyReferences.Count == 0;
+        var mentions = scenario.LegacyMentions.Count == 0
+            ? "コメント・説明文での旧名称の言及はありません。"
+            : $"コメント・説明文での旧名称の言及が {scenario.LegacyMentions.Count} 件あります（診断情報。依存の根拠にしない）: {string.Join(", ", scenario.LegacyMentions.Take(10))}";
         return Verdict(
             state,
             "R-029",
@@ -930,9 +990,9 @@ public static class Checks
             input,
             ok,
             ok
-                ? "成果物ツリーに旧実装を参照・起動する記述は見つかりませんでした。"
-                : $"旧実装を参照・起動する記述が {scenario.LegacyReferences.Count} 件見つかりました: {string.Join(", ", scenario.LegacyReferences.Take(10))}",
-            string.Join(Environment.NewLine, scenario.LegacyReferences));
+                ? "成果物ツリーに旧実装を参照・起動する記述は見つかりませんでした。" + mentions
+                : $"旧実装を参照・起動する記述が {scenario.LegacyReferences.Count} 件見つかりました: {string.Join(", ", scenario.LegacyReferences.Take(10))}。{mentions}",
+            string.Join(Environment.NewLine, scenario.LegacyReferences.Concat(scenario.LegacyMentions)));
     }
 
     private static int? ExtractItemCount(string jsonBody)

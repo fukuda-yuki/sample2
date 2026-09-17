@@ -41,6 +41,24 @@ class RunFixture:
         return evaluate.score_run(self.repo, self.runs, self.manifest['run_id'],
                                   evaluator=STUB, **kwargs)
 
+    def snapshot_evidence(self):
+        """Content hashes of the work directories, logs and records of a run."""
+        run_dir = self.run_dir
+        paths = []
+        for root in ('evaluations', 'evaluation-work', 'evidence'):
+            base = run_dir / root
+            if base.is_dir():
+                paths.extend(p for p in base.rglob('*') if p.is_file())
+        return {str(p.relative_to(run_dir)).replace('\\', '/'): util.sha256_file(p)
+                for p in sorted(paths)}
+
+    def count_invocations(self):
+        """Start counting evaluator invocations; returns the log path."""
+        log = self.run_dir / 'stub-invocations.log'
+        os.environ['HARNESS_STUB_INVOCATIONS'] = str(log)
+        self.addCleanup(os.environ.pop, 'HARNESS_STUB_INVOCATIONS', None)
+        return log
+
 
 class ScoreTestCase(RunFixture, unittest.TestCase):
 
@@ -68,19 +86,108 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
         self.assertEqual(first['evaluation_id'], entries[0]['evaluation_id'])
         self.assertEqual(second['evaluation_id'], entries[1]['evaluation_id'])
 
-    def test_same_artifact_and_version_at_the_same_sequence_repeats_the_id(self):
-        first = self.score('ok')
-        expected = '{}-{}-1.0.0-001'.format(support.TASK_ID,
-                                            first['artifact_sha256_outer'][:12])
-        self.assertEqual(expected, first['evaluation_id'])
-        with self.assertRaises(FileExistsError):
-            self.score('ok', sequence=1)
-        directories = sorted(p.name for p in (self.run_dir / 'evaluations').iterdir()
-                             if p.is_dir())
-        self.assertEqual([expected], directories)
-        leftovers = [p.name for p in (self.run_dir / 'evaluations').iterdir()
-                     if p.name.startswith('.tmp-')]
-        self.assertEqual([], leftovers)
+    def test_a_used_sequence_is_refused_before_any_side_effect(self):
+        """The earlier scoring's work directory, database, logs and records are its evidence.
+
+        Reusing the number would overwrite them, so the refusal must happen
+        before the work directory is touched, before the logs are opened and
+        before the evaluator is started.
+        """
+        first = self.score('work-marker')
+        self.assertEqual('scored', first['scoring_state'])
+        before = self.snapshot_evidence()
+        invocations = self.count_invocations()
+
+        record = self.score('work-marker', sequence=1)
+
+        self.assertEqual('duplicate_sequence', record['scoring_state'])
+        self.assertFalse(record['adopted'])
+        self.assertIsNone(record['quality'])
+        self.assertIsNone(record['verdict'])
+        # 評価器を起動していない。
+        self.assertFalse(invocations.exists())
+        # 以前の採点の資材が、存在や件数ではなく内容まで変わっていない。
+        after = self.snapshot_evidence()
+        self.assertEqual(sorted([record['directory'] + '/record.json',
+                                 'evaluations/duplicate-refusals.jsonl']),
+                         sorted(set(after) - set(before)))
+        for path, digest in before.items():
+            self.assertEqual(digest, after[path], path)
+        # 以前の採点の対応が維持されている。
+        self.assertEqual(1, len(evaluate.read_index(self.run_dir)))
+        self.assertEqual(first['evaluation_id'],
+                         evaluate.last_scoring(self.run_dir)['evaluation_id'])
+        self.assertEqual(first['evaluation_id'],
+                         util.read_json(self.run_dir / first['directory']
+                                        / 'evaluation.json')['evaluationId'])
+        # 拒否は、既存の採点のログ・結果とは別の記録として残る。
+        refusals = evaluate.read_duplicate_refusals(self.run_dir)
+        self.assertEqual(1, len(refusals))
+        self.assertEqual(1, refusals[0]['sequence'])
+        self.assertEqual('duplicate_sequence', refusals[0]['scoring_state'])
+        self.assertTrue((self.run_dir / record['directory'] / 'record.json').is_file())
+        self.assertFalse((self.run_dir / record['directory'] / 'evaluation.json').is_file())
+        # 集計は以前の採点のままである。
+        row = aggregate.row_for(self.runs, self.manifest['run_id'])
+        self.assertEqual('scored', row['scoring']['state'])
+        self.assertEqual('pass', row['verdict'])
+
+    def test_a_leftover_attempt_without_an_index_record_is_preserved(self):
+        """An interrupted attempt leaves a work directory and a log, and no index record.
+
+        Those files are the only trace that the attempt happened, so the number
+        is treated as used and nothing is deleted.
+        """
+        work = self.run_dir / 'evaluation-work' / '001'
+        work.mkdir(parents=True)
+        (work / 'store.sqlite').write_text('interrupted\n', encoding='utf-8')
+        evidence = self.run_dir / 'evidence'
+        evidence.mkdir(parents=True, exist_ok=True)
+        (evidence / 'scoring-001-stdout.log').write_text('interrupted\n', encoding='utf-8')
+        invocations = self.count_invocations()
+
+        record = self.score('ok', sequence=1)
+
+        self.assertEqual('duplicate_sequence', record['scoring_state'])
+        self.assertFalse(invocations.exists())
+        self.assertEqual('interrupted\n',
+                         (work / 'store.sqlite').read_text(encoding='utf-8'))
+        self.assertEqual('interrupted\n',
+                         (evidence / 'scoring-001-stdout.log').read_text(encoding='utf-8'))
+        self.assertEqual([], evaluate.read_index(self.run_dir))
+        self.assertIn('evaluation-work/001', record['sequence_traces'])
+        self.assertIn('evidence/scoring-001-stdout.log', record['sequence_traces'])
+
+    def test_the_next_sequence_skips_a_leftover_attempt(self):
+        work = self.run_dir / 'evaluation-work' / '001'
+        work.mkdir(parents=True)
+        (work / 'store.sqlite').write_text('interrupted\n', encoding='utf-8')
+
+        record = self.score('ok')
+
+        self.assertEqual('scored', record['scoring_state'])
+        self.assertEqual(2, record['sequence'])
+        self.assertEqual('002', Path(record['work_dir']).name)
+        self.assertEqual('interrupted\n',
+                         (work / 'store.sqlite').read_text(encoding='utf-8'))
+
+    def test_rescoring_with_a_new_sequence_keeps_separate_work_and_evidence(self):
+        first = self.score('work-marker')
+        second = self.score('work-marker', sequence=2)
+
+        self.assertEqual('scored', first['scoring_state'])
+        self.assertEqual('scored', second['scoring_state'])
+        self.assertNotEqual(first['work_dir'], second['work_dir'])
+        self.assertEqual('001', Path(first['work_dir']).name)
+        self.assertEqual('002', Path(second['work_dir']).name)
+        self.assertTrue((Path(first['work_dir']) / 'store.sqlite').is_file())
+        self.assertTrue((Path(second['work_dir']) / 'store.sqlite').is_file())
+        self.assertEqual(['scoring-001-stderr.log', 'scoring-001-stdout.log',
+                          'scoring-002-stderr.log', 'scoring-002-stdout.log'],
+                         sorted(p.name for p in (self.run_dir / 'evidence').iterdir()
+                                if p.name.startswith('scoring-')))
+        self.assertEqual(2, len(evaluate.read_index(self.run_dir)))
+        self.assertEqual([], evaluate.read_duplicate_refusals(self.run_dir))
 
     def test_rescoring_keeps_verdict_and_quality_and_only_the_sequence_differs(self):
         first = self.score('ok')

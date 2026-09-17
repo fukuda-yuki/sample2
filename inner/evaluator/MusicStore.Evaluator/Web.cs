@@ -109,24 +109,27 @@ public static class Html
 {
     // 属性値の引用符は " と ' のどちらも等価な HTML である（docs/quality-spec.md §4.6）。
     // 契約は識別子と値であり、引用符の種類は判定に影響させない。
+    // 属性名と値の間の空白・タブ・改行も等価な HTML である。`=` の前後を \s* で
+    // 許容し、属性の順序にも依存しない。HTML 全体の空白を削る前処理はしない
+    // （表示内容や値を変えてしまうため）。
     public static readonly Regex CartRowRegex = new Regex(
-        "<tr[^>]*id=[\"']row-(?<recordId>\\d+)[\"'][^>]*>(?<inner>.*?)</tr>",
+        "<tr[^>]*id\\s*=\\s*[\"']row-(?<recordId>\\d+)[\"'][^>]*>(?<inner>.*?)</tr>",
         RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
     public static readonly Regex AlbumLinkRegex = new Regex(
-        "href=[\"'](?:[^\"']*?)?/Store/Details/(?<albumId>\\d+)[\"']",
+        "href\\s*=\\s*[\"'](?:[^\"']*?)?/Store/Details/(?<albumId>\\d+)[\"']",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex ItemCountRegex = new Regex(
-        "id=[\"']item-count-(?<recordId>\\d+)[\"'][^>]*>\\s*(?<count>\\d+)\\s*<",
+        "id\\s*=\\s*[\"']item-count-(?<recordId>\\d+)[\"'][^>]*>\\s*(?<count>\\d+)\\s*<",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex CartTotalRegex = new Regex(
-        "id=[\"']cart-total[\"'][^>]*>\\s*(?<total>-?[0-9][0-9,]*(?:\\.[0-9]+)?)\\s*<",
+        "id\\s*=\\s*[\"']cart-total[\"'][^>]*>\\s*(?<total>-?[0-9][0-9,]*(?:\\.[0-9]+)?)\\s*<",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex CartStatusRegex = new Regex(
-        "id=[\"']cart-status[\"'][^>]*>(?<text>[^<]*)<",
+        "id\\s*=\\s*[\"']cart-status[\"'][^>]*>(?<text>[^<]*)<",
         RegexOptions.IgnoreCase);
 
     public static readonly Regex OrderNumberRegex = new Regex(

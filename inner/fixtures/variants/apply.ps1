@@ -111,6 +111,41 @@ switch ($Name) {
             'かご件数の id を単一引用符で書く'
     }
 
+    'whitespace-notation' {
+        # 属性名と属性値の間の空白・タブ・改行、および属性順を、等価な表記へ変える。
+        # 契約は識別子と値であり、空白の表記は判定に影響させてはならない
+        # （docs/quality-spec.md §4.6）。観測される値は変えない。
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<tr id="row-@item.RecordId">' `
+            ("<tr`t id`n     = `"row-@item.RecordId`">") `
+            '明細行の id を = の前後の空白・タブ・改行で書く'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<a href="/Store/Details/@item.AlbumId">@item.Album.Title</a>' `
+            "<a href = '/Store/Details/@item.AlbumId'>@item.Album.Title</a>" `
+            'アルバムリンクを単一引用符と = の前後の空白で書く'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<td id="item-count-@item.RecordId">' `
+            "<td id = `"item-count-@item.RecordId`">" `
+            '数量セルの id を = の前後の空白で書く'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<td id="cart-total">' `
+            "<td id`t=`"cart-total`">" `
+            '合計セルの id をタブで書く'
+        Edit-File 'MusicStore.Web\Views\Shared\_Layout.cshtml' `
+            '<a href="/ShoppingCart" id="cart-status">' `
+            "<a id = 'cart-status' href=`"/ShoppingCart`">" `
+            'かご件数の属性順を変え、= の前後に空白を入れる'
+    }
+
+    'legacy-comment-mention' {
+        # 旧実装への言及を説明コメントにだけ残す。実際の参照・起動はないため、
+        # 合格しなければならない（docs/quality-spec.md §7.2）。
+        Edit-File 'MusicStore.Web\Program.cs' `
+            'var builder = WebApplication.CreateBuilder(args);' `
+            ('// Migrated from net48 to net8.0; no legacy process is used.' + $nl + '// MvcMusicStore は旧実装の名前であり、参照も起動もしない。' + $nl + 'var builder = WebApplication.CreateBuilder(args);') `
+            '旧実装への言及を説明コメントに残す'
+    }
+
     'legacy-name-kept' {
         # 旧名称を名前空間・アセンブリ名に残したまま移行を完了させる。
         # 名前の一致は旧実装への依存ではない。参照・起動の記述だけを不合格にする

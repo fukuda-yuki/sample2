@@ -7,12 +7,16 @@
 
   校正の 4 分類（docs/quality-spec.md §7.1）をすべて含む。
     1. 正例            : inner/fixtures/reference
-    2. 重要な負例      : inner/fixtures/negatives の 9 種
-    3. 妥当な別実装    : inner/fixtures/alternative と inner/fixtures/variants の 2 種
+      2. 重要な負例      : inner/fixtures/negatives の 10 種
+      3. 妥当な別実装    : inner/fixtures/alternative と inner/fixtures/variants の 4 種
     4. 評価側の障害    : 成果物なし / 台帳に実装のない検査 ID
 
-  `wipe-orders-only` だけは期待が pass である。注文を消しても R-005 が落ちない
-  ことを固定し、見逃しを「直った」ことにしないための負例である（§5 の限界）。
+    `wipe-orders-only` は 2026-02 の再レビュー指摘まで期待が pass だった。注文を
+    消しても R-005 が落ちないことを固定し、見逃しを「直った」ことにしないための
+    負例である。指摘後は保存契約の Orders 表を再起動前後で観測するため、期待は
+        fail_critical である。過去の pass 記録は履歴として別ファイル
+        inner/calibration/calibration-summary-1.0.0.json（評価版 1.0.0 の 17 ケース）に
+        残し、本スクリプトは最新の実行結果だけを runs/ に書く。過去の記録を上書きしない。
 
   期待は実行前に宣言する。各ケースについて「期待する判定」「不合格になる要件の
   集合」「未評価になる要件の集合」「終了コード」「品質点の有無」を固定し、実結果と
@@ -24,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$EvaluationVersion = '1.0.0'
+    [string]$EvaluationVersion = '1.1.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -189,8 +193,12 @@ Add-Case -CaseId 'neg-compile-error' -Kind '重要な負例' -Artifact $null -Ne
     -Note '成果物に構文エラーを入れる。ビルドの R-001 だけが不合格になり、起動できないために観測できない要件は未評価になることを期待する。評価側の障害（error）にしてはならない。'
 
 Add-Case -CaseId 'neg-wipe-orders-only' -Kind '重要な負例' -Artifact $null -Negative 'wipe-orders-only' -Sequence 18 `
-    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
-    -Note '再起動のたびに注文を消す。注文番号が変わるため R-005 はこれを見逃す。**期待は pass** であり、見逃しを校正の限界として固定する（§5）。'
+    -ExpectedVerdict 'fail_critical' -ExpectedFailed @('R-005') -ExpectedBlocked @() `
+    -Note '再起動のたびに注文を消す。保存契約の Orders 表で再起動前の注文行が消えたことを観測し、重大要件 R-005 が不合格になることを期待する。過去の pass は見逃しであり、記録として残す（§5、§7.3）。'
+
+Add-Case -CaseId 'neg-whitespace-wrong-quantity' -Kind '重要な負例' -Artifact $null -Negative 'whitespace-wrong-quantity' -Sequence 19 `
+    -ExpectedVerdict 'fail_critical' -ExpectedFailed @('R-012', 'R-014', 'R-016') -ExpectedBlocked @() `
+    -Note '空白表記で書いた数量セルの値そのものを誤らせる。空白を許容しても値の誤りは検出し、数量を見る R-012 R-014 R-016 が落ちることを期待する。'
 
 Add-Case -CaseId 'var-single-quoted-attributes' -Kind '妥当な別実装' -Artifact $null -Variant 'single-quoted-attributes' -Sequence 20 `
     -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
@@ -199,6 +207,14 @@ Add-Case -CaseId 'var-single-quoted-attributes' -Kind '妥当な別実装' -Arti
 Add-Case -CaseId 'var-legacy-name-kept' -Kind '妥当な別実装' -Artifact $null -Variant 'legacy-name-kept' -Sequence 21 `
     -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
     -Note '旧名称を名前空間・アセンブリ名に残す。名前の一致を旧実装への依存と誤認しないことを期待する。'
+
+Add-Case -CaseId 'var-whitespace-notation' -Kind '妥当な別実装' -Artifact $null -Variant 'whitespace-notation' -Sequence 22 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note '属性名と値の間の空白・タブ・改行と属性順を変える。値が同じなら同じ判定になることを期待する。'
+
+Add-Case -CaseId 'var-legacy-comment-mention' -Kind '妥当な別実装' -Artifact $null -Variant 'legacy-comment-mention' -Sequence 23 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note '旧実装への言及を説明コメントに残す。実際の参照・起動がないため R-029 が落ちないことを期待する。'
 
 $missingArtifact = Join-Path $runs 'no-such-artifact'
 Add-Case -CaseId 'fault-missing-artifact' -Kind '評価側の障害' -Artifact $missingArtifact -Sequence 90 `

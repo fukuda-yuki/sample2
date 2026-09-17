@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-16T00:17:23.808734+00:00",
-  "started_at": "2026-09-16T00:16:46.117859+00:00",
-  "repo": "C:\\Users\\mwam0\\.copilot\\repos\\copilot-worktrees\\sample2\\fukuda-yuki-issue-6-10-2-21fab1",
+  "generated_at": "2026-09-17T16:54:41.531015+00:00",
+  "started_at": "2026-09-17T16:54:03.920236+00:00",
+  "repo": "C:\\Users\\mwam0\\.copilot\\repos\\sample2",
   "note": "外側の実験実行基盤の非モデル検証の生記録。モデルは一切呼び出していない。期待は実行前に宣言し、観測値と完全一致で突き合わせる。",
   "environment": {
     "platform": "win32",
@@ -10,15 +10,15 @@
     "dotnet": "10.0.300-preview.0.26177.108"
   },
   "commands": [
-    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\copilot-worktrees\\sample2\\fukuda-yuki-issue-6-10-2-21fab1\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
-    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\copilot-worktrees\\sample2\\fukuda-yuki-issue-6-10-2-21fab1\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
+    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
+    "dotnet build C:\\Users\\mwam0\\.copilot\\repos\\sample2\\inner\\evaluator\\MusicStore.Evaluator\\MusicStore.Evaluator.csproj -c Release --nologo -v q",
     "C:\\Python314\\python.exe -m unittest discover -p test_*.py -v",
     "harness.cli preserve --run MS1-001-C01-001 --archive C:\\Users\\mwam0\\AppData\\Local\\Temp\\musicstore-verify-preserve\\archive"
   ],
   "artifacts": {
-    "evaluator_sha256_rebuild": "4eeca67bd2206b78aec96a56072b9cf8ccebc8081406565d22584b275ab3caa2",
+    "evaluator_sha256_rebuild": "210205b9fe6aae351202524a9d9c37218fbf63924070696df63454c5593d3585",
     "evaluator_dll": "inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll",
-    "evaluator_sha256": "4eeca67bd2206b78aec96a56072b9cf8ccebc8081406565d22584b275ab3caa2"
+    "evaluator_sha256": "210205b9fe6aae351202524a9d9c37218fbf63924070696df63454c5593d3585"
   },
   "case_count": 18,
   "mismatched": [],
@@ -55,11 +55,13 @@
       "what": "外側のテストを実行する",
       "expected": {
         "failed": 0,
-        "ran_at_least_70": true
+        "ran_at_least_70": true,
+        "test_count": 90
       },
       "observed": {
         "failed": 0,
-        "ran_at_least_70": true
+        "ran_at_least_70": true,
+        "test_count": 90
       },
       "matched": true
     },
@@ -95,7 +97,7 @@
         "verdict": "pass",
         "quality": 100.0,
         "mismatches": [],
-        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001",
+        "evaluation_id": "MS1-001-9a6de335c982-1.1.0-001",
         "artifact_sha256_reported": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73"
       },
       "observed": {
@@ -114,7 +116,7 @@
         "verdict": "pass",
         "quality": 100,
         "mismatches": [],
-        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001",
+        "evaluation_id": "MS1-001-9a6de335c982-1.1.0-001",
         "artifact_sha256_reported": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73"
       },
       "matched": true
@@ -130,7 +132,7 @@
           "crlf_to_lf"
         ],
         "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
-        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001"
+        "evaluation_id": "MS1-001-9a6de335c982-1.1.0-001"
       },
       "observed": {
         "artifact_hash_changed_by_collection": true,
@@ -139,25 +141,31 @@
           "crlf_to_lf"
         ],
         "artifact_sha256": "9a6de335c982a35a6fa76737872c698ade9d32a1b03cc1636ebb90d8d9259e73",
-        "evaluation_id": "MS1-001-9a6de335c982-1.0.0-001"
+        "evaluation_id": "MS1-001-9a6de335c982-1.1.0-001"
       },
       "matched": true
     },
     {
       "id": "V-4",
       "kind": "measured",
-      "what": "同じ成果物・同じ評価版・同じ連番の再実行を重複として拒否する",
+      "what": "同じ成果物・同じ評価版・同じ連番の再実行を、副作用の前に拒否する",
       "expected": {
-        "raised": "FileExistsError",
-        "directories_before": 1,
-        "directories_after": 1,
-        "index_unchanged": true
+        "scoring_state": "duplicate_sequence",
+        "adopted": false,
+        "evaluator_not_invoked": true,
+        "evidence_unchanged": true,
+        "index_unchanged": true,
+        "refusal_recorded_separately": true,
+        "refusal_count": 1
       },
       "observed": {
-        "raised": "FileExistsError",
-        "directories_before": 1,
-        "directories_after": 1,
-        "index_unchanged": true
+        "scoring_state": "duplicate_sequence",
+        "adopted": false,
+        "evaluator_not_invoked": true,
+        "evidence_unchanged": true,
+        "index_unchanged": true,
+        "refusal_recorded_separately": true,
+        "refusal_count": 1
       },
       "matched": true
     },
@@ -347,7 +355,7 @@
       "what": "保存したパッケージを検証・復元し、復元した資材で再集計できる",
       "expected": {
         "package_id": "run-MS1-001-C01-001",
-        "package_files": 69,
+        "package_files": 71,
         "restored_runs": 1,
         "quality": 100,
         "verdict": "pass",
@@ -356,7 +364,7 @@
       },
       "observed": {
         "package_id": "run-MS1-001-C01-001",
-        "package_files": 69,
+        "package_files": 71,
         "restored_runs": 1,
         "quality": 100,
         "verdict": "pass",

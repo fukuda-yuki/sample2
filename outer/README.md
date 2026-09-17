@@ -22,7 +22,7 @@
 | --- | --- |
 | `harness/` | 実行基盤の実装（Python 3、標準ライブラリのみ） |
 | `conditions/<task_id>/condition.json` | 条件。課題・開始状態・環境・移行要求・入力条件・実行上限・エージェント版・評価版 |
-| `tests/` | 非モデル検証の単体テスト（`unittest`）。87 件 |
+| `tests/` | 非モデル検証の単体テスト（`unittest`）。90 件 |
 | `verify/` | 接続検証のドライバ（`verify.py`）、記録（`README.md`）、生データ（`verification-summary.json`） |
 
 実行時のデータは `runs/` に置き、**追跡しない**。

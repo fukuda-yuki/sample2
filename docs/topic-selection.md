@@ -1,7 +1,7 @@
 # 題材・移行課題の選定（第 1 課題）
 
 対応 Issue: [#3](https://github.com/fukuda-yuki/sample2/issues/3)
-状態: **採用確定（.NET 候補）／移行課題 `MS1-001` の範囲も確定**（[decision-log.md](decision-log.md) D-10）。§2 の移行範囲は、[quality-spec.md](quality-spec.md) の校正 13 ケースが期待と完全一致したことをもって確定した（[inner/calibration/README.md](../inner/calibration/README.md) §2）。ただし校正は部分検証である（同 §5）。
+状態: **採用確定（.NET 候補）／移行課題 `MS1-001` の範囲も確定**（[decision-log.md](decision-log.md) D-10）。§2 の移行範囲は、[quality-spec.md](quality-spec.md) の校正 13 ケースが期待と完全一致したことをもって確定した（[inner/calibration/README.md](../inner/calibration/README.md) §2）。ただし校正は部分検証である（同 §5）。**確定の根拠に使った 13 ケースは当時の件数であり、その後の改訂で 20 ケースになっている**（同 §2。確定そのものは巻き戻していない）。
 関連: [docs/plan.md](plan.md) の D-4・D-6、[docs/decision-log.md](decision-log.md)、[docs/sample1-inventory.md](sample1-inventory.md)、[docs/quality-spec.md](quality-spec.md)
 
 ## 0. この文書の事実区分
@@ -88,7 +88,7 @@
 - [x] 最初の 1 課題の推奨案、選定理由、評価可能な品質の範囲、主なリスクを示した（§2〜§4）
 - [x] 必要情報の探索・依存関係を残せているかと、評価準備の負担の両方を説明した（§3 の 3、§4）
 - [x] ユーザー判断が記録されている（[decision-log.md](decision-log.md) の D-4・D-6。`.NET` 候補の採用は確定）
-- [x] `MS1-001` の移行範囲（§2）を確定した。[quality-spec.md](quality-spec.md) の校正（正例・負例・別実装・評価側障害）13 ケースが期待と完全一致したため（[inner/calibration/README.md](../inner/calibration/README.md) §2、判断は [decision-log.md](decision-log.md) D-10）。ただし校正は部分検証であり（同 §5）、この確定は「評価器がこの範囲で使える」ことの確認であって「範囲が研究に十分」ことの証明ではない。
+- [x] `MS1-001` の移行範囲（§2）を確定した。[quality-spec.md](quality-spec.md) の校正（正例・負例・別実装・評価側障害）13 ケースが期待と完全一致したため（[inner/calibration/README.md](../inner/calibration/README.md) §2、判断は [decision-log.md](decision-log.md) D-10）。ただし校正は部分検証であり（同 §5）、この確定は「評価器がこの範囲で使える」ことの確認であって「範囲が研究に十分」ことの証明ではない。**確定に使った件数は当時の 13 ケースであり、その後 20 ケースに増えている**（同 §2）。
 
 ## 7. 参照
 

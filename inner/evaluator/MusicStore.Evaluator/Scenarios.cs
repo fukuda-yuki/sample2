@@ -182,6 +182,12 @@ public sealed class RestartResult : ScenarioResult
 
     public int? OrderIdAfter { get; set; }
 
+    /// <summary>再起動の直前に観測した、再起動前の注文行。</summary>
+    public OrderStore.Probe OrderRowBeforeRestart { get; set; }
+
+    /// <summary>再起動後、新しい注文を作る前に観測した、同じ注文行。</summary>
+    public OrderStore.Probe OrderRowAfterRestart { get; set; }
+
     public WebResponse CheckoutPost { get; set; }
 
     public string RestartDetail { get; set; } = string.Empty;
@@ -237,7 +243,15 @@ public sealed class StaticResult : ScenarioResult
 
     public string DatabasePath { get; set; }
 
+    /// <summary>
+    /// 旧実装を参照・起動する記述（設定・参照・起動処理）。コメントでの言及は含めない。
+    /// </summary>
     public List<string> LegacyReferences { get; set; } = new List<string>();
+
+    /// <summary>
+    /// コメント・説明文での旧名称の言及。診断情報であり、依存の根拠にしない。
+    /// </summary>
+    public List<string> LegacyMentions { get; set; } = new List<string>();
 }
 
 public static class Scenarios
@@ -411,6 +425,13 @@ public static class Scenarios
         RequireReady(state);
         var result = new RestartResult { OrderIdBefore = orderIdBefore };
 
+        // 再起動前の注文行を、再起動の前に観測しておく。再起動後に同じ行が残って
+        // いるかを見るための比較対象であり、注文番号の差では代替しない。
+        if (orderIdBefore.HasValue)
+        {
+            result.OrderRowBeforeRestart = OrderStore.OrderRowExists(state.Host.DatabasePath, orderIdBefore.Value);
+        }
+
         state.Host.Stop();
         state.Host.Start();
         var (ready, detail) = state.Host.WaitReady(TimeSpan.FromSeconds(60));
@@ -428,6 +449,13 @@ public static class Scenarios
 
         var rock = session.Get("/Store/Browse?genre=Rock");
         result.RockCount = Html.AlbumIds(rock.Body).Distinct().Count();
+
+        // 新しい注文を作る前に、再起動前の注文行が残っているかを観測する。
+        // 先に注文を作ると、保持していない成果物でも番号だけは進んでしまう。
+        if (orderIdBefore.HasValue)
+        {
+            result.OrderRowAfterRestart = OrderStore.OrderRowExists(state.Host.DatabasePath, orderIdBefore.Value);
+        }
 
         session.Get("/ShoppingCart/AddToCart/3");
         result.CheckoutPost = session.PostForm("/Checkout/AddressAndPayment", OrderFields("FREE"));
@@ -494,72 +522,12 @@ public static class Scenarios
 
         result.DatabasePath = state.Host.DatabasePath;
 
-        result.LegacyReferences = FindLegacyReferences(state.ArtifactPath);
+        var scan = LegacyScan.Scan(state.ArtifactPath);
+        result.LegacyReferences = scan.References;
+        result.LegacyMentions = scan.Mentions;
 
         return result;
     });
-
-    private static readonly string[] ScannedExtensions = { ".csproj", ".sln", ".cs", ".cshtml", ".config", ".props", ".targets", ".json" };
-
-    /// <summary>
-    /// 旧実装を「参照または起動する」記述。名前空間やアセンブリ名に旧名称を使うこと自体は
-    /// 移行の妨げではないので、名前の一致ではなく参照・起動の記述を見る。
-    /// ヒューリスティックであり、間接的なラッパー化を証明しない（docs/quality-spec.md §7.2）。
-    /// </summary>
-    private static readonly Regex[] LegacySignals =
-    {
-        new Regex(@"MvcMusicStore\.(?:exe|dll|pdb|csproj|sln)\b", RegexOptions.IgnoreCase),
-        new Regex(@"\bMVC-Music-Store\b", RegexOptions.IgnoreCase),
-        new Regex(@"\biisexpress\b", RegexOptions.IgnoreCase),
-        new Regex(@"\bSystem\.Web\b", RegexOptions.IgnoreCase),
-        new Regex(@"\bnet4[0-9]{0,2}\b", RegexOptions.IgnoreCase),
-        new Regex(@"\bTargetFrameworkVersion\b", RegexOptions.IgnoreCase),
-        new Regex(@"\bGlobal\.asax\b", RegexOptions.IgnoreCase),
-        new Regex(@"\bpackages\.config\b", RegexOptions.IgnoreCase),
-    };
-
-    /// <summary>
-    /// 成果物ツリーを静的に走査し、旧実装への参照・起動の記述を探す。
-    /// </summary>
-    public static List<string> FindLegacyReferences(string artifactPath)
-    {
-        var found = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(artifactPath, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(artifactPath, file);
-            var parts = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (parts.Any(p => p.Equals("bin", StringComparison.OrdinalIgnoreCase) || p.Equals("obj", StringComparison.OrdinalIgnoreCase) || p.Equals("wwwroot", StringComparison.OrdinalIgnoreCase)))
-            {
-                continue;
-            }
-
-            var extension = Path.GetExtension(file);
-            if (!ScannedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string text;
-            try
-            {
-                text = File.ReadAllText(file);
-            }
-            catch (Exception)
-            {
-                continue;
-            }
-
-            foreach (var signal in LegacySignals)
-            {
-                foreach (Match match in signal.Matches(text))
-                {
-                    found.Add(relative + " :: " + match.Value);
-                }
-            }
-        }
-
-        return found.Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
-    }
 
     public static string DescribeCart(IEnumerable<Html.CartLine> lines)
     {

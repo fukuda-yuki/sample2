@@ -27,4 +27,13 @@
     <EnableSourceLink>false</EnableSourceLink>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!--
+      保存契約（Orders 表の OrderId 列）に沿って注文行の存在を読み取り専用で観測するため。
+      成果物の内部スキーマを推測せずに済ませるには、SQLite を直接読む必要がある
+      （docs/quality-spec.md §4.6）。
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.31" />
+  </ItemGroup>
+
 </Project>

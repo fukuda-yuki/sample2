@@ -6,7 +6,14 @@ namespace MusicStore.Evaluator;
 
 public static class Program
 {
+    /// <summary>評価器自身の版。ビルドの同一性は evaluator_sha256 が表す。</summary>
     public const string EvaluatorVersion = "1.0.0";
+
+    /// <summary>
+    /// 判定の意味（検査集合・合否規則・配点）の既定版。--evaluation-version で上書きできる。
+    /// 評価器の版とは別に進める（docs/evaluator.md §6.2）。
+    /// </summary>
+    public const string DefaultEvaluationVersion = "1.1.0";
 
     public static int Main(string[] args)
     {
@@ -477,7 +484,7 @@ public sealed class CliOptions
 
     public string CatalogPath { get; private set; }
 
-    public string EvaluationVersion { get; private set; } = Program.EvaluatorVersion;
+    public string EvaluationVersion { get; private set; } = Program.DefaultEvaluationVersion;
 
     public int Sequence { get; private set; } = 1;
 

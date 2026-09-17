@@ -150,8 +150,9 @@ def run_unit_tests(repo, report):
     count = int(ran.group(1)) if ran else None
     failed = len(re.findall(r'^(FAIL|ERROR):', output, flags=re.MULTILINE))
     report.case('V-1', 'measured', '外側のテストを実行する',
-                {'failed': 0, 'ran_at_least_70': True},
-                {'failed': failed, 'ran_at_least_70': bool(count and count >= 70)})
+                {'failed': 0, 'ran_at_least_70': True, 'test_count': 90},
+                {'failed': failed, 'ran_at_least_70': bool(count and count >= 70),
+                 'test_count': count})
     # The five mismatch rules are checked with a stand-in evaluator, not the real
     # one. Record that the named test exists and ran green rather than claiming
     # the real evaluator was used.
@@ -233,7 +234,7 @@ def positive_path(repo, runs, source, reference, report):
                  'normalized_files': 0, 'usage_state': 'complete',
                  'total_tokens': EXPECTED_TOKENS, 'scoring_state': 'scored',
                  'adopted': True, 'verdict': 'pass', 'quality': 100.0,
-                 'mismatches': [], 'evaluation_id': 'MS1-001-9a6de335c982-1.0.0-001',
+                 'mismatches': [], 'evaluation_id': 'MS1-001-9a6de335c982-1.1.0-001',
                  'artifact_sha256_reported': REFERENCE_HASH},
                 {'end_reason': manifest['end_reason'],
                  'stop_confirmed': manifest['stop_confirmed'],
@@ -264,7 +265,7 @@ def line_ending_path(repo, runs, source, reference, report):
                 {'artifact_hash_changed_by_collection': True,
                  'normalized_kinds': ['bom_removed', 'crlf_to_lf'],
                  'artifact_sha256': REFERENCE_HASH,
-                 'evaluation_id': 'MS1-001-9a6de335c982-1.0.0-001'},
+                 'evaluation_id': 'MS1-001-9a6de335c982-1.1.0-001'},
                 {'artifact_hash_changed_by_collection': snapshot['artifact_hash_changed_by_collection'],
                  'normalized_kinds': kinds,
                  'artifact_sha256': snapshot['artifact_sha256'],
@@ -273,22 +274,54 @@ def line_ending_path(repo, runs, source, reference, report):
 
 
 def duplicate_path(runs, run_id, report):
-    evaluations = run_mod.run_dir_for(runs, run_id) / 'evaluations'
-    before = sorted(p.name for p in evaluations.iterdir() if p.is_dir())
+    """Reusing a sequence must not touch the earlier scoring's evidence.
+
+    The earlier scoring's work directory, database, logs and records are the
+    evidence for that scoring, so the refusal has to happen before the work
+    directory is created, before the logs are opened and before the evaluator
+    is started. The refusal is recorded apart from the run's own scorings.
+    """
+    run_dir = run_mod.run_dir_for(runs, run_id)
+    evaluations = run_dir / 'evaluations'
+    before = _evidence_hashes(run_dir)
     index_before = (evaluations / 'index.jsonl').read_bytes()
-    raised = None
-    try:
-        score(Path(report.repo), runs, run_id, sequence=1)
-    except FileExistsError as error:
-        raised = type(error).__name__
-    after = sorted(p.name for p in evaluations.iterdir() if p.is_dir())
+    record = score(Path(report.repo), runs, run_id, sequence=1)
+    after = _evidence_hashes(run_dir)
+    refusals = evaluate.read_duplicate_refusals(run_dir)
     report.case('V-4', 'measured',
-                '同じ成果物・同じ評価版・同じ連番の再実行を重複として拒否する',
-                {'raised': 'FileExistsError', 'directories_before': 1,
-                 'directories_after': 1, 'index_unchanged': True},
-                {'raised': raised, 'directories_before': len(before),
-                 'directories_after': len(after),
-                 'index_unchanged': index_before == (evaluations / 'index.jsonl').read_bytes()})
+                '同じ成果物・同じ評価版・同じ連番の再実行を、副作用の前に拒否する',
+                {'scoring_state': 'duplicate_sequence', 'adopted': False,
+                 'evaluator_not_invoked': True, 'evidence_unchanged': True,
+                 'index_unchanged': True, 'refusal_recorded_separately': True,
+                 'refusal_count': 1},
+                {'scoring_state': record['scoring_state'],
+                 'adopted': record['adopted'],
+                 'evaluator_not_invoked': record['evaluator_exit_code'] is None,
+                 'evidence_unchanged': all(after.get(path) == digest
+                                           for path, digest in before.items()),
+                 'index_unchanged': index_before == (evaluations / 'index.jsonl').read_bytes(),
+                 'refusal_recorded_separately': (
+                     len(refusals) == 1 and refusals[0]['sequence'] == 1
+                     and refusals[0]['scoring_state'] == 'duplicate_sequence'
+                     and (run_dir / record['directory'] / 'record.json').is_file()
+                     and not (run_dir / record['directory'] / 'evaluation.json').is_file()),
+                 'refusal_count': len(refusals)})
+
+
+def _evidence_hashes(run_dir):
+    """Content hashes of everything a scoring leaves behind.
+
+    Existence and counts are not enough: the failure this guards against is a
+    rewrite of the same files, which leaves both unchanged.
+    """
+    run_dir = Path(run_dir)
+    paths = []
+    for root in ('evaluations', 'evaluation-work', 'evidence'):
+        base = run_dir / root
+        if base.is_dir():
+            paths.extend(path for path in base.rglob('*') if path.is_file())
+    return {str(path.relative_to(run_dir)).replace('\\', '/'): util.sha256_file(path)
+            for path in sorted(paths)}
 
 
 def rescore_path(repo, runs, run_id, first, report):
@@ -537,7 +570,7 @@ def evaluator_build_path(repo, runs, run_id, record, rows, report):
                  'index_row_count': len(index_rows),
                  'aggregate_matches_file': scoring['evaluator_sha256'] == measured,
                  'unpinned_is_recorded_as_null': record['evaluator_sha256_pinned'] is None,
-                 'version_is_not_the_build': record['evaluation_version'] == '1.0.0'
+                 'version_is_not_the_build': record['evaluation_version'] == '1.1.0'
                  and record['evaluation_version'] != measured})
 
 

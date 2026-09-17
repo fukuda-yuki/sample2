@@ -7,6 +7,8 @@ The mode comes from HARNESS_STUB_MODE. Modes: ok, fault, no-output, sleep,
 blocked, fail-critical, mismatch-{task,spec,artifact,version,path}, work-marker
 (leaves a file in the work directory, like a scoring run's database),
 manifest-mismatch (claims a different evaluator build than the one invoked).
+When HARNESS_STUB_INVOCATIONS names a file, every start appends its arguments
+there, so a test can prove the harness did not invoke the evaluator.
 """
 import json
 import os
@@ -42,6 +44,13 @@ def write_manifest(out, version, artifact_hash, evaluator_sha256=None):
 
 def main():
     mode = os.environ.get('HARNESS_STUB_MODE', 'ok')
+    # Records that this stand-in was actually started. A test can then tell
+    # "the harness refused before invoking the evaluator" apart from "the
+    # harness invoked it and threw the result away".
+    invocations = os.environ.get('HARNESS_STUB_INVOCATIONS')
+    if invocations:
+        with open(invocations, 'a', encoding='utf-8') as handle:
+            handle.write(' '.join(sys.argv[1:]) + '\n')
     argv = sys.argv[1:]
     options = {}
     index = 0

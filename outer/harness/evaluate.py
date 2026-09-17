@@ -17,7 +17,8 @@ from . import util
 
 DEFAULT_EVALUATOR_DLL = 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll'
 SCORING_TIMEOUT_SECONDS = 1800
-SCORING_STATES = ('not_attempted', 'scored', 'evaluator_fault', 'rejected_mismatch')
+SCORING_STATES = ('not_attempted', 'scored', 'evaluator_fault', 'rejected_mismatch',
+                  'duplicate_sequence')
 
 
 def evaluator_file(repo, evaluator=None):
@@ -47,6 +48,47 @@ def evaluator_command(repo, evaluator=None):
 
 def read_index(run_dir):
     return util.read_lines(Path(run_dir) / 'evaluations' / 'index.jsonl')
+
+
+def read_duplicate_refusals(run_dir):
+    """Duplicate-sequence refusals, kept apart from the run's own scorings.
+
+    A duplicate sequence is an operator mistake, not a property of the run, so
+    it must not displace the run's adopted scoring in `index.jsonl`.
+    """
+    return util.read_lines(Path(run_dir) / 'evaluations' / 'duplicate-refusals.jsonl')
+
+
+def used_sequences(run_dir):
+    """Sequences that already have a scoring, a work directory, or evidence logs.
+
+    A sequence counts as used even when the index has no record for it. An
+    interrupted attempt leaves a work directory or a log behind, and that trace
+    is the only evidence it happened; reusing the number would overwrite it.
+    """
+    run_dir = Path(run_dir)
+    used = {}
+
+    def note(sequence, trace):
+        if isinstance(sequence, int) and sequence > 0:
+            used.setdefault(sequence, []).append(trace)
+
+    for entry in read_index(run_dir):
+        note(entry.get('sequence'), 'evaluations/index.jsonl')
+    for entry in read_duplicate_refusals(run_dir):
+        note(entry.get('sequence'), 'evaluations/duplicate-refusals.jsonl')
+    work_root = run_dir / 'evaluation-work'
+    if work_root.is_dir():
+        for path in sorted(work_root.iterdir()):
+            if path.is_dir() and path.name.isdigit():
+                note(int(path.name), 'evaluation-work/' + path.name)
+    evidence = run_dir / 'evidence'
+    if evidence.is_dir():
+        for path in sorted(evidence.glob('scoring-*-*.log')):
+            digits = path.name.split('-')[1]
+            if digits.isdigit():
+                note(int(digits), 'evidence/' + path.name)
+    return used
 
 
 def last_scoring(run_dir):
@@ -147,8 +189,26 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                                  '同じ値になったことを示す）')
     evaluations = run_dir / 'evaluations'
     evaluations.mkdir(exist_ok=True)
-    existing = read_index(run_dir)
-    sequence = int(sequence) if sequence is not None else len(existing) + 1
+    used = used_sequences(run_dir)
+    if sequence is None:
+        # 使用済みの最大の次を使う。件数で数えると、中断された試行が残した
+        # 作業領域や証跡と衝突する（docs/outer-harness.md §6.6）。
+        sequence = max(used) + 1 if used else 1
+    else:
+        sequence = int(sequence)
+        if sequence in used:
+            # 作業領域の削除・作成、既存ログのオープン、評価器の起動より前に拒否する。
+            # 以前の採点の DB・ログ・記録はその採点の証跡であり、書き換えない。
+            return _refuse_duplicate_sequence(
+                run_dir, evaluations, sequence, used[sequence],
+                run_id=run_id, version=version, independent_hash=util.artifact_hash(frozen),
+                spec_sha256=spec_sha256,
+                command=evaluator_command(repo, evaluator) + [
+                    '--artifact', str(frozen), '--out', '', '--spec', str(spec),
+                    '--catalog', str(catalog), '--evaluation-version', str(version),
+                    '--sequence', str(sequence),
+                    '--work', str(run_dir / 'evaluation-work' / '{:03d}'.format(sequence))],
+                evaluator_sha256=evaluator_sha256)
     independent_hash = util.artifact_hash(frozen)
     # 採点ごとに空の作業ディレクトリを使う。前の採点の SQLite ファイルや生成物を
     # 引き継ぐと「毎回空のデータベースから始める」という初期条件を満たさない
@@ -180,18 +240,20 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
             run_id=run_id, version=version, independent_hash=independent_hash,
             spec_sha256=spec_sha256, command=command,
             evaluator_sha256=evaluator_sha256, evaluator_sha256_pinned=pinned_evaluator)
+    # 使用済み連番は上で拒否しているので、既存の作業領域を消すことはない。
+    # 消さずに残すのは、中断された試行の資材を保全するためである。
+    work_dir.mkdir(parents=True)
     temporary = evaluations / ('.tmp-{}-{}'.format(sequence, uuid.uuid4().hex))
     temporary.mkdir(parents=True)
     command[command.index('--out') + 1] = str(temporary)
-    if work_dir.exists():
-        shutil.rmtree(work_dir)
-    work_dir.mkdir(parents=True)
     evidence = run_dir / 'evidence'
     evidence.mkdir(exist_ok=True)
     environment = dict(os.environ)
     environment['PYTHONIOENCODING'] = 'utf-8'
-    with (evidence / 'scoring-{:03d}-stdout.log'.format(sequence)).open('wb') as out, \
-            (evidence / 'scoring-{:03d}-stderr.log'.format(sequence)).open('wb') as err:
+    # 'xb' は既存のログを切り詰めない。使用済み連番は上で拒否しているので、
+    # ここで既存のログを開くことはない。
+    with (evidence / 'scoring-{:03d}-stdout.log'.format(sequence)).open('xb') as out, \
+            (evidence / 'scoring-{:03d}-stderr.log'.format(sequence)).open('xb') as err:
         exit_code, timed_out = run_evaluator(command, repo, environment, out, err, timeout)
     produced = temporary / 'evaluation.json'
     if timed_out or not produced.is_file():
@@ -340,6 +402,41 @@ def _refuse_scoring(run_dir, evaluations, sequence, mismatches, reason, *, run_i
     _write_record(target, record)
     _append_index(run_dir, record)
     return record
+
+
+def _refuse_duplicate_sequence(run_dir, evaluations, sequence, traces, *, run_id, version,
+                               independent_hash, spec_sha256, command,
+                               evaluator_sha256=None):
+    """Record a refused duplicate sequence without touching the earlier scoring.
+
+    The earlier scoring's work directory, database, logs and records are the
+    evidence for that scoring. Reusing the number would overwrite them, so the
+    refusal is written to its own directory and its own log, and the run's
+    adopted scoring in `index.jsonl` is left alone.
+    """
+    target = evaluations / ('duplicate_sequence-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
+    target.mkdir(parents=True)
+    record = _base_record(run_id, sequence, version, None, independent_hash,
+                          spec_sha256, 'duplicate_sequence', None, [], command,
+                          evaluator_sha256=evaluator_sha256)
+    record['reason'] = ('連番 {} は使用済みのため採点しません。既存の採点の作業領域・DB・'
+                        'ログ・記録を書き換えないよう、評価器を起動する前に拒否しました。'
+                        '同じ Run を採点し直すときは新しい連番を使ってください。'
+                        .format(sequence))
+    record['sequence_traces'] = traces
+    record['directory'] = 'evaluations/' + target.name
+    _write_record(target, record)
+    _append_duplicate_index(run_dir, record)
+    return record
+
+
+def _append_duplicate_index(run_dir, record):
+    util.append_line(Path(run_dir) / 'evaluations' / 'duplicate-refusals.jsonl',
+                     {key: record[key] for key in
+                      ('run_id', 'sequence', 'evaluation_version', 'scoring_state',
+                        'adopted', 'evaluator_sha256', 'spec_sha256',
+                        'artifact_sha256_outer', 'sequence_traces', 'reason',
+                        'recorded_at', 'directory') if key in record})
 
 
 def _append_index(run_dir, record):

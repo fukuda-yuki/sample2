@@ -131,7 +131,9 @@ API, model and transport failures are separate from implementation quality.
 Input/output, cache and reasoning fields retain provider-reported values;
 unreported fields stay null. `usage_complete` means complete input/output
 accounting and call inventory, not known values for all optional breakdowns.
-Gateway session identity and native OpenCode session IDs are labelled separately.
+Every new Run has a unique `run_instance_id`, also used as its gateway session
+ID; repeated display names in another batch cannot supply its usage. Native
+OpenCode session IDs are recorded separately. Older Runs retain their original IDs.
 
 `usage/context-evidence.json` maps the first request to the original prompt and
 source blocks. OpenCode's numbered Read rendering is matched line by line, with
@@ -158,7 +160,8 @@ refuses changed files and incompatible existing destinations. The recorded
 evaluator image must remain locally available: the package includes evaluator
 bytes and image digest, **not an exported Docker image**. For another machine,
 also retain pinned images with Docker `image save`/`image load`. Restore, rescore
-and aggregate never call a model. Schema 2 packages include native state,
+and aggregate never call a model. The ordinary `run` and `acceptance` commands
+include the original workspace as well as normalized frozen files. Schema 2 packages include native state,
 gateway originals, scoring work databases, results and monitor readback. Keep
 raw data in ignored `runs/` or `artifacts/`, outside public Git.
 
@@ -168,19 +171,22 @@ raw data in ignored `runs/` or `artifacts/`, outside public Git.
 python -m unittest discover -s outer/tests -p 'test_*.py'
 dotnet run --project inner/evaluator/MusicStore.Evaluator.Tests -c Release
 pwsh -NoProfile -File inner/calibration/run-calibration.ps1
+pwsh -NoProfile -File inner/calibration/run-calibration.ps1 -Docker
 python outer/verify/verify.py --repo .
 python outer/verify/probe-agent.py --intervention preload
 python outer/verify/probe-containers.py
 python -m outer.harness.cli acceptance --task MS1-001
 ```
 
-The first six commands use no real model and keep separate attempt directories.
+All commands above except `acceptance` use no real model and keep separate attempt directories.
 The container probe runs the production controller with a local mock upstream,
 and exercises completion, timeout, operator stop, crashed-controller recovery,
 HTTP failure, missing usage, wrong model and a truncated response. Its synthetic
 credential is never the Windows user credential. Original logs, manifests and
 per-case expectations are retained under a unique `_container-probe-*` directory.
-`acceptance` uses the real model for three arms twice, saving a plan first. A
+`acceptance` uses the real model for three arms twice, saving a plan first. It
+checks frozen task, intervention, runtime and prepared-environment fingerprints
+against that plan before each model dispatch. A
 harness failure stops the batch for repair. A quality failure may remain a valid
 observation. Acceptance also requires at least one full application pass and a
 restore/rescore without model execution. Container isolation/stop, real usage,

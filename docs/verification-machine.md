@@ -40,6 +40,16 @@ working **Linux engine**, and a .NET SDK for the existing monitor importer.
 The live worker's OpenCode binary is prepared inside its image. Host OpenCode is
 only required for the separate non-model CLI compatibility probe.
 
+Before preparation, `docker info --format '{{.OSType}}'` must return `linux`.
+If it times out or cannot connect, open Docker Desktop and use **Troubleshoot >
+Restart Docker Desktop**, then wait until the engine is running and repeat the
+command. If Desktop is using Windows containers, switch to Linux containers from
+its tray menu. See the [official troubleshooting guide](https://docs.docker.com/desktop/troubleshoot-and-support/troubleshoot/).
+If restart fails, retain the displayed error and the preparation failure record.
+Clean/Purge data and Reset to factory defaults are destructive operations and
+are not required by this procedure. When host recovery is blocked, the operator
+needs these concrete steps; a Docker prerequisite alone is not a delivery result.
+
 The Windows **User** environment variable `OPENCODE_GO_API_KEY` must already exist.
 Do not paste it into commands, configuration files, issues or reports. The
 controller reads that registry value and pipes it to gateway stdin. Worker,
@@ -160,10 +170,16 @@ dotnet run --project inner/evaluator/MusicStore.Evaluator.Tests -c Release
 pwsh -NoProfile -File inner/calibration/run-calibration.ps1
 python outer/verify/verify.py --repo .
 python outer/verify/probe-agent.py --intervention preload
+python outer/verify/probe-containers.py
 python -m outer.harness.cli acceptance --task MS1-001
 ```
 
-The first five commands use no real model and keep separate attempt directories.
+The first six commands use no real model and keep separate attempt directories.
+The container probe runs the production controller with a local mock upstream,
+and exercises completion, timeout, operator stop, crashed-controller recovery,
+HTTP failure, missing usage, wrong model and a truncated response. Its synthetic
+credential is never the Windows user credential. Original logs, manifests and
+per-case expectations are retained under a unique `_container-probe-*` directory.
 `acceptance` uses the real model for three arms twice, saving a plan first. A
 harness failure stops the batch for repair. A quality failure may remain a valid
 observation. Acceptance also requires at least one full application pass and a

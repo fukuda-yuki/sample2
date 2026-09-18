@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from harness import machine, util
+from support import util
+from harness import machine
 
 
 class AcceptanceContractTests(unittest.TestCase):

@@ -29,7 +29,8 @@
 [CmdletBinding()]
 param(
     [string]$EvaluationVersion = '1.1.0',
-    [switch]$Docker
+    [switch]$Docker,
+    [string]$AdditionalArtifact
 )
 
 $ErrorActionPreference = 'Stop'
@@ -216,6 +217,16 @@ Add-Case -CaseId 'var-xml-sdk-notation' -Kind '妥当な別実装' -Artifact $nu
 Add-Case -CaseId 'var-html-entity-nesting' -Kind '妥当な別実装' -Artifact $null -Variant 'html-entity-nesting' -Sequence 25 `
     -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
     -Note 'HTML entities, nested quantity text and misleading comments must preserve all verdicts.'
+
+Add-Case -CaseId 'var-aspnetcore-launch-profile' -Kind 'valid launch settings' -Artifact $null -Variant 'aspnetcore-launch-profile' -Sequence 26 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note 'IIS Express is also an ASP.NET Core host; a standard launch profile must not fail R-029.'
+
+if ($AdditionalArtifact) {
+    Add-Case -CaseId 'regression-saved-model-artifact' -Kind 'saved real-model regression' -Artifact $AdditionalArtifact -Sequence 27 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+        -Note 'Re-evaluate the unchanged frozen diagnostic artifact after repairing the launch-profile false failure. No model call.'
+}
 
 $missingArtifact = Join-Path $runs 'no-such-artifact'
 Add-Case -CaseId 'fault-missing-artifact' -Kind '評価側の障害' -Artifact $missingArtifact -Sequence 90 `

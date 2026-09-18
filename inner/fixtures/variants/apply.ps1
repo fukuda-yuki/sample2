@@ -192,6 +192,20 @@ internal static class LegacyName
             '旧名称の名前空間を宣言する'
     }
 
+    'aspnetcore-launch-profile' {
+        Add-File 'MusicStore.Web\Properties\launchSettings.json' `
+            @'
+{
+  "iisSettings": { "iisExpress": { "applicationUrl": "http://localhost:1486", "sslPort": 0 } },
+  "profiles": {
+    "http": { "commandName": "Project", "applicationUrl": "http://localhost:5270" },
+    "IIS Express": { "commandName": "IISExpress", "launchBrowser": true }
+  }
+}
+'@ `
+            'Standard ASP.NET Core launch profiles do not call a legacy application'
+    }
+
     default {
         throw "未知の別表現です: $Name"
     }

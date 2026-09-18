@@ -262,7 +262,13 @@ error が 1 つでもある            → verdict = error, quality = null
 1. **正例を評価器と同じ作業者が書いている。** 正例が通ったことは妥当性の根拠にならない（仕様 §7.2-1）。
 2. **旧実装を実行していない。** `legacy` を根拠とする期待値はコード読解に基づく（仕様 §7.2-2）。
 3. **静的な検査の限界。** `R-029` は成果物ツリーの走査によるヒューリスティックであり、間接的なラッパー化を証明しない。
-   **旧実装の成果物名・旧ホスト・旧フレームワークの信号で判定し、名前空間やアセンブリ名の語だけでは判定しない。**
+   **旧実装の成果物名・旧実装を指定する起動記述・旧フレームワークの信号で判定し、名前空間やアセンブリ名の語だけでは判定しない。**
+   IIS Express also hosts ASP.NET Core. A standard `launchSettings.json` profile
+   is not a legacy dependency; the IIS Express signal requires an explicit
+   `MvcMusicStore` legacy path. This corrects the first real-model diagnostic's
+   R-029 false failure without changing the published success contract (1.1.0).
+   [Microsoft's ASP.NET Core launch-profile documentation](https://learn.microsoft.com/en-us/visualstudio/debugger/how-to-enable-debugging-for-aspnet-applications?view=vs-2022)
+   includes both Kestrel and IIS Express profiles.
    名前を `MvcMusicStore` に保っただけの正常な実装は合格する
    （[`inner/calibration/README.md`](../inner/calibration/README.md) §4.4）。
    **コメント・説明文の旧名称も判定の根拠にしない。** 走査の前にコメントを除去し、

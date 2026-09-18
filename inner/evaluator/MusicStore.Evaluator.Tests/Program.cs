@@ -38,6 +38,15 @@ try
     Check("XML child SDK", AppHost.FindWebProjects(root).Count == 1);
     File.WriteAllText(Path.Combine(root, "App.csproj"), "<Project><!-- Microsoft.NET.Sdk.Web --></Project>");
     Check("XML comment is not SDK", AppHost.FindWebProjects(root).Count == 0);
+    File.WriteAllText(Path.Combine(root, "launchSettings.json"), """
+        {"iisSettings":{"iisExpress":{"applicationUrl":"http://localhost:1234"}},
+         "profiles":{"IIS Express":{"commandName":"IISExpress"}}}
+        """);
+    Check("ASP.NET Core IIS Express profile is not a legacy dependency", LegacyScan.Scan(root).References.Count == 0);
+    File.WriteAllText(Path.Combine(root, "Bridge.cs"), """
+        class Bridge { public string Command = "iisexpress /path:MvcMusicStore\\"; }
+        """);
+    Check("IIS Express legacy target is still detected", LegacyScan.Scan(root).References.Count == 1);
 }
 finally { Directory.Delete(root, true); }
 

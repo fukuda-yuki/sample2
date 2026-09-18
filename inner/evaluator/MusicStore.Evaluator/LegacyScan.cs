@@ -35,7 +35,9 @@ public static class LegacyScan
     {
         new Regex(@"MvcMusicStore\.(?:exe|dll|pdb|csproj|sln)\b", RegexOptions.IgnoreCase),
         new Regex(@"\bMVC-Music-Store\b", RegexOptions.IgnoreCase),
-        new Regex(@"\biisexpress\b", RegexOptions.IgnoreCase),
+        // IIS Express also hosts ASP.NET Core. Its standard launch profile alone
+        // is not evidence of a legacy application; require an explicit old path.
+        new Regex(@"\biisexpress(?:\.exe)?\b[^\r\n]*?/path\s*:[^\r\n]*?\bMvcMusicStore(?=[\\/\s""']|$)", RegexOptions.IgnoreCase),
         new Regex(@"\bSystem\.Web\b", RegexOptions.IgnoreCase),
         new Regex(@"\bnet4[0-9]{0,2}\b", RegexOptions.IgnoreCase),
         new Regex(@"\bTargetFrameworkVersion\b", RegexOptions.IgnoreCase),

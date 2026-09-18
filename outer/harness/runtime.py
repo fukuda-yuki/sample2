@@ -270,7 +270,8 @@ def _start(repo, runs_dir, run_id):
     gateway_args = ['create', '-i', '--name', state['gateway'], '--label', 'sample2.run=' + run_id,
                     '--network', private, '--network-alias', 'gateway', *sandbox_args(),
                     *mount(root / 'usage/raw', '/records'), lock['images']['gateway'],
-                    '--run-id', run_id, '--model', condition['runtime']['model_id']]
+                    '--run-id', run_id, '--model', condition['runtime']['model_id'],
+                    '--session-id', manifest.get('run_instance_id', run_id)]
     manifest.update(started_at=run.now(), runner={'id': 'opencode', 'version': lock['opencode_version']},
                     synthetic=False, model_called=False)
     run.save_manifest(runs_dir, run_id, manifest)

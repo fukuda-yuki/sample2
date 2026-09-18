@@ -70,11 +70,12 @@ def input_locations(messages, original):
     return found
 
 
-def reconcile(started, ended, run_id):
+def reconcile(started, ended, run_id, session_id=None):
+    session_id = session_id or run_id
     issues, starts, ends = [], {}, {}
     for events, dest in ((started, starts), (ended, ends)):
         for e in events:
-            if e.get('run_id') != run_id or e.get('session_id') != run_id:
+            if e.get('run_id') != run_id or e.get('session_id') != session_id:
                 issues.append('identity_mismatch')
                 continue
             rid = e.get('request_id')
@@ -106,7 +107,8 @@ def collect(root):
     raw = root / 'usage/raw'
     starts, start_errors = journal(raw / 'started.jsonl')
     ends, end_errors = journal(raw / 'events.jsonl')
-    events, issues = reconcile(starts, ends, manifest['run_id'])
+    session_id = manifest.get('run_instance_id', manifest['run_id'])
+    events, issues = reconcile(starts, ends, manifest['run_id'], session_id)
     issues += start_errors + end_errors
     if (raw / 'failure.jsonl').exists():
         issues.append('gateway_failed')
@@ -173,7 +175,8 @@ def collect(root):
         'schema_version': 2, 'run_id': manifest['run_id'], 'source': 'sample2-gateway',
         'native_agent_session_ids': native_sessions,
         'native_step_count': native_steps,
-        'expected_sessions': [manifest['run_id']], 'inventory_complete': not issues,
+        'run_instance_id': manifest.get('run_instance_id'),
+        'expected_sessions': [session_id], 'inventory_complete': not issues,
         'inventory_complete_basis': {'issues': sorted(set(issues)), 'started_count': len(starts),
             'ended_count': len(ends),
             'transport': 'worker internal Docker network; sole outbound gateway',

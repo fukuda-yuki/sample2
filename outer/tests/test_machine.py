@@ -199,6 +199,13 @@ class InventoryTests(unittest.TestCase):
         _, issues = live_usage.reconcile([self.event()], [], 'A')
         self.assertIn('incomplete_call_inventory', issues)
 
+    def test_same_display_run_name_in_another_batch_cannot_supply_usage(self):
+        event = dict(self.event(), session_id='unique-instance-A')
+        self.assertEqual(live_usage.reconcile([event], [event], 'A', 'unique-instance-A')[1], [])
+        events, issues = live_usage.reconcile([event], [event], 'A', 'unique-instance-B')
+        self.assertEqual(events, [])
+        self.assertIn('identity_mismatch', issues)
+
     def test_duplicate_and_foreign_calls_are_rejected(self):
         event = self.event()
         self.assertTrue(live_usage.reconcile([event, event], [event], 'A')[1])

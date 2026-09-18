@@ -28,7 +28,7 @@ import json, sys, threading, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, '/app')
 from gateway import Gateway
-mode, run_id = sys.argv[1:]
+mode, run_id, session_id = sys.argv[1:]
 model = 'deepseek-v4.1-flash'
 class Upstream(BaseHTTPRequestHandler):
     def log_message(self, *_): pass
@@ -50,7 +50,7 @@ class Upstream(BaseHTTPRequestHandler):
 upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
 threading.Thread(target=upstream.serve_forever, daemon=True).start()
 server = Gateway(('0.0.0.0',8080), '/records', run_id, model, sys.stdin.readline().strip(),
-                 upstream_host='127.0.0.1', upstream_port=upstream.server_port, tls=False)
+                 upstream_host='127.0.0.1', upstream_port=upstream.server_port, tls=False, session_id=session_id)
 server.serve_forever()
 '''
 
@@ -89,8 +89,9 @@ def controller(root, case):
             lock = util.read_json(REPO/'artifacts/runtime/MS1-001/lock.json')
             if name.startswith('s2-gateway-'):
                 at = args.index(lock['images']['gateway'])
+                session_id = args[args.index('--session-id')+1]
                 args = args[:at] + ['--entrypoint','python3', *runtime.mount(root/'fixtures','/fixtures',True),
-                    lock['images']['gateway'], '/fixtures/gateway.py', case, 'MS1-001-explore-001']
+                    lock['images']['gateway'], '/fixtures/gateway.py', case, 'MS1-001-explore-001', session_id]
             elif name.startswith('s2-worker-') and case in ('timeout','operator_stop','controller_crash'):
                 at = args.index(lock['images']['worker'])
                 args = args[:at] + [*runtime.mount(root/'fixtures','/fixtures',True),

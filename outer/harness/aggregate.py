@@ -75,6 +75,7 @@ def row_for(runs_dir, run_id):
 
     return {
         'run_id': run_id,
+        'run_instance_id': manifest.get('run_instance_id'),
         'task_id': manifest.get('task_id'),
         'condition_id': manifest.get('condition_id'),
         'intervention_id': manifest.get('intervention_id'),

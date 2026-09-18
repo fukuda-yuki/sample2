@@ -52,9 +52,10 @@ class Gateway(ThreadingHTTPServer):
     daemon_threads = False
 
     def __init__(self, address, root, run_id, model, secret, *, upstream_host='opencode.ai',
-                 upstream_port=443, tls=True):
+                 upstream_port=443, tls=True, session_id=None):
         super().__init__(address, Handler)
         self.root, self.run_id, self.model, self.secret = Path(root), run_id, model, secret
+        self.session_id = session_id or run_id
         self.upstream_host, self.upstream_port, self.tls = upstream_host, upstream_port, tls
         self.lock = threading.Lock()
         self.failed = threading.Event()
@@ -107,7 +108,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(403, 'Request policy denied')
             return
         rid = uuid.uuid4().hex
-        event = {'run_id': g.run_id, 'session_id': g.run_id, 'event_id': rid, 'request_id': rid,
+        event = {'run_id': g.run_id, 'session_id': g.session_id, 'event_id': rid, 'request_id': rid,
                  'mode': 'request', 'includes_children': False, 'model_id': g.model,
                  'provider': 'opencode-go', 'started_at': now(), 'usage': None,
                  'status': 'started', 'request_file': rid + '.request.json',
@@ -129,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
             connection.request('POST', '/zen/go/v1/chat/completions', raw, {
                 'Authorization': 'Bearer ' + g.secret, 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream', 'User-Agent': 'sample2-verification-machine/1',
-                'x-opencode-session': g.run_id})
+                'x-opencode-session': g.session_id})
             response = connection.getresponse()
             event['http_status'] = response.status
             if response.status != 200:
@@ -212,13 +213,15 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--run-id', required=True)
     p.add_argument('--model', required=True)
+    p.add_argument('--session-id')
     p.add_argument('--directory', default='/records')
     args = p.parse_args()
     import sys
     secret = sys.stdin.readline().strip()
     if not secret:
         raise SystemExit('Gateway credential is missing')
-    server = Gateway(('0.0.0.0', 8080), args.directory, args.run_id, args.model, secret)
+    server = Gateway(('0.0.0.0', 8080), args.directory, args.run_id, args.model, secret,
+                     session_id=args.session_id)
     server.serve_forever()
 
 

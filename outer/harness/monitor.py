@@ -27,7 +27,7 @@ def payload(events, run_id, manifest=None):
             'name': 'chat ' + e['model_id'], 'kind': 3, 'startTimeUnixNano': str(start),
             'endTimeUnixNano': str(end), 'attributes': attributes({
                 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': e['model_id'],
-                'gen_ai.conversation.id': run_id, 'sample2.request.id': e['request_id'],
+                'gen_ai.conversation.id': e.get('session_id', run_id), 'sample2.request.id': e['request_id'],
                 'gen_ai.usage.input_tokens': usage.get('input_tokens'),
                 'gen_ai.usage.output_tokens': usage.get('output_tokens'),
                 'sample2.cache_read_tokens': usage.get('cache_read_tokens'),
@@ -36,6 +36,7 @@ def payload(events, run_id, manifest=None):
             'status': {'code': 1 if e.get('status') == 'completed' else 2}})
     return {'resourceSpans': [{'resource': {'attributes': attributes({
         'service.name': 'sample2-gateway', 'client.kind': 'sample2-gateway', 'run.id': run_id,
+        'sample2.run_instance_id': manifest.get('run_instance_id'),
         'experiment.id': run_id, 'task.id': manifest.get('task_id'),
         'task.run_index': manifest.get('attempt'), 'experiment.condition': manifest.get('intervention_id'),
         'sample2.provenance': 'gateway-derived; not native OpenCode telemetry'})},

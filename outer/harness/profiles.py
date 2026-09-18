@@ -4,6 +4,7 @@ import fnmatch
 import json
 import re
 import shutil
+import uuid
 from pathlib import Path
 
 from . import run, util
@@ -121,7 +122,7 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
         raise ValueError('Task ledger hash mismatch; retain incomplete Run')
     (root / 'inputs' / 'prompt.txt').write_bytes(prompt.encode('utf-8'))
     util.write_new_json(root / 'context.json', context)
-    manifest.update(schema_version=2, intervention_id=intervention,
+    manifest.update(schema_version=2, intervention_id=intervention, run_instance_id=uuid.uuid4().hex,
                     profile_files=util.tree_hashes(root / 'profiles'),
                     context_sha256=util.sha256_file(root / 'context.json'),
                     prompt_sha256=util.sha256_file(root / 'inputs' / 'prompt.txt'),

@@ -131,6 +131,25 @@ public static class Html
         return match.Success ? Number(match.Groups["id"].Value) : null;
     }
 
+    public static int? MarkedOrderNumber(string html)
+    {
+        var nodes = Document(html).QuerySelectorAll("[id='order-number']");
+        return nodes.Length == 1 ? Number(nodes[0].TextContent.Trim()) : null;
+    }
+
+    public static bool HasOrderMarker(string html) => Document(html).QuerySelector("[id='order-number']") != null;
+
+    public static bool HasCheckoutForm(string html) => Document(html).QuerySelectorAll("form input")
+        .Any(e => string.Equals(e.GetAttribute("name"), "PromoCode", StringComparison.OrdinalIgnoreCase));
+
+    public static bool SameCart(string before, string after)
+    {
+        var a = CartLines(before).Select(x => (x.AlbumId, x.Count)).OrderBy(x => x).ToArray();
+        var b = CartLines(after).Select(x => (x.AlbumId, x.Count)).OrderBy(x => x).ToArray();
+        var total = Money(before);
+        return a.Length > 0 && a.SequenceEqual(b) && total.HasValue && total == Money(after);
+    }
+
     public sealed class CartLine
     {
         public int RecordId { get; set; }

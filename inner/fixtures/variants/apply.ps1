@@ -206,6 +206,25 @@ internal static class LegacyName
             'Standard ASP.NET Core launch profiles do not call a legacy application'
     }
 
+    'japanese-order-label' {
+        Edit-File 'MusicStore.Web\Views\Checkout\Complete.cshtml' `
+            '<p>Thanks for your order! Your order number is: <span id="order-number">@Model</span></p>' `
+            '<p>ご注文番号： <strong id=''order-number''><span> @Model </span></strong></p>' `
+            'Localize the label and nest the order number'
+    }
+
+    'order-denied-403' {
+        Edit-File 'MusicStore.Web\Controllers\CheckoutController.cs' `
+            'return NotFound();' 'return StatusCode(403);' 'Use the other permitted denial status'
+    }
+
+    'modern-project-legacy-name' {
+        $originalProject = (Resolve-Path -LiteralPath (Join-Path $Out 'MusicStore.Web\MusicStore.Web.csproj')).Path
+        # Rename exactly the generated fixture file; never a computed directory tree.
+        Rename-Item -LiteralPath $originalProject -NewName 'MvcMusicStore.csproj'
+        $log.Add('A modern net8.0 project retains the historical project filename')
+    }
+
     default {
         throw "未知の別表現です: $Name"
     }

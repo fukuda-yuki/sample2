@@ -303,3 +303,23 @@ error が 1 つでもある            → verdict = error, quality = null
    `V-14` は `bin` `obj` をプロジェクト直下に置く既定の SDK 構成で測っている。
    出力先を変えた成果物、複数プロジェクトを含む成果物では確認していない
    （[`outer/verify/README.md`](../outer/verify/README.md) 限界 19）。
+
+## Evaluation 1.2.0 observation repair
+
+The current task publishes the order DOM marker and denial statuses rather than
+assuming an English sentence. Duplicate, missing, commented and incorrect order
+markers cannot satisfy R-021. A 200 completion response to a different session
+cannot satisfy R-022 even when it uses another label. R-023/R-024 compare the
+cart's album/quantity pairs and total, require a checkout form input, and compare
+read-only order-ID snapshots around invalid checkout. Each rejection has its own
+session. See the predeclared calibration matrix for localized positive cases
+and cart mutation/order creation negative cases. The evaluator refuses to pair
+the 1.2.0 ledger with a historical evaluation version. Saved 1.1.0 Runs continue
+to use their original frozen evaluator/assets; the old schema 1 default is kept.
+
+A real preload diagnosis also exposed a filename-only R-029 false failure.
+A retained `MvcMusicStore.csproj` is inspected as XML: a .NET 8+ Web SDK project
+is not classified as the old application solely by that filename. Actual
+Framework projects and explicit legacy launch commands remain negative cases.
+Static legacy detection remains a documented heuristic, not proof against
+arbitrary obfuscated wrappers.

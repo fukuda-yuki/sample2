@@ -59,7 +59,7 @@ public class CheckoutController : Controller
             return View(id);
         }
 
-        return View("Error");
+        return NotFound();
     }
 
     private void CreateOrder(Order order)

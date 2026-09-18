@@ -749,7 +749,7 @@ public static class Checks
             return Fail(state, "R-021", "C-022", input, "注文番号が得られず、完了画面を要求できませんでした。", state.Transcript("order"));
         }
 
-        var shown = Html.OrderNumber(scenario.Complete.Body);
+        var shown = state.ExplicitOrderContract ? Html.MarkedOrderNumber(scenario.Complete.Body) : Html.OrderNumber(scenario.Complete.Body);
         var ok = scenario.Complete.Status == 200 && shown.HasValue && shown.Value == scenario.OrderId;
         return Verdict(state, "R-021", "C-022", input, ok, $"HTTP {scenario.Complete.Status}、表示された注文番号 {Describe(shown)} / 期待 {Describe(scenario.OrderId)}", state.Transcript("order"));
     }
@@ -775,7 +775,10 @@ public static class Checks
         }
 
         var shown = Html.OrderNumber(scenario.OtherSessionComplete.Body);
-        var ok = !shown.HasValue || shown.Value != scenario.OrderId.Value;
+        var ok = state.ExplicitOrderContract
+            ? (scenario.OtherSessionComplete.Status is 403 or 404) && !Html.HasOrderMarker(scenario.OtherSessionComplete.Body)
+                && (!shown.HasValue || shown.Value != scenario.OrderId.Value)
+            : !shown.HasValue || shown.Value != scenario.OrderId.Value;
         return Verdict(state, "R-022", "C-023", input, ok, $"HTTP {scenario.OtherSessionComplete.Status}、別セッションで表示された注文番号 {Describe(shown)} / 他人の注文番号 {Describe(scenario.OrderId)}", state.Transcript("other"));
     }
 
@@ -803,6 +806,15 @@ public static class Checks
 
         var showsForm = Html.Contains(scenario.WrongPromo.Body, "PromoCode");
         var ok = scenario.WrongPromo.Status == 200 && showsForm && scenario.LinesAfterWrongPromo.Count == scenario.LinesBefore.Count && scenario.LinesAfterWrongPromo.Count > 0;
+        if (state.ExplicitOrderContract)
+        {
+            var readFault = InvalidOrderReadFault(state, "R-023", "C-024", input, scenario.OrdersBefore, scenario.OrdersAfterWrongPromo);
+            if (readFault != null) return readFault;
+            showsForm = Html.HasCheckoutForm(scenario.WrongPromo.Body);
+            ok = scenario.WrongPromo.Status == 200 && showsForm
+                && Html.SameCart(scenario.CartBefore.Body, scenario.CartAfterWrongPromo.Body)
+                && scenario.OrdersBefore.SameAs(scenario.OrdersAfterWrongPromo);
+        }
         return Verdict(
             state,
             "R-023",
@@ -810,7 +822,7 @@ public static class Checks
             input,
             ok,
             $"HTTP {scenario.WrongPromo.Status}（リダイレクトなし）、入力フォームの再表示 {showsForm}、かごは {Scenarios.DescribeCart(scenario.LinesAfterWrongPromo)}（直前 {Scenarios.DescribeCart(scenario.LinesBefore)}）",
-            state.Transcript("invalid"));
+            state.Transcript("invalid") + "\n" + scenario.OrdersBefore?.Detail + "\n" + scenario.OrdersAfterWrongPromo?.Detail);
     }
 
     private static CheckResult C025(RunState state)
@@ -828,7 +840,7 @@ public static class Checks
             return Fault(state, "R-024", "C-025", input, scenario, state.Transcript("invalid"));
         }
 
-        if (scenario.LinesBefore.Count == 0)
+        if (Html.CartLines(scenario.CartBeforeMissing.Body).Count == 0)
         {
             return Make(state, "R-024", "C-025", input, Judgement.Blocked, "未評価: かごに明細を入れられないため、必須項目欠落の挙動を観測できません。", state.Transcript("invalid"));
         }
@@ -836,6 +848,14 @@ public static class Checks
         var ok = scenario.MissingField.Status == 200
             && scenario.LinesAfterMissingField.Count == scenario.LinesBefore.Count
             && scenario.LinesAfterMissingField.Count > 0;
+        if (state.ExplicitOrderContract)
+        {
+            var readFault = InvalidOrderReadFault(state, "R-024", "C-025", input, scenario.OrdersBeforeMissing, scenario.OrdersAfterMissing);
+            if (readFault != null) return readFault;
+            ok = scenario.MissingField.Status == 200 && Html.HasCheckoutForm(scenario.MissingField.Body)
+                && Html.SameCart(scenario.CartBeforeMissing.Body, scenario.CartAfterMissingField.Body)
+                && scenario.OrdersBeforeMissing.SameAs(scenario.OrdersAfterMissing);
+        }
         return Verdict(
             state,
             "R-024",
@@ -843,7 +863,17 @@ public static class Checks
             input,
             ok,
             $"HTTP {scenario.MissingField.Status}（リダイレクトなし）、かごは {Scenarios.DescribeCart(scenario.LinesAfterMissingField)}（直前 {Scenarios.DescribeCart(scenario.LinesBefore)}）",
-            state.Transcript("invalid"));
+            state.Transcript(state.ExplicitOrderContract ? "invalid-missing" : "invalid")
+                + "\n" + scenario.OrdersBeforeMissing?.Detail + "\n" + scenario.OrdersAfterMissing?.Detail);
+    }
+
+    private static CheckResult InvalidOrderReadFault(RunState state, string requirement, string check,
+        string input, OrderStore.Snapshot before, OrderStore.Snapshot after)
+    {
+        if (before == null || after == null || before.Status == OrderStore.ProbeStatus.Unreadable || after.Status == OrderStore.ProbeStatus.Unreadable)
+            return Make(state, requirement, check, input, Judgement.Error, "Order observation unavailable",
+                before?.Detail + "\n" + after?.Detail);
+        return null;
     }
 
     private static CheckResult C026(RunState state)

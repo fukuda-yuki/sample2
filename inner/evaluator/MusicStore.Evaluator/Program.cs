@@ -48,6 +48,8 @@ public static class Program
 
         if (ledger != null)
         {
+            if ((ledger.SpecVersion == "1.2.0") != (options.EvaluationVersion == "1.2.0"))
+                faults.Add("Evaluation 1.2.0 requires the 1.2.0 ledger; historical contracts must not be relabeled.");
             var missing = ledger.AllCheckIds().Where(id => !Checks.Registry.ContainsKey(id)).ToList();
             if (missing.Count > 0)
             {
@@ -91,6 +93,7 @@ public static class Program
             Ledger = ledger,
             Catalog = catalog,
             ArtifactPath = options.ArtifactPath,
+            EvaluationVersion = options.EvaluationVersion,
         };
 
         Console.WriteLine($"[evaluator] evaluation id: {evaluationId}");

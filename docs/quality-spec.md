@@ -336,3 +336,17 @@
   外側の実行基盤の挙動であり、`outer/tests` と `outer/verify/verify.py` の `V-4` で確認している。
   校正が 20 件一致したことを、この確認の完了として数えない。
 - 校正の通過を「すべての入力に対する完全な等価性」や「モダナイズ品質全般の保証」と表現しない。
+
+## Current schema 2 contract (evaluation 1.2.0)
+
+The current `outer/profiles/tasks/MS1-001.json` uses
+`inner/spec/requirements-1.2.0.json`. The historical ledger and schema 1
+conditions remain unchanged. Order completion uses a unique `id="order-number"`
+element whose text is the integer order ID; surrounding language and nested
+markup are unrestricted. Another session must receive HTTP 403 or 404 without
+the order marker. These are explicit task decisions, not inferred legacy rules.
+Invalid promo and missing-address probes use independent sessions and compare
+album/quantity pairs, cart total and read-only snapshots of `Orders.OrderId`
+before and after each rejection. A database read failure is an evaluator error;
+a missing contract table is an artifact failure. Stored order field values and
+line-item persistence remain outside this ledger's observations.

@@ -28,7 +28,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$EvaluationVersion = '1.1.0',
+    [ValidateSet('1.1.0', '1.2.0')][string]$EvaluationVersion = '1.2.0',
     [switch]$Docker,
     [string]$AdditionalArtifact
 )
@@ -43,6 +43,7 @@ $variants = Join-Path $repo 'inner\fixtures\variants\apply.ps1'
 $reference = Join-Path $repo 'inner\fixtures\reference'
 $alternative = Join-Path $repo 'inner\fixtures\alternative'
 $specSource = Join-Path $repo 'inner\spec\requirements.json'
+if ($EvaluationVersion -eq '1.2.0') { $specSource = Join-Path $repo 'inner\spec\requirements-1.2.0.json' }
 $catalogSource = Join-Path $repo 'inner\spec\catalog.json'
 $runs = Join-Path $repo ('runs/_calibration/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss') + '-' + [guid]::NewGuid().ToString('N'))
 $dll = Join-Path $evaluator 'bin\Release\net8.0\MusicStore.Evaluator.dll'
@@ -222,7 +223,33 @@ Add-Case -CaseId 'var-aspnetcore-launch-profile' -Kind 'valid launch settings' -
     -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
     -Note 'IIS Express is also an ASP.NET Core host; a standard launch profile must not fail R-029.'
 
+if ($EvaluationVersion -eq '1.2.0') {
+    Add-Case -CaseId 'var-modern-project-legacy-name' -Kind 'equivalent project name' -Artifact $null -Variant 'modern-project-legacy-name' -Sequence 29 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'A net8.0 Web project is not a legacy project solely because it retains its filename.'
+    Add-Case -CaseId 'var-japanese-order-label' -Kind 'equivalent order display' -Artifact $null -Variant 'japanese-order-label' -Sequence 30 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'A Japanese label and nested DOM must pass without English phrase matching.'
+    Add-Case -CaseId 'var-order-denied-403' -Kind 'equivalent denial' -Artifact $null -Variant 'order-denied-403' -Sequence 31 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'Both public denial statuses are valid.'
+    Add-Case -CaseId 'neg-order-marker-wrong' -Kind 'order display defect' -Artifact $null -Negative 'order-marker-wrong' -Sequence 32 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-021') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-order-marker-comment' -Kind 'order display defect' -Artifact $null -Negative 'order-marker-comment' -Sequence 33 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-021') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-order-marker-duplicate' -Kind 'order display defect' -Artifact $null -Negative 'order-marker-duplicate' -Sequence 34 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-021') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-other-session-alternate-label' -Kind 'order ownership defect' -Artifact $null -Negative 'other-session-alternate-label' -Sequence 35 `
+        -ExpectedVerdict 'fail_critical' -ExpectedFailed @('R-022') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-invalid-promo-mutates-cart' -Kind 'invalid checkout defect' -Artifact $null -Negative 'invalid-promo-mutates-cart' -Sequence 36 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-023') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-missing-field-mutates-cart' -Kind 'invalid checkout defect' -Artifact $null -Negative 'missing-field-mutates-cart' -Sequence 37 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-024') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-invalid-promo-stores-order' -Kind 'invalid checkout defect' -Artifact $null -Negative 'invalid-promo-stores-order' -Sequence 38 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-023') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-missing-field-stores-order' -Kind 'invalid checkout defect' -Artifact $null -Negative 'missing-field-stores-order' -Sequence 39 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-024') -ExpectedBlocked @()
+}
+
 if ($AdditionalArtifact) {
+    if ($EvaluationVersion -ne '1.1.0') { throw 'The saved diagnostic artifact predates contract 1.2.0. Use -EvaluationVersion 1.1.0.' }
     Add-Case -CaseId 'regression-saved-model-artifact' -Kind 'saved real-model regression' -Artifact $AdditionalArtifact -Sequence 27 `
         -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
         -Note 'Re-evaluate the unchanged frozen diagnostic artifact after repairing the launch-profile false failure. No model call.'
@@ -239,7 +266,9 @@ $specCopyDir = Join-Path $runs 'fault-unimplemented-check'
 New-Item -ItemType Directory -Force -Path $specCopyDir | Out-Null
 $specCopy = Join-Path $specCopyDir 'requirements.json'
 $specText = [System.IO.File]::ReadAllText($specSource, [System.Text.Encoding]::UTF8)
-$specText = $specText.Replace('{ "id": "C-001",', '{ "id": "C-999", "observation": "実装のない検査。" },{ "id": "C-001",')
+$faultSpec = $specText | ConvertFrom-Json
+$faultSpec.requirements[0].checks += [pscustomobject]@{ id = 'C-999'; observation = 'Unimplemented calibration check' }
+$specText = $faultSpec | ConvertTo-Json -Depth 20
 [System.IO.File]::WriteAllText($specCopy, $specText)
 
 Add-Case -CaseId 'fault-unimplemented-check' -Kind '評価側の障害' -Artifact $reference -Sequence 91 -Spec $specCopy -Catalog $catalogSource `

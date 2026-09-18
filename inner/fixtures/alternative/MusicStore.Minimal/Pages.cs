@@ -131,8 +131,8 @@ public static class Pages
     }
 
     public static string Complete(int orderId) =>
-        "<h2>Checkout Complete</h2>\n<p>Thanks for your order! Your order number is: " +
-        orderId.ToString(CultureInfo.InvariantCulture) + "</p>\n";
+        "<h2>Checkout Complete</h2>\n<p>Thanks for your order! Your order number is: <span id='order-number'>" +
+        orderId.ToString(CultureInfo.InvariantCulture) + "</span></p>\n";
 
     public static string Error(string message) =>
         "<h2>Error</h2>\n<p>" + Escape(message) + "</p>\n";

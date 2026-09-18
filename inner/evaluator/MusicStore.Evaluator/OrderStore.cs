@@ -13,6 +13,52 @@ namespace MusicStore.Evaluator;
 /// </summary>
 public static class OrderStore
 {
+    public sealed class Snapshot
+    {
+        public ProbeStatus Status { get; set; }
+        public string Detail { get; set; } = string.Empty;
+        public List<long> Ids { get; } = new();
+        public bool SameAs(Snapshot other) => Status == ProbeStatus.Found
+            && other?.Status == ProbeStatus.Found && Ids.SequenceEqual(other.Ids);
+    }
+
+    public static Snapshot ReadIds(string databasePath)
+    {
+        var result = new Snapshot();
+        if (string.IsNullOrEmpty(databasePath) || !File.Exists(databasePath))
+        {
+            result.Status = ProbeStatus.ContractViolation;
+            result.Detail = "Orders snapshot: database missing";
+            return result;
+        }
+        try
+        {
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false,
+                DefaultTimeout = 10,
+            }.ToString());
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT OrderId FROM Orders ORDER BY OrderId";
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) result.Ids.Add(reader.GetInt64(0));
+            result.Status = ProbeStatus.Found;
+            result.Detail = "Orders.OrderId: [" + string.Join(",", result.Ids) + "]";
+        }
+        catch (SqliteException ex) when (IsContractViolation(ex))
+        {
+            result.Status = ProbeStatus.ContractViolation;
+            result.Detail = "Orders snapshot contract violation: " + ex.Message;
+        }
+        catch (Exception ex)
+        {
+            result.Status = ProbeStatus.Unreadable;
+            result.Detail = "Orders snapshot unreadable: " + ex.GetType().Name + ": " + ex.Message;
+        }
+        return result;
+    }
+
     public const string TableName = "Orders";
 
     public const string OrderIdColumn = "OrderId";

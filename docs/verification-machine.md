@@ -192,7 +192,7 @@ observation. Acceptance also requires at least one full application pass and a
 restore/rescore without model execution. Container isolation/stop, real usage,
 all six Runs and generated application workflows must pass before delivery.
 
-MS1-001 evaluates 29 published requirements at version 1.1.0. XML/HTML parsing
+MS1-001 evaluates 29 published requirements at version 1.2.0. XML/HTML parsing
 corrections preserve this meaning and change the evaluator build identity.
 Authentication, administration, deployment, general security and performance
 are out of scope. Persistence checks the published `Orders.OrderId` row contract,

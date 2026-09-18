@@ -28,7 +28,8 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$EvaluationVersion = '1.1.0'
+    [string]$EvaluationVersion = '1.1.0',
+    [switch]$Docker
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,18 +46,24 @@ $catalogSource = Join-Path $repo 'inner\spec\catalog.json'
 $runs = Join-Path $repo ('runs/_calibration/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss') + '-' + [guid]::NewGuid().ToString('N'))
 $dll = Join-Path $evaluator 'bin\Release\net8.0\MusicStore.Evaluator.dll'
 
-Write-Host '評価器をビルドします。'
-& dotnet build (Join-Path $evaluator 'MusicStore.Evaluator.csproj') -c Release --nologo -v q
-if ($LASTEXITCODE -ne 0) {
-    throw '評価器のビルドに失敗しました。'
+if (-not $Docker) {
+    Write-Host '評価器をビルドします。'
+    & dotnet build (Join-Path $evaluator 'MusicStore.Evaluator.csproj') -c Release --nologo -v q
+    if ($LASTEXITCODE -ne 0) { throw '評価器のビルドに失敗しました。' }
 }
 
-if (-not (Test-Path $dll)) {
+if (-not $Docker -and -not (Test-Path $dll)) {
     throw "評価器のアセンブリがありません: $dll"
 }
 
 # Every invocation owns a new directory. Never remove past Runs or fixtures.
 New-Item -ItemType Directory -Force -Path $runs | Out-Null
+if ($Docker) {
+    $runtimeRoot = Join-Path $repo 'artifacts/runtime/MS1-001'
+    $runtimeLock = Get-Content (Join-Path $runtimeRoot 'lock.json') -Raw | ConvertFrom-Json
+    Copy-Item -LiteralPath (Join-Path $runtimeRoot 'evaluator') -Destination (Join-Path $runs 'evaluator') -Recurse
+    Copy-Item -LiteralPath (Join-Path $runtimeRoot 'lock.json') -Destination (Join-Path $runs 'runtime-lock.json')
+}
 
 $spec = [System.IO.File]::ReadAllText($specSource, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 $requirementIds = @($spec.requirements | ForEach-Object { $_.id })
@@ -261,8 +268,49 @@ function Invoke-Evaluation {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & dotnet @arguments 1> $stdoutPath 2> $stderrPath
-        $exitCode = $LASTEXITCODE
+        if ($Docker) {
+            $artifactSnapshot = Join-Path $out 'frozen-input'
+            $containerArtifact = '/artifact'
+            if (Test-Path -LiteralPath $Artifact -PathType Container) {
+                & python -c 'import sys; sys.path.insert(0,sys.argv[1]); from outer.harness import util; util.collect(sys.argv[2],sys.argv[3])' $repo $Artifact $artifactSnapshot
+                if ($LASTEXITCODE -ne 0) { throw 'Calibration source snapshot failed' }
+            }
+            else {
+                New-Item -ItemType Directory -Path $artifactSnapshot | Out-Null
+                $containerArtifact = '/artifact/missing'
+            }
+            $assets = Join-Path $out 'assets'
+            $work = Join-Path $out 'work'
+            New-Item -ItemType Directory -Path $assets, $work | Out-Null
+            Copy-Item -LiteralPath $(if ($Spec) { $Spec } else { $specSource }) -Destination (Join-Path $assets 'requirements.json')
+            Copy-Item -LiteralPath $(if ($Catalog) { $Catalog } else { $catalogSource }) -Destination (Join-Path $assets 'catalog.json')
+            $containerName = 's2-cal-' + [guid]::NewGuid().ToString('N')
+            $dockerArguments = @('run', '--name', $containerName, '--network', 'none', '--read-only',
+                '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512', '--memory=6g', '--cpus=4',
+                '--tmpfs', '/tmp:rw,exec,size=2g',
+                '--mount', "type=bind,source=$artifactSnapshot,target=/artifact,readonly",
+                '--mount', "type=bind,source=$assets,target=/assets,readonly",
+                '--mount', "type=bind,source=$(Join-Path $runs 'evaluator'),target=/evaluator,readonly",
+                '--mount', "type=bind,source=$out,target=/result",
+                '--mount', "type=bind,source=$work,target=/work",
+                $runtimeLock.images.evaluator, 'dotnet', '/evaluator/MusicStore.Evaluator.dll',
+                '--artifact', $containerArtifact, '--out', '/result', '--work', '/work',
+                '--spec', '/assets/requirements.json', '--catalog', '/assets/catalog.json',
+                '--evaluation-version', $EvaluationVersion, '--sequence', "$Sequence")
+            $dockerArguments | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $out 'container-command.json')
+            try {
+                & docker @dockerArguments 1> $stdoutPath 2> $stderrPath
+                $exitCode = $LASTEXITCODE
+            }
+            finally {
+                & docker rm -f $containerName 1> (Join-Path $out 'container-removal.txt') 2>&1
+                if ($LASTEXITCODE -ne 0) { throw 'Calibration container stop was not confirmed' }
+            }
+        }
+        else {
+            & dotnet @arguments 1> $stdoutPath 2> $stderrPath
+            $exitCode = $LASTEXITCODE
+        }
     }
     finally {
         $ErrorActionPreference = $previous

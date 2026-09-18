@@ -1,16 +1,38 @@
 """Operator's ordinary end-to-end workflow. Failed attempts remain in the ledger."""
 from pathlib import Path
+import json
 import uuid
 
 from . import aggregate, evaluate, preserve, profiles, run, runtime, util
 
 
-def execute(repo, runs_dir, task, intervention, attempt, runtime_id, archive):
+def fingerprint(value):
+    return util.sha256_bytes(json.dumps(value, ensure_ascii=False, sort_keys=True).encode('utf-8'))
+
+
+def expected_conditions(repo, task, runtime_id, interventions):
+    return {'task': fingerprint(profiles.read(repo, 'tasks', task)),
+            'runtime': fingerprint(profiles.read(repo, 'runtimes', runtime_id)),
+            'runtime_lock': fingerprint(util.read_json(Path(repo)/'artifacts/runtime'/task/'lock.json')),
+            'interventions': {i:fingerprint(profiles.read(repo, 'interventions', i)) for i in interventions}}
+
+
+def verify_conditions(root, expected, intervention):
+    actual = {k:fingerprint(util.read_json(root/'profiles'/(k+'.json'))) for k in ('task','runtime')}
+    actual['runtime_lock'] = fingerprint(util.read_json(root/'condition.json')['runtime_lock'])
+    if any(actual[k] != expected[k] for k in actual) or (
+        fingerprint(util.read_json(root/'profiles/intervention.json')) != expected['interventions'][intervention]):
+        raise ValueError('Acceptance conditions changed after the batch plan; no model dispatched')
+
+
+def execute(repo, runs_dir, task, intervention, attempt, runtime_id, archive, *, expected=None):
     manifest = profiles.create(repo, runs_dir, task, intervention, attempt, runtime_id)
     rid = manifest['run_id']
     root = Path(runs_dir) / rid
     print('Running ' + rid, flush=True)
     try:
+        if expected is not None:
+            verify_conditions(root, expected, intervention)
         manifest = runtime.start(repo, runs_dir, rid)
         if manifest['stop_confirmed']:
             run.collect_run(runs_dir, rid)
@@ -23,7 +45,7 @@ def execute(repo, runs_dir, task, intervention, attempt, runtime_id, archive):
         raise
     finally:
         # Also preserve interrupted, unscored and missing-usage attempts.
-        reference = preserve.pack_run(archive, root, include=['evidence'])
+        reference = preserve.pack_run(archive, root, include=['evidence', 'workspace'])
         util.write_new_json(root / 'archive-reference.json', reference)
     row = aggregate.row_for(runs_dir, rid)
     row['archive'] = reference
@@ -36,13 +58,16 @@ def acceptance(repo, runs_dir, task, runtime_id):
     root.mkdir(parents=True)
     cases = [{'intervention': i, 'attempt': a} for a in (1, 2)
              for i in ('explore', 'preload', 'explained')]
+    expected = expected_conditions(repo, task, runtime_id, ('explore','preload','explained'))
     util.write_new_json(root / 'acceptance-plan.json', {'task': task, 'runtime': runtime_id,
-        'cases': cases, 'criteria': ['completed', 'usage_complete', 'input_reached',
+        'cases': cases, 'condition_fingerprints': expected,
+        'criteria': ['uniform_frozen_conditions', 'completed', 'usage_complete', 'input_reached',
                                    'scored', 'monitor_readback', 'restored_rescore']})
     results = []
     for case in cases:
         try:
-            row = execute(repo, root, task, case['intervention'], case['attempt'], runtime_id, root / '_archive')
+            row = execute(repo, root, task, case['intervention'], case['attempt'], runtime_id, root / '_archive',
+                          expected=expected)
         except Exception as exc:
             util.write_new_json(root / 'acceptance-failure.json', {'case':case, 'completed_runs':results,
                 'complete':False, 'error_type':type(exc).__name__, 'message':str(exc)})

@@ -33,6 +33,18 @@ class ScheduleContracts(unittest.TestCase):
         events[0],events[2]=events[2],events[0]
         self.assertIn('initial_order_or_identity_changed',validate_schedule(events,self.plan))
 
+    def test_user_amended_infrastructure_recovery_keeps_original_failure(self):
+        events=self.events()
+        events[3].update(disposition='halt',row={'execution':{'end_reason':'environment_failure'}})
+        recovery={'kind':'infrastructure_recovered','run_id':'1','reason':'premodel_docker_address_pool'}
+        events.insert(4,recovery)
+        supplement={'cohort':'supplement','condition':'explore','run_id':'extra','replacement_for':'1'}
+        events.append({'kind':'dispatch','case':supplement})
+        self.assertIn('unauthorized_infrastructure_recovery:1',validate_schedule(events,self.plan))
+        amended={**self.plan,'resume_amendment':{'allow_premodel_pool_recovery':True}}
+        self.assertEqual(validate_schedule(events,amended),[])
+        self.assertEqual(events[3]['disposition'],'halt')
+
 
 if __name__=='__main__':
     unittest.main()

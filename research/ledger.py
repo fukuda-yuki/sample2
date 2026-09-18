@@ -20,8 +20,17 @@ def validate_schedule(events,plan):
     active=None
     finished={}
     seen=set()
+    recovered=set()
     for e in events:
-        if e['kind']=='dispatch':
+        if e['kind']=='infrastructure_recovered':
+            if (plan.get('resume_amendment',{}).get('allow_premodel_pool_recovery') is True
+                    and e.get('reason')=='premodel_docker_address_pool'
+                    and e.get('run_id') in finished
+                    and finished[e['run_id']].get('row',{}).get('execution',{}).get('end_reason')=='environment_failure'):
+                recovered.add(e['run_id'])
+            else:
+                problems.append('unauthorized_infrastructure_recovery:'+str(e.get('run_id')))
+        elif e['kind']=='dispatch':
             s=e['case'];rid=s['run_id']
             if active is not None:problems.append('overlapping_dispatch:'+rid)
             if rid in seen:problems.append('replayed_dispatch:'+rid)
@@ -30,7 +39,7 @@ def validate_schedule(events,plan):
                 if len([x for x in finished.values() if x['case']['cohort']=='primary18'])!=18:
                     problems.append('supplement_before_all_initial_results')
                 prior=finished.get(s.get('replacement_for'),{})
-                if prior.get('disposition')!='technical':
+                if prior.get('disposition')!='technical' and s.get('replacement_for') not in recovered:
                     problems.append('supplement_for_ineligible_run:'+rid)
                 if prior.get('case',{}).get('condition')!=s['condition']:
                     problems.append('supplement_condition_changed:'+rid)
@@ -38,7 +47,7 @@ def validate_schedule(events,plan):
             rid=e['case']['run_id']
             if active!=rid:problems.append('result_without_active_dispatch:'+rid)
             active=None;finished[rid]=e
-    expected=[s['run_id'] for s in initial if finished.get(s['run_id'],{}).get('disposition')=='technical'][:plan['maximum_supplements']]
+    expected=[s['run_id'] for s in initial if finished.get(s['run_id'],{}).get('disposition')=='technical' or s['run_id'] in recovered][:plan['maximum_supplements']]
     if original_ids!=expected[:len(original_ids)]:
         problems.append('supplement_order_changed')
     return problems
@@ -86,9 +95,10 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--batch',type=Path,required=True)
     p.add_argument('--out',type=Path,required=True)
+    p.add_argument('--plan',type=Path)
     args=p.parse_args()
     if args.out.exists():raise SystemExit('Refusing to overwrite ledger output')
-    result=build_ledger(args.batch,read_json(args.batch/'frozen-plan.json'))
+    result=build_ledger(args.batch,read_json(args.plan or args.batch/'frozen-plan.json'))
     args.out.mkdir(parents=True)
     write_json(args.out/'execution-ledger.json',result)
     write_csv(args.out/'execution-ledger.csv',result['ledger'])

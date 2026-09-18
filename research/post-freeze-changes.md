@@ -24,3 +24,16 @@ The stopped batch must not be resumed with this modified research source; its
 driver's frozen hash check intentionally rejects it. Any later acquisition needs
 an explicit new protocol/batch decision after the documented environment and
 evaluation issues are resolved. No further model dispatch occurred here.
+
+## Explicit retry amendment R1
+
+The subsequent user instruction on 2026-09-19 explicitly authorized retry and
+diagnosis/repair of Docker network exhaustion. The paragraph above describes
+the earlier stopped delivery, not a prohibition after that new authorization.
+See `docs/ms1-exploration-20260919-retry-amendment.md` for the bounded exception.
+The original frozen files and closed result remain unchanged. `resume.py` uses
+a separately hashed amended plan, appends a new journal segment, finishes the
+remaining initial slots in their original order, and retains the pre-model
+Docker failure before its separately identified late supplement. The operational
+`network_recovery.py` reclaims only verified stopped and preserved Run networks,
+outside measured execution. Runtime/controller/evaluator bytes remain fixed.

@@ -94,6 +94,12 @@ IDs are never reused; choose a new attempt number after a repair. Diagnostic
 budget changes belong in a separately named runtime profile before creation.
 Use identical frozen conditions for all six final acceptance Runs.
 
+`provider_timeout_seconds` freezes a separate 600-second request/header/chunk
+timeout. A previous 120-second cap aborted a real queued response despite the
+remaining Run budget. The 1800-second controller limit still bounds the entire
+Run. Gateway shutdown cancels active upstream sockets and records a terminal
+event before exit; cancelled/missing usage remains incomplete.
+
 Individual phases are also available:
 
 ```powershell
@@ -147,6 +153,12 @@ model understanding or a causal intervention effect.
 and input/output counts. Linking twice skips the append-only import to avoid
 doubled usage. This is gateway observation, not native OpenCode telemetry support.
 
+The monitor normalizer sums reported spans even when a different span has missing
+usage. `telemetry-link.json` therefore verifies those observed sums separately
+from nullable Run totals and records `usage_complete`. A successful import of
+partial observations cannot make an incomplete Run complete. Trace identity uses
+the unique Run instance, not a display name reused in another batch.
+
 ```powershell
 python -m outer.harness.cli preserve --run MS1-001-explained-001 --archive artifacts/archive --include evidence
 python -m outer.harness.cli verify-package --archive artifacts/archive --package run-MS1-001-explained-001 --sha256 <receipt-hash>
@@ -182,6 +194,8 @@ All commands above except `acceptance` use no real model and keep separate attem
 The container probe runs the production controller with a local mock upstream,
 and exercises completion, timeout, operator stop, crashed-controller recovery,
 HTTP failure, missing usage, wrong model and a truncated response. Its synthetic
+provider also exercises a 130-second queued stream and cancellation while a
+request is active. Its synthetic
 credential is never the Windows user credential. Original logs, manifests and
 per-case expectations are retained under a unique `_container-probe-*` directory.
 `acceptance` uses the real model for three arms twice, saving a plan first. It

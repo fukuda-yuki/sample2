@@ -195,6 +195,7 @@ def main(argv=None):
         result = aggregate.row_for(runs_dir, args.run)
         result['requests_started'] = len(util.read_lines(root / 'usage/raw/started.jsonl'))
         result['requests_ended'] = len(util.read_lines(root / 'usage/raw/events.jsonl'))
+        result['model_called'] = bool(result.get('model_called') or result['requests_started'])
     elif args.command == 'run':
         from .machine import execute
         result = execute(repo, runs_dir, args.task, args.intervention, args.attempt,

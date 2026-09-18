@@ -21,10 +21,11 @@ from harness.security import child_environment
 REPO = Path(__file__).resolve().parents[2]
 CANARY = 'synthetic-container-credential-canary'
 CASES = ('normal', 'timeout', 'operator_stop', 'controller_crash',
-         'http_error', 'missing_usage', 'wrong_model', 'cut_stream')
+         'http_error', 'missing_usage', 'wrong_model', 'cut_stream',
+         'slow_stream', 'active_request_stop')
 
 GATEWAY_FIXTURE = r'''
-import json, sys, threading, uuid
+import json, sys, threading, uuid, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, '/app')
 from gateway import Gateway
@@ -37,6 +38,13 @@ class Upstream(BaseHTTPRequestHandler):
         self.send_response(503 if mode == 'http_error' else 200)
         self.send_header('Content-Type', 'text/event-stream')
         self.end_headers()
+        if mode in ('slow_stream', 'active_request_stop'):
+            # Heartbeats without model output reproduce a queued provider request.
+            try:
+                for _ in range(130 if mode == 'slow_stream' else 360):
+                    self.wfile.write(b': synthetic provider heartbeat\n\n'); self.wfile.flush()
+                    time.sleep(1)
+            except OSError: return
         item = {'id':'fixture-'+uuid.uuid4().hex, 'object':'chat.completion.chunk',
                 'created':1, 'model':'wrong-model' if mode == 'wrong_model' else model,
                 'choices':[{'index':0, 'delta':{'role':'assistant','content':'synthetic fixture complete'},
@@ -48,10 +56,11 @@ class Upstream(BaseHTTPRequestHandler):
         self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode())
         if mode != 'cut_stream': self.wfile.write(b'data: [DONE]\n\n')
 upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+upstream.daemon_threads = True
 threading.Thread(target=upstream.serve_forever, daemon=True).start()
 server = Gateway(('0.0.0.0',8080), '/records', run_id, model, sys.stdin.readline().strip(),
                  upstream_host='127.0.0.1', upstream_port=upstream.server_port, tls=False, session_id=session_id)
-server.serve_forever()
+server.serve_with_signals()
 '''
 
 WORKER_FIXTURE = r'''
@@ -78,7 +87,7 @@ def controller(root, case):
     condition_resolver = profiles.resolve
     def resolve(*args, **kwargs):
         condition = condition_resolver(*args, **kwargs)
-        seconds = 15 if case == 'timeout' else 120
+        seconds = 15 if case == 'timeout' else 240 if case == 'slow_stream' else 120
         condition['budget']['value'] = seconds
         condition['runtime']['timeout_seconds'] = seconds
         return condition
@@ -137,7 +146,9 @@ def main():
             'http_error':'provider_failure, incomplete measurement',
             'missing_usage':'completed but incomplete measurement',
             'wrong_model':'provider_failure, incomplete measurement',
-            'cut_stream':'provider_failure, incomplete measurement'}})
+            'cut_stream':'provider_failure, incomplete measurement',
+            'slow_stream':'completed after 130 seconds of heartbeats, complete usage',
+            'active_request_stop':'operator_stop, terminal cancelled journal and incomplete usage'}})
     results = []
     for case in CASES:
         root = batch/case
@@ -160,7 +171,14 @@ def main():
                     (root/'stop-cli.stdout').write_bytes(stopped.stdout)
                     (root/'stop-cli.stderr').write_bytes(stopped.stderr)
                     if stopped.returncode: raise RuntimeError('Stop CLI failed')
-                code = process.wait(timeout=160)
+                if case == 'active_request_stop':
+                    wait_for(run_root/'usage/raw/started.jsonl', process)
+                    stopped = subprocess.run([sys.executable,'-m','outer.harness.cli','--runs-dir',str(root),
+                        'stop','--run',rid], cwd=REPO, env=child_environment(), capture_output=True, timeout=65)
+                    (root/'stop-cli.stdout').write_bytes(stopped.stdout)
+                    (root/'stop-cli.stderr').write_bytes(stopped.stderr)
+                    if stopped.returncode: raise RuntimeError('Stop CLI failed')
+                code = process.wait(timeout=280 if case == 'slow_stream' else 160)
                 if code and case != 'controller_crash': raise RuntimeError('Controller failed')
             finally:
                 if process.poll() is None:
@@ -182,17 +200,24 @@ def main():
             item = runtime.inspect_container(state[role])
             if item and CANARY in json.dumps(item): credentials_absent = False
         records_safe = all(CANARY.encode() not in p.read_bytes() for p in (run_root/'usage').rglob('*') if p.is_file())
-        expected = ('timeout' if case == 'timeout' else 'operator_stop' if case in ('operator_stop','controller_crash')
+        expected = ('timeout' if case == 'timeout' else 'operator_stop' if case in ('operator_stop','controller_crash','active_request_stop')
                     else 'provider_failure' if case in ('http_error','wrong_model','cut_stream') else 'completed')
         passed = (manifest['end_reason'] == expected and stopped and children_stopped
                   and credentials_absent and records_safe)
-        if case == 'normal': passed = passed and usage['usage_complete'] and usage['input_reached']
+        if case in ('normal','slow_stream'): passed = passed and usage['usage_complete'] and usage['input_reached']
         else: passed = passed and not usage['usage_complete']
+        cancelled_recorded = None
+        if case == 'active_request_stop':
+            starts = util.read_lines(run_root/'usage/raw/started.jsonl')
+            ends = util.read_lines(run_root/'usage/raw/events.jsonl')
+            cancelled_recorded = (len(starts) == len(ends) == 1 and ends[0]['status'] == 'cancelled'
+                and util.sha256_file(run_root/'usage/raw'/ends[0]['response_file']) == ends[0]['response_sha256'])
+            passed = passed and cancelled_recorded
         result = {'case':case,'passed':bool(passed),'end_reason':manifest['end_reason'],
             'stop_confirmed':stopped,'children_stopped':children_stopped,
             'credentials_absent_from_container_metadata':credentials_absent,
             'records_redacted':records_safe,'usage_complete':usage['usage_complete'],
-            'input_reached':usage.get('input_reached')}
+            'input_reached':usage.get('input_reached'),'cancelled_terminal_recorded':cancelled_recorded}
         util.write_new_json(root/'result.json', result)
         results.append(result)
         util.write_json_atomic(batch/'progress.json', {'results':results,'complete':False})

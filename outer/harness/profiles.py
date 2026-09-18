@@ -40,6 +40,9 @@ def resolve(repo, task_id, intervention_id, runtime_id='deepseek'):
             or runtime['concurrency'] != 1 or runtime['subagents'] is not False
             or type(runtime['timeout_seconds']) is not int or runtime['timeout_seconds'] <= 0):
         raise ValueError('Runtime violates the fixed provider, model or execution contract')
+    if (type(runtime.get('provider_timeout_seconds', 120)) is not int
+            or runtime.get('provider_timeout_seconds', 120) <= 0):
+        raise ValueError('Provider timeout must be a positive number of seconds')
     condition = copy.deepcopy(task)
     condition.update(schema_version=2, condition_id=intervention_id,
                      intervention=intervention, runtime=runtime,

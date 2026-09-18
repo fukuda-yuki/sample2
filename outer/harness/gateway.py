@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import signal
 import threading
 import uuid
 
@@ -52,13 +53,17 @@ class Gateway(ThreadingHTTPServer):
     daemon_threads = False
 
     def __init__(self, address, root, run_id, model, secret, *, upstream_host='opencode.ai',
-                 upstream_port=443, tls=True, session_id=None):
+                 upstream_port=443, tls=True, session_id=None, upstream_timeout=120):
         super().__init__(address, Handler)
         self.root, self.run_id, self.model, self.secret = Path(root), run_id, model, secret
         self.session_id = session_id or run_id
         self.upstream_host, self.upstream_port, self.tls = upstream_host, upstream_port, tls
+        self.upstream_timeout = upstream_timeout
         self.lock = threading.Lock()
         self.failed = threading.Event()
+        self.stopping = threading.Event()
+        self.socket_lock = threading.Lock()
+        self.active_sockets = set()
         self.root.mkdir(parents=True, exist_ok=True)
 
     def record(self, file, obj):
@@ -67,6 +72,38 @@ class Gateway(ThreadingHTTPServer):
                 f.write(json.dumps(obj, ensure_ascii=False) + '\n')
                 f.flush()
                 os.fsync(f.fileno())
+
+    def track_socket(self, connection):
+        with self.socket_lock:
+            if self.stopping.is_set():
+                connection.close()
+                raise ConnectionAbortedError()
+            self.active_sockets.add(connection)
+
+    def cancel_and_shutdown(self):
+        """Stop upstream traffic and let each handler durably close its journal."""
+        self.stopping.set()
+        self.failed.set()
+        with self.socket_lock:
+            sockets = list(self.active_sockets)
+        for connection in sockets:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
+        self.shutdown()
+
+    def serve_with_signals(self):
+        def stop(*_):
+            # shutdown must run outside the serve_forever thread.
+            threading.Thread(target=self.cancel_and_shutdown, daemon=True).start()
+        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGINT, stop)
+        try:
+            self.serve_forever()
+        finally:
+            self.server_close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -122,11 +159,15 @@ class Handler(BaseHTTPRequestHandler):
         filt = SecretFilter(g.secret)
         response_bytes = bytearray()
         connection = None
+        upstream_socket = None
         sent_headers = False
         original = (g.root / event['response_file']).open('xb')
         try:
             cls = http.client.HTTPSConnection if g.tls else http.client.HTTPConnection
-            connection = cls(g.upstream_host, g.upstream_port, timeout=120)
+            connection = cls(g.upstream_host, g.upstream_port, timeout=g.upstream_timeout)
+            connection.connect()
+            upstream_socket = connection.sock
+            g.track_socket(upstream_socket)
             connection.request('POST', '/zen/go/v1/chat/completions', raw, {
                 'Authorization': 'Bearer ' + g.secret, 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream', 'User-Agent': 'sample2-verification-machine/1',
@@ -182,14 +223,22 @@ class Handler(BaseHTTPRequestHandler):
                 g.failed.set()
         except Exception as exc:
             # Never log exception messages: upstream errors can include credentials.
-            event['status'] = 'transport_error'
+            event['status'] = 'cancelled' if g.stopping.is_set() else 'transport_error'
             event['error_type'] = type(exc).__name__
             g.failed.set()
             if not sent_headers:
-                self.send_error(502, 'Upstream transport failed')
+                try:
+                    self.send_error(502, 'Upstream transport failed')
+                except OSError:
+                    pass
         finally:
+            if g.stopping.is_set() and not event.get('stream_done'):
+                event['status'] = 'cancelled'
             if connection:
                 connection.close()
+            if upstream_socket:
+                with g.socket_lock:
+                    g.active_sockets.discard(upstream_socket)
             tail = filt.feed(b'', final=True)
             response_bytes.extend(tail)
             original.write(tail)
@@ -214,6 +263,7 @@ def main():
     p.add_argument('--run-id', required=True)
     p.add_argument('--model', required=True)
     p.add_argument('--session-id')
+    p.add_argument('--upstream-timeout', type=int, default=120)
     p.add_argument('--directory', default='/records')
     args = p.parse_args()
     import sys
@@ -221,8 +271,8 @@ def main():
     if not secret:
         raise SystemExit('Gateway credential is missing')
     server = Gateway(('0.0.0.0', 8080), args.directory, args.run_id, args.model, secret,
-                     session_id=args.session_id)
-    server.serve_forever()
+                     session_id=args.session_id, upstream_timeout=args.upstream_timeout)
+    server.serve_with_signals()
 
 
 if __name__ == '__main__':

@@ -17,7 +17,7 @@ def attributes(values):
 
 def payload(events, run_id, manifest=None):
     manifest = manifest or {}
-    trace = hashlib.sha256(('sample2:' + run_id).encode()).hexdigest()[:32]
+    trace = hashlib.sha256(('sample2:' + (manifest.get('run_instance_id') or run_id)).encode()).hexdigest()[:32]
     spans = []
     for e in events:
         usage = e.get('usage') or {}
@@ -28,6 +28,7 @@ def payload(events, run_id, manifest=None):
             'endTimeUnixNano': str(end), 'attributes': attributes({
                 'gen_ai.operation.name': 'chat', 'gen_ai.request.model': e['model_id'],
                 'gen_ai.conversation.id': e.get('session_id', run_id), 'sample2.request.id': e['request_id'],
+                'sample2.request.status': e.get('status'),
                 'gen_ai.usage.input_tokens': usage.get('input_tokens'),
                 'gen_ai.usage.output_tokens': usage.get('output_tokens'),
                 'sample2.cache_read_tokens': usage.get('cache_read_tokens'),
@@ -41,6 +42,19 @@ def payload(events, run_id, manifest=None):
         'task.run_index': manifest.get('attempt'), 'experiment.condition': manifest.get('intervention_id'),
         'sample2.provenance': 'gateway-derived; not native OpenCode telemetry'})},
         'scopeSpans': [{'scope': {'name': 'sample2.gateway', 'version': '1'}, 'spans': spans}]}]}
+
+
+def usage_totals(events):
+    """Monitor normalization sums known spans; that is not an unknown Run total."""
+    totals = {}
+    complete_requests = all(e.get('status') == 'completed' and not e.get('policy_error') for e in events)
+    for key in ('input_tokens', 'output_tokens'):
+        values = [(e.get('usage') or {}).get(key) for e in events]
+        known = [v for v in values if type(v) is int and v >= 0]
+        observed = sum(known) if known else None
+        totals[key] = {'observed': observed, 'reported_requests': len(known),
+                       'total': observed if values and len(known) == len(values) and complete_requests else None}
+    return totals
 
 
 def link(repo, root):
@@ -80,15 +94,24 @@ def link(repo, root):
                                       'normalize-raw', str(database), '--json', str(normalized)], timeout=300)
     (directory / 'normalizer.log').write_text(normalization.stdout + normalization.stderr, encoding='utf-8')
     rows = util.read_json(normalized)
-    expected = {'experiment_id': root.name, 'turn_count': len(events)}
-    for key in ('input_tokens', 'output_tokens'):
-        values = [(e.get('usage') or {}).get(key) for e in events]
-        expected[key] = sum(values) if values and all(type(v) is int and v >= 0 for v in values) else None
+    totals = usage_totals(events)
+    expected = {'experiment_id': root.name, 'turn_count': len(events)} if events else {}
+    expected.update({key: value['observed'] for key, value in totals.items()})
     readback = rows[0] if len(rows) == 1 else {}
     comparison = {k: {'expected': v, 'observed': readback.get(k), 'matched': readback.get(k) == v}
                   for k, v in expected.items()}
+    comparison['normalized_row_count'] = {'expected': 1 if events else 0, 'observed': len(rows),
+                                         'matched': len(rows) == (1 if events else 0)}
+    measurement = root / 'usage/normalized.json'
+    usage_complete = (util.read_json(measurement).get('usage_complete', False) if measurement.exists()
+                      else bool(events) and all(v['total'] is not None for v in totals.values()))
+    if not usage_complete:
+        for value in totals.values():
+            value['total'] = None
     receipt = {'verified': len(found) == 1 and all(v['matched'] for v in comparison.values()),
                'readback': comparison, 'raw_record_ids': found, 'request_count': len(events),
+               'usage_complete': usage_complete, 'usage_totals': totals,
+               'readback_basis': 'known reported spans only; totals remain null when usage is incomplete',
                'source': 'gateway-derived OTLP, not native agent telemetry',
                'raw_sha256': util.sha256_file(raw), 'database': 'telemetry/monitor.db',
                'monitor_commit': runtime.command(['git', '-C', str(monitor_root), 'rev-parse', 'HEAD']).stdout.strip(),

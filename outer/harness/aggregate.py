@@ -37,6 +37,8 @@ def row_for(runs_dir, run_id):
     manifest = run_mod.load_manifest(runs_dir, run_id)
     snapshot = run_mod.read_snapshot(run_dir)
     usage = run_mod.read_usage(run_dir)
+    if usage.get('error') == 'usage_not_collected':
+        usage['observed_tokens'] = None
     scoring = evaluate.last_scoring(run_dir)
     execution = run_mod.execution_state(manifest)
     artifact_state = snapshot.get('artifact_state')
@@ -120,6 +122,7 @@ def compare(runs_dir):
         manifest = run_mod.load_manifest(runs_dir, row['run_id'])
         profile_files = manifest.get('profile_files', {})
         identity = {'task': row['task_id'], 'intervention': row['condition_id'],
+                    'condition_sha256': manifest.get('condition_sha256'),
                     'profiles': {k: v['sha256'] for k, v in profile_files.items()},
                     'evaluator_sha256': row['scoring'].get('evaluator_sha256')}
         key = json.dumps(identity, sort_keys=True)

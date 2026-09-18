@@ -155,6 +155,7 @@ def mount(path, dest, readonly=False):
 def opencode_config(condition):
     model = condition['runtime']['model_id']
     selected = 'sample2/' + model
+    request_timeout = condition['runtime'].get('provider_timeout_seconds', 120) * 1000
     return {'$schema': 'https://opencode.ai/config.json', 'model': selected, 'small_model': selected,
             'enabled_providers': ['sample2'], 'autoupdate': False, 'share': 'disabled',
             'plugin': [], 'mcp': {}, 'lsp': False, 'compaction': condition['runtime']['compaction'],
@@ -162,7 +163,8 @@ def opencode_config(condition):
                            'webfetch': 'deny', 'websearch': 'deny'},
             'provider': {'sample2': {'npm': '@ai-sdk/openai-compatible', 'name': 'Sample2 gateway',
                 'options': {'baseURL': 'http://gateway:8080/v1', 'apiKey': 'local-no-credential',
-                            'timeout': 120000},
+                            'timeout': request_timeout, 'headerTimeout': request_timeout,
+                            'chunkTimeout': request_timeout},
                 'models': {model: {'name': 'DeepSeek V4.1 Flash',
                     'limit': {'context': condition['runtime']['model_context_tokens'],
                               'output': condition['runtime']['model_output_tokens']}}}}}}
@@ -271,7 +273,8 @@ def _start(repo, runs_dir, run_id):
                     '--network', private, '--network-alias', 'gateway', *sandbox_args(),
                     *mount(root / 'usage/raw', '/records'), lock['images']['gateway'],
                     '--run-id', run_id, '--model', condition['runtime']['model_id'],
-                    '--session-id', manifest.get('run_instance_id', run_id)]
+                    '--session-id', manifest.get('run_instance_id', run_id),
+                    '--upstream-timeout', str(condition['runtime'].get('provider_timeout_seconds', 120))]
     manifest.update(started_at=run.now(), runner={'id': 'opencode', 'version': lock['opencode_version']},
                     synthetic=False, model_called=False)
     run.save_manifest(runs_dir, run_id, manifest)

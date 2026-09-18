@@ -1,5 +1,9 @@
 # Verification checkpoint, 2026-09-18 JST
 
+This is the historical checkpoint before Linux engine recovery and live
+acquisition. See the [completed local delivery](verification-delivery-20260918.md)
+for the later results; the unsuccessful preparation/recovery record below remains intact.
+
 **Delivery is not complete. Real-model acceptance is 0/6.** No real model was
 called in this implementation/verification session. The records below distinguish
 the real evaluator and real OpenCode executable from synthetic provider responses.

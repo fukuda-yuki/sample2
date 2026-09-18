@@ -1,6 +1,6 @@
 # 外側：実験実行基盤（最小経路）
 
-Schema 2 adds the OpenCode/gateway execution path: see the [operator guide](../docs/verification-machine.md) and [acceptance evidence](../docs/verification-evidence-20260918.md). The sections below describe the original schema 1 path. Live delivery acceptance is still pending.
+Schema 2 adds the OpenCode/gateway execution path: see the [operator guide](../docs/verification-machine.md) and [delivery evidence](../docs/verification-delivery-20260918.md). Six real Runs passed local machine acceptance for MS1-001. The sections below describe the original schema 1 path.
 
 対応 Issue: [#5](https://github.com/fukuda-yuki/sample2/issues/5)。仕様は [docs/outer-harness.md](../docs/outer-harness.md)。
 

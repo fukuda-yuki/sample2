@@ -3,7 +3,8 @@
 This schema 2 path implements the plan approved on 2026-09-18. It adds an OpenCode
 runner while retaining schema 1 Runs and the dummy/manual runners. The old
 statement that `outer/` contains no model path describes the schema 1 prototype.
-**Live delivery acceptance is pending.** See [current evidence](verification-evidence-20260918.md).
+**Local live delivery acceptance passed for MS1-001.** See the [delivery report](verification-delivery-20260918.md)
+for six real Runs, original records, calibration, controls and reproduction.
 
 ## Select task and intervention independently
 
@@ -115,6 +116,9 @@ python -m outer.harness.cli compare --out runs/comparison.json
 Global `--runs-dir <directory>` goes **before** the command. Use it for a batch
 or restored Run directory. Comparisons keep changed task/runtime/evaluator
 conditions in separate groups and preserve failed/unscored Runs and null usage.
+Before scoring, the actual evaluator-build hash is unknown, so an unscored Run
+appears in its own group. After scoring, identical frozen conditions and evaluator
+builds group together. The final acceptance comparison contains three groups of two.
 
 The worker has read-only inputs, its own workspace/state, no research mounts,
 no Docker socket and an internal network. Only gateway has an outbound network.
@@ -195,8 +199,7 @@ The container probe runs the production controller with a local mock upstream,
 and exercises completion, timeout, operator stop, crashed-controller recovery,
 HTTP failure, missing usage, wrong model and a truncated response. Its synthetic
 provider also exercises a 130-second queued stream and cancellation while a
-request is active. Its synthetic
-credential is never the Windows user credential. Original logs, manifests and
+request is active. Its credential is never the Windows user credential. Original logs, manifests and
 per-case expectations are retained under a unique `_container-probe-*` directory.
 `acceptance` uses the real model for three arms twice, saving a plan first. It
 checks frozen task, intervention, runtime and prepared-environment fingerprints

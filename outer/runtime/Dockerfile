@@ -11,6 +11,7 @@ FROM base AS worker
 ARG OPENCODE_VERSION=1.17.11
 RUN curl -fsSL https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz \
     | tar -xz -C /usr/local/bin && opencode --version
+RUN mkdir -p /state /workspace && chown 1000:1000 /state /workspace
 ENV HOME=/tmp/home XDG_CONFIG_HOME=/tmp/config XDG_DATA_HOME=/state XDG_CACHE_HOME=/tmp/cache \
     OPENCODE_DISABLE_AUTOUPDATE=true OPENCODE_DISABLE_MODELS_FETCH=true \
     OPENCODE_DISABLE_DEFAULT_PLUGINS=true

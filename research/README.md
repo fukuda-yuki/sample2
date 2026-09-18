@@ -7,9 +7,12 @@ Start with the [Japanese findings](../docs/ms1-exploration-20260919-report.md),
 
 The historical population is the six direct children of
 `runs/acceptance-64ad09cd85ca`. The new batch is
-`runs/exploration-20260919-ms1`: two completed implementations, one environment
-failure before model dispatch, fifteen undispatched slots, no supplements.
-Its closed batch must not be silently resumed or combined with a later batch.
+`runs/exploration-20260919-ms1`. The first segment stopped after two completed
+implementations and one pre-model Docker failure. The user's explicit retry
+instruction authorized a documented continuation; see the
+[retry amendment](../docs/ms1-exploration-20260919-retry-amendment.md).
+Its original plan, result, and failed attempt remain preserved. The appended
+journal and `resume-v1/result.json` record continuation separately.
 
 ## Programs
 
@@ -25,6 +28,10 @@ Its closed batch must not be silently resumed or combined with a later batch.
 - `notebook`: produce an executed ipynb and readable standalone HTML companion.
 - `review.ps1`: run only the prepared review copies, with separate human and
   automation state. This is not a model Run, and does not edit fixed artifacts.
+- `evidence_review`: post-acquisition evidence index for every Run, linking large
+  input increases, retained outputs, error-text review candidates and quality.
+- `resume` / `network_recovery`: explicitly authorized continuation and narrowly
+  scoped cleanup of preserved, stopped Run networks. No global Docker pruning.
 - `freeze` / `acquire`: the already-used, bounded acquisition path. The exact
   pre-acquisition source is commit `5fa4977`. The frozen plan records its hashes.
 

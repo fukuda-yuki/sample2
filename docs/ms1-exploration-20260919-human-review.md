@@ -1,7 +1,7 @@
 # 探索後の人による抜き取り確認材料
 
-**人の確認は未実施。** 新規バッチは3枠目の環境障害で中断したため、現時点で
-全条件の合格生成物は揃っていない。これは確認対象と手順の納品であり、人の合格記録ではない。
+**人の確認は未実施。** Docker障害からの明示的な再開後、全初回18枠の処理を終え、
+各条件の合格生成物から以下を選んだ。これは確認対象と手順の納品であり、人の合格記録ではない。
 
 ## 対象と起動
 
@@ -11,28 +11,32 @@
 
 | 条件 | 今回の対象 | 選定理由 | 人の判定 |
 |---|---|---|---|
-| explore | 新規 MS1-001-explore-001 | 合格1件、中央値4,337,365 tokensと一致 | Not run |
-| preload | 新規 MS1-001-preload-001 | 合格なし。93.1点の失敗原因を確認する対象 | Not run |
-| explained | 新規 MS1-001-explained-001 の障害記録 | モデル未実行、アプリ生成物なし | アプリ確認不可 |
+| explore | 新規 MS1-001-explore-003（3,730,097 tokens） | 合格6件の中央値3,915,396.5へ最も近い2件のうち実行が早い | Not run |
+| preload | 新規 MS1-001-preload-003（3,344,941 tokens） | 合格4件の中央値3,747,229.5へ最も近い2件のうち実行が早い | Not run |
+| explained | 新規 MS1-001-explained-004（3,783,708 tokens） | 合格5件の中央値3,783,708と一致 | Not run |
 
 対象のRunは `runs/exploration-20260919-ms1` 直下。既存6件に含まれる同名Runとは別である。
 評価時のpublish成果物を、ハッシュ一致を確認して
-`artifacts/exploration/20260919/human-review/<condition>/application` に複製した。
-90ファイルの対応とSHA-256は同ディレクトリの `copy-receipt.json` にある。
+`artifacts/exploration/20260919/human-review-resumed-v1/<condition>/application` に複製した。
+全ファイルの対応、Run instance ID、SHA-256は同ディレクトリの `review-targets.json` にある。
 原本・固定成果物を編集せず、確認用DBは別の `human-state` に作る。
 
 リポジトリのルートからPowerShellで実行する。既存Dockerのbridgeを使うローカル確認で、
 新たな専用ネットワークやモデルRunを作る操作ではない。
 
 ```powershell
-.\research\review.ps1 -Condition explore -Action Start
-# http://127.0.0.1:18101/ をブラウザーで開く
-.\research\review.ps1 -Condition explore -Action Restart
-.\research\review.ps1 -Condition explore -Action Stop
+.\research\review-resumed.ps1 -Condition explore -Action Start
+# http://127.0.0.1:18201/ をブラウザーで開く
+.\research\review-resumed.ps1 -Condition explore -Action Restart
+.\research\review-resumed.ps1 -Condition explore -Action Stop
 
-.\research\review.ps1 -Condition preload -Action Start
-# http://127.0.0.1:18102/ は失敗原因確認用
-.\research\review.ps1 -Condition preload -Action Stop
+.\research\review-resumed.ps1 -Condition preload -Action Start
+# http://127.0.0.1:18202/
+.\research\review-resumed.ps1 -Condition preload -Action Stop
+
+.\research\review-resumed.ps1 -Condition explained -Action Start
+# http://127.0.0.1:18203/
+.\research\review-resumed.ps1 -Condition explained -Action Stop
 ```
 
 最初は空の確認用状態から起動する。Stop/RestartでDBは消さない。同じ条件の再確認は
@@ -51,6 +55,7 @@ Email=review@example.test。有効なPromoCodeは `FREE`。
 |---|---|---|---|
 | AでHome→ジャンル→アルバム詳細→Add to cart | 通常のリンクで移動でき、商品・価格・Cart件数が見える | R-006/008/010/011、C-007/009/011/012 | Not run |
 | 同じ商品をもう1個追加し、1個ずつ削除 | 数量2→1→0、合計金額と表示が対応する | R-012〜015、C-013〜016 | Not run |
+| 別の商品も続けて追加 | 2商品の別行と金額の合計が表示され、サーバーエラーにならない | R-016、C-017 | Not run |
 | 商品を入れ、無効PromoCodeでcheckout | 入力画面に戻り、かごの商品・数量・合計、Orders.OrderId集合が変わらない | R-023、C-024 | Not run |
 | 独立した状態でFirstName空欄＋FREEでcheckout | 同様に状態を保持し、注文を作らない | R-024、C-025 | Not run |
 | 正しい架空住所＋FREEでcheckout | 完了画面に整数の注文番号、かごが空になる | R-018/020/021/025、C-019/021/022/026 | Not run |
@@ -60,7 +65,7 @@ Email=review@example.test。有効なPromoCodeは `FREE`。
 注文集合は確認用コンテナーのDBを読み取り専用で調べられる。
 
 ```powershell
-docker exec ms1-review-20260919-explore-human python3 -c "import sqlite3; c=sqlite3.connect('file:/data/store.sqlite?mode=ro',uri=True); print(c.execute('SELECT OrderId FROM Orders ORDER BY OrderId').fetchall())"
+docker exec ms1-review-20260919-r1-explore-human python3 -c "import sqlite3; c=sqlite3.connect('file:/data/store.sqlite?mode=ro',uri=True); print(c.execute('SELECT OrderId FROM Orders ORDER BY OrderId').fetchall())"
 ```
 
 操作日時・条件・Run instance ID・使ったURL・操作前後の表示・注文集合・判定・不一致を
@@ -70,14 +75,23 @@ R-005は現行契約の注文ID保持であり、注文詳細の全列保持を�
 
 ## 現時点で分かったこと
 
-エージェントは別の `automation-state` で2生成物の起動とホーム画面を確認した。
-exploreにはCartとジャンルのリンクが表示される。preloadはHTMLタグを文字として表示し、
-カートとジャンルメニューが正常なリンクにならない。ビルド修正後の `Content(html)` が
-保存された最終実装にあり、R-010の不合格と対応する。
-この起動・画面確認は人の受入確認や、上表の全シナリオ再実施を意味しない。
+自動確認は `-Session automation` を指定し、別の `automation-state` と18301〜18303番を使う。
+人の状態領域とCookieを再利用しない。自動確認の実施範囲・結果は別の確認記録へ残す。
+これは人の受入確認や、上表の全シナリオを人が再実施したことを意味しない。
+
+今回選んだ3生成物は、エージェントが起動とホームの実描画を確認した。Cart、ジャンル、商品詳細への
+リンクは表示される。商品画像の欠落とスタイルの差も見えるため、画面の忠実再現まで合格したとは扱わない。
+記録は `human-review-resumed-v1/automated-preview.json`。人の領域は未作成のまま保持した。
+記入用の `human-observation-template.csv` に各条件7シナリオのNot run行を用意した。
+
+初回中断時の旧確認材料は `human-review` に残した。旧対象preload-001はHTMLタグを文字として表示し、
+カートとジャンルメニューが正常なリンクにならない。保存された `Content(html)` とR-010不合格に対応し、
+エージェントが実画面で確認した。今回の中央値代表preload-003とは異なる生成物である。
 
 preloadのR-029は `.sln` の名前だけを根拠とする判定で、参照先は新しいnet8.0プロジェクトである。
 評価器の偽不合格を疑う具体例として別途確認する。現行スコア93.1は改変していない。
-explainedはネットワーク作成前後の障害記録を確認する対象であり、画面確認はできない。
+別の品質不合格preload-002はCartの主キーがCartIdになり、別商品追加で制約違反を起こした。
+人の確認でも異なる商品を続けて追加する操作を含め、R-016/C-017との対応を確認する。
+explained-001の起動前障害記録も残すが、上表のexplained-004には確認可能な生成物がある。
 
 本実験の開始には、これらの評価上の不一致の解決と、人による主要シナリオ確認が必要である。

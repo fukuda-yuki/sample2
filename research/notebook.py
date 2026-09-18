@@ -102,9 +102,10 @@ def main():
             display(Image(filename=str(summary_path.parent/'primary18-totals.png')))
       '''),
       md('## 行動と保持された出力\n\n10,000文字以上という表示上の区分は事後的な記述用です。'
-         '仮説採否の事前閾値や「浪費」の判定に使いません。エラーらしい文字列も意味を個別確認します。'),
+         '仮説採否の事前閾値や「浪費」の判定に使いません。named seed outputsは入力にSampleData.csが明示された大出力だけで、'
+         'シェル変数経由などを取りこぼします。0件は種データ未取得の証明ではありません。エラーらしい文字列も意味を個別確認します。'),
       code('''
-        table(['cohort','Run','multi-tool requests','actions/call','source actions','large seed reads','unknown actions'],
+        table(['cohort','Run','multi-tool requests','actions/call','source actions','named seed outputs','unknown actions'],
           [[m['cohort'],m['run_id'],m['multi_tool_requests'],round(m['actions_per_call'],2) if m['actions_per_call'] else None,
             m['source_action_count'],m['large_seed_read_actions'],m['unknown_actions']] for m in summary['mechanisms']])
         table(['cohort','Run','call','tool','output chars','later requests','character exposure','evidence'],

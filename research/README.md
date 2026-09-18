@@ -13,6 +13,9 @@ instruction authorized a documented continuation; see the
 [retry amendment](../docs/ms1-exploration-20260919-retry-amendment.md).
 Its original plan, result, and failed attempt remain preserved. The appended
 journal and `resume-v1/result.json` record continuation separately.
+The continuation completed all eighteen original slots and one late supplement:
+eighteen model executions plus the preserved pre-model failure. The final
+analysis contains 955 new calls; the historical six retain exactly 322 calls.
 
 ## Programs
 
@@ -26,8 +29,13 @@ journal and `resume-v1/result.json` record continuation separately.
   supplements, including missing/unstarted states and preservation receipts.
 - `validate`: independently parse provider usage and recheck source hashes.
 - `notebook`: produce an executed ipynb and readable standalone HTML companion.
-- `review.ps1`: run only the prepared review copies, with separate human and
+- `prepare_reviews` / `review-resumed.ps1`: prepare and run the final selected copies, with separate human and
   automation state. This is not a model Run, and does not edit fixed artifacts.
+- `review.ps1` is retained for the earlier stopped-segment materials only.
+- `completion`: independently check the finished continuation's schedule,
+  preservation packages, original journal prefix, frozen files, fresh sessions,
+  initial requests, and stopped containers with reclaimed private networks.
+- `report`: regenerate this batch's Japanese report and tables from final analysis.
 - `evidence_review`: post-acquisition evidence index for every Run, linking large
   input increases, retained outputs, error-text review candidates and quality.
 - `resume` / `network_recovery`: explicitly authorized continuation and narrowly
@@ -54,5 +62,8 @@ python -m venv artifacts/exploration/analysis-env
 
 The existing environment is already prepared; do not recreate it to read the
 deliverable. Reproduction commands are in the report. Original and corrected
-v1.0.1 outputs remain separate; the correction preserves unobserved totals as
-null and leaves all measured values and classification rules unchanged.
+v1.0.1 outputs remain separate; that correction preserves unobserved totals as
+null. Post-acquisition v1.0.2 also accepts nullable SSE tool deltas, with a
+recorded regression comparison of all prior rows. Measured values and frozen
+classification rules are unchanged. The continuation's frozen source copies
+remain available even though the current reader includes this correction.

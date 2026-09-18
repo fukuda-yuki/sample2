@@ -93,7 +93,7 @@ def summarize(data, plan=None):
             'unknown_actions':r['action_label_counts'].get('other_unknown',0),
             'initial_retention':r['initial_prompt_present_calls'],'calls':r['calls']})
     return {'groups':stats,'block_contrasts':blocks,'slots':slots,'human_review_selection':selected,
-            'mechanisms':mechanisms,'note':'Descriptive only. 10,000-character bin is a post-acquisition display aid, not a frozen hypothesis criterion.'}
+            'mechanisms':mechanisms,'note':'Descriptive only. 10,000-character bin is a post-acquisition display aid, not a frozen hypothesis criterion. Large seed candidates require SampleData.cs in the literal tool input and can miss shell-variable reads; zero is not absence of catalog delivery.'}
 
 
 def figures(data, out):
@@ -118,7 +118,7 @@ def figures(data, out):
                 ax.plot([c['call_index'] for c in cc],[c['input_tokens'] for c in cc],
                         color=COLORS[arm],alpha=0.45+0.5*(i+1)/max(len(rr),1),
                         linestyle=['-','--',':','-.',(0,(5,1)),(0,(1,1))][i%6],
-                        linewidth=1.5,label=r['run_id'].rsplit('-',1)[-1])
+                        linewidth=1.5,label=r['run_id'].rsplit('-',1)[-1]+(' (no usage)' if not cc else ''))
             ax.set_title(arm+' | '+str(len(rr))+' Runs');ax.set_xlabel('Model call within Run')
             ax.set_xlim(1,max(2,maxcall));ax.set_ylim(0,ymax*1.05);ax.xaxis.set_major_locator(MaxNLocator(integer=True))
             if not any(r['calls'] for r in rr):
@@ -140,7 +140,7 @@ def figures(data, out):
                         [c['observed_cumulative_input']+c['observed_cumulative_output'] for c in cc],
                         color=COLORS[arm],alpha=0.45+0.5*(i+1)/max(len(rr),1),
                         linestyle=['-','--',':','-.',(0,(5,1)),(0,(1,1))][i%6],linewidth=1.5,
-                        label=r['run_id'].rsplit('-',1)[-1]+(' (partial)' if not r['usage_complete'] else ''))
+                        label=r['run_id'].rsplit('-',1)[-1]+(' (no usage)' if not cc else (' (partial)' if not r['usage_complete'] else '')))
             ax.set_title(arm+' | '+str(len(rr))+' Runs');ax.set_xlabel('Model call within Run')
             ax.set_xlim(1,max(2,maxcall));ax.set_ylim(0,ymax*1.05)
             ax.xaxis.set_major_locator(MaxNLocator(integer=True))
@@ -158,8 +158,10 @@ def figures(data, out):
             for i,r in enumerate(rr):
                 ax.scatter(r['calls'],r['mean_input'],color=COLORS[arm],s=55,
                            marker='o' if r['verdict']=='pass' else 'x')
+                near=any(abs(p['calls']-r['calls'])<7 and abs(p['mean_input']-r['mean_input'])<4000 for p in rr[:i])
                 ax.annotate(r['run_id'].rsplit('-',1)[-1],(r['calls'],r['mean_input']),
-                            xytext=(5,5 if i%2==0 else -12),textcoords='offset points',fontsize=8)
+                            xytext=(-25,18) if near else (5,5 if i%2==0 else -12),textcoords='offset points',fontsize=8,
+                            arrowprops={'arrowstyle':'-','color':'#888888','lw':0.6} if near else None)
             ax.set_xlabel('Model calls / Run');ax.set_title(arm)
             ax.set_xlim(0,max(2,maxcall)*1.16);ax.set_ylim(0,max(1,maxmean)*1.16)
             if not rr:

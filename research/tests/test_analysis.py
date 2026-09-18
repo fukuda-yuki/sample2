@@ -6,6 +6,20 @@ from research.analyze import classify, numbered_lines, observed_total, provider_
 
 
 class AnalysisContracts(unittest.TestCase):
+    def test_nullable_sse_tool_deltas_preserve_real_tools_and_usage(self):
+        data = '\n'.join([
+            'data: {"choices":[{"index":0,"delta":{"tool_calls":null}}]}',
+            'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-a","function":{"name":"read","arguments":"{}"}}]}}]}',
+            'data: {"choices":[{"index":0,"delta":null}],"usage":{"prompt_tokens":12,"completion_tokens":3}}',
+            'data: [DONE]'])
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'nullable.sse';p.write_text(data,encoding='utf-8')
+            u,calls,_,errors,done=provider_response(p)
+        self.assertEqual(calls,[{'id':'call-a','name':'read','arguments':'{}'}])
+        self.assertEqual((u['input_tokens'],u['output_tokens']),(12,3))
+        self.assertEqual(errors,[])
+        self.assertTrue(done)
+
     def test_empty_or_unreported_partial_sum_is_missing_but_reported_zero_is_zero(self):
         self.assertIsNone(observed_total([]))
         self.assertIsNone(observed_total([None,None]))

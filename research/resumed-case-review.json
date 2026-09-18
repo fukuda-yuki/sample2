@@ -5,6 +5,85 @@
   "human_application_review": "not_run",
   "cases": [
     {
+      "run_id": "MS1-001-explained-007",
+      "cohort": "supplement",
+      "tool_call_ids": ["call_07_MobnXUd3pd5OIuUMX3ra2311", "call_00_l5EludMOz239mUZpS5Tz4733", "call_00_htdaKJMRdWRSJvAS4oM49420", "call_00_yagx8HdUR34cZS3d4efC4063", "call_00_ET_ahklZulcyBVTIudYrIYL0496", "chatcmpl-tool-acf8c29e32c122c4"],
+      "finding": "50 calls, 106 actions, 14 multi-tool requests, mean input 82,870.6, total 4,198,176 and 29/29 pass. Seed output remains for 47 later calls, startup output (51,464 characters) for 29 and combined rendered pages/diagnostic log (42,674) for 24. The unknown call 10 checks JSON strings for special characters and prints done. Unknown call 26 shows repeated SQLite decimal Sum exceptions; self-tests at 25, 29 and 33 report 10/9/9 failures before later runs at 38 and 46 report PASS=47 FAIL=0.",
+      "boundary": "The supplement repeats both large-output retention and in-Run repair, but stays outside the initial18 and its block contrasts. Null tool_calls SSE chunks exposed a post-acquisition parser limitation; v1.0.2 reads them without changing originals or rerunning the model. A zero-failure summary can still match the frozen literal screening flag."
+    },
+    {
+      "run_id": "MS1-001-explore-006",
+      "tool_call_ids": ["call_00_7rcB79CqKG4bsZj1nhRz2349"],
+      "finding": "The 53,025-character Completed/SampleData.cs read output explicitly says it is capped at 50 KB, shows lines 1-360 and asks for offset=361 to continue. The complete file remains present on disk. The retained output is therefore not a delivered copy of the entire source.",
+      "boundary": "Tool-output truncation is different from conversation compaction. The proposed next comparison must freeze visible range, output limit and truncation behavior as well as identical full-file access; do not silently expand the baseline's tool limit."
+    },
+    {
+      "run_id": "MS1-001-explained-006",
+      "tool_call_ids": ["call_00_WUOJKK83DI8R12Fcl9kl6010", "call_00_zOrgzC9wcMccxqkAS8mG7165", "call_00_ET_0GQwxCdpR7W4BHHuEp1G3559", "call_00_ET_Z16gfvYJFBKfPR0ffaAZ0001"],
+      "finding": "36 calls, 89 actions, 19 multi-tool requests, mean input 63,319.78 and 29/29 pass. Seed output persists for 32 subsequent calls. The unknown actions are a head/tail startup-log inspection at call 26 and self-test script executions at 28 and 31. Their outputs report PASS=73 FAIL=1 (a missing literal >2< match) and later PASS=74 FAIL=0 respectively. Frozen literal error screening does not flag either script output.",
+      "boundary": "Unknown labels and unflagged outputs can still contain testing behavior and a failed assertion. The text-matching failure should not automatically be read as a final cart defect. This lowest-total initial explained Run still reads and retains a large seed source; it is not a no-source-delivery intervention."
+    },
+    {
+      "run_id": "MS1-001-explore-006",
+      "tool_call_ids": ["call_00_7rcB79CqKG4bsZj1nhRz2349", "call_00_jzSOWzARecvtBQ7d3Tvj6773", "call_00_zsvnrb2gYOGmmApSxDcM3313", "call_00_ET_ng3vsSTssRQSesesilDK1907"],
+      "finding": "45 calls, 95 actions, mean input 59,818.16 and 29/29 pass. Seed output persists for 42 later requests. The unknown action at call 30 reads a diagnostic log showing SQLite's unsupported decimal Sum in ShoppingCartService.GetTotal; call 34 is only an echo-alive probe. The call-37 self-test reports five blank-value extraction failures, followed by a dedicated rendered-markup check at call 38; the final external evaluator passes the cart requirements.",
+      "boundary": "The migration failure is evidenced by the runtime stack, whereas the self-test's blank strings do not independently establish five application defects. Frozen unknown labels and literal failure flags remain unchanged. Input volume and call grouping both differ from the higher-total explore Runs."
+    },
+    {
+      "run_id": "MS1-001-preload-006",
+      "tool_call_ids": ["call_00_BBX16rkoKwTRq3Vsah7R5612", "call_00_NBGlQUGTFkqMR4GBAJh51790", "call_00_ET_w9JthlPYra7tM83vrCTQ1478", "call_00_E39cHiOxBJFkGkkVmlCR8560"],
+      "finding": "37 calls, 71 actions, 16 multi-tool requests, mean input 68,470.05 and 29/29 pass. Seed output persists for 34 later requests, and the 51,466-character startup output for 15. The unknown action at call 9 runs a data parser and returns counts, missing-artist validation and the first two records. The test-failure-text flag at call 25 is a requests/sqlite CLI availability probe, not a product requirement failure.",
+      "boundary": "Large output still occurs in the lower-total preload Run, but there are fewer later requests retaining it. The concise parser output is another feasibility observation; it is not a controlled estimate of summarization benefit."
+    },
+    {
+      "run_id": "MS1-001-explore-005",
+      "tool_call_ids": ["call_00_ET_NK9Lpm1rVYrctvwFGt4i2763", "call_00_ET_nHomwfb2DILY9VIQtZQc1585"],
+      "finding": "72 calls, 71 actions, zero multi-tool requests, mean input 56,352.46 and 29/29 quality pass. A 51,095-character shell source output remains for 68 calls. This repeats the historical explained-002's all-single-tool style in a different condition. Its total is 4,100,696, substantially below explore-002 despite essentially the same call count (72 versus 71). A self-test at call 60 reports duplicate-add count 1 instead of 2; the later fixed artifact passes the external duplication requirement.",
+      "boundary": "High call count alone does not determine the largest Run total. The source/history volume differs; the single-tool style is not exclusive to explained. The self-test observation is retained without assuming it is the final defect count."
+    },
+    {
+      "run_id": "MS1-001-explained-005",
+      "tool_call_ids": ["call_00_GONOdueffSPKDBf7KvG27104", "call_00_1t6S1NPC8ACNhoKphPcg0901", "call_00_ET_Oj2Ejzl5eJL9W9hPV0ad0290", "call_00_ET_0WhoOhfhGnlWJQboEzWK5186", "call_00_ET_cENnJKN39kfM0XegkoU89972"],
+      "finding": "89 calls and 118 actions, mean input 85,408.36, quality 29/29. The 53,025-character seed output remains for 84 requests. A 51,513-character validation log at call 36 remains for 53 and precedes a +18,615 input increase. Self-tests at calls 45 and 62 report failures involving removal JSON, Complete and restart/session handling; the combined final test at call 77 reports 57/57 plus 10/10 restart checks. Those three script executions have frozen unknown labels. PASS=57 FAIL=0 also triggers the literal screening flag in other calls.",
+      "boundary": "Both application changes and testing/session changes occur; do not count each FAIL string as a product defect. There are 13 multi-tool requests, so the high call count is not an exact recurrence of the historical all-single-tool explained Run. Long retained inputs, generated test text, repeated checking and process-control delays coexist."
+    },
+    {
+      "run_id": "MS1-001-preload-005",
+      "tool_call_ids": ["call_01_UKHqKb8dzRLsO67l3G6G5685", "call_00_ET_lFXxtnc3pUcufJeLPGvN9274", "call_00_rX2yptO3Qe58hdjyumzu4498"],
+      "finding": "53 calls, mean input 77,436.85 and 29/29 pass. Seed output (53,025 characters) persists for 51 requests and startup output (51,509) for 35. Call 19 input increases by 17,917. The frozen unknown action at call 24 tails an application log showing an EF query-translation stack and POST RemoveFromCart HTTP 500; the final evaluator subsequently passes cart removal.",
+      "boundary": "Literal build/test-error screening does not enumerate every runtime failure: this diagnostic log has an unknown action label. Preserve that label and annotate its meaning rather than silently reclassifying."
+    },
+    {
+      "run_id": "MS1-001-preload-004",
+      "tool_call_ids": ["call_00_JJa0ddFNqt3hAO7iP8v08138", "call_02_7klxPbA4eWn91HNheV2f5024", "call_00_DlSazLVFPuANfuciNgr20457"],
+      "finding": "56 calls, mean input 92,056.43, quality 29/29. Two 53,025/53,013-character seed outputs remain for 53 requests each. The 51,113-character startup output at call 27 remains for 29 requests, followed by +18,067 input tokens. There are only 10 source-read action labels, yet total usage is 5,208,755 tokens compared with 2,368,556 for the same-block explore-004.",
+      "boundary": "Counterexample to using acquisition-action count alone as an efficiency proxy or treating preload as invariably cheaper. Large retained inputs and more calls coexist; no call usage is apportioned across the compound startup command."
+    },
+    {
+      "run_id": "MS1-001-explore-004",
+      "tool_call_ids": ["call_08_ET_sHrsHYZ1Neu7Z4ndbJQI1036", "call_00_BRuEhjXjzF46jPTjev1o4981", "call_00_6r6vad8bscbty1posla1pufs"],
+      "finding": "46 calls with mean input 50,649.39 and 29/29 pass. An initial 53,025-character seed-source read remains for 43 requests, so this is not a no-large-input counterfactual. At call 5 a script processes the full file and prints only 538 characters: genre/artist/album counts, distribution, first two records, and missing-artist check. No large validation output is present. The frozen unknown action at call 41 runs final.sh, whose output reports PASS=21 FAIL=0.",
+      "boundary": "Observed feasibility example for keeping complete data in files while returning concise verification information, not an estimated treatment effect. The lower total is compatible with lower mean input at the same 46 calls as explained-003; implementation text and subsequent behavior also differ."
+    },
+    {
+      "run_id": "MS1-001-explained-004",
+      "tool_call_ids": ["call_00_vrAwU5ABsNmma85VHeJx2911", "call_02_GLjC4ose2eLSkJNjArLw7988", "call_00_60rajwurfrbaput8iwvrypv2", "call_00_8invydufh0z2a5ceuiv31wf7", "call_00_qu738bo6dp0jdnm3u4b76am9"],
+      "finding": "54 calls, mean input 69,358.98, quality 29/29. Two seed-source outputs (53,025 and 53,013 characters) each persist for 50 requests; the next input rises by 29,503. Cart calculation is repaired at call 35 by materializing matching items before summing. The test's start_server function explicitly deletes its DB at every start, so the subsequent self-reported loss of old orders on restart is not sufficient evidence of an application persistence defect.",
+      "boundary": "Necessary application repair and flawed test-state handling both occur in one Run. Keep their observed counts and semantic interpretations distinct; the final external evaluator passes persistence."
+    },
+    {
+      "run_id": "MS1-001-explained-004",
+      "tool_call_ids": ["call_00_ET_T96Z18HqAnyRV3D2gdFe8113", "call_00_7w1itnitwg3hqtc4xkne1530"],
+      "finding": "The frozen unknown action at call 31 reads an empty diagnostic server log. At call 44 the agent intentionally removes NUGET_PACKAGES from the environment and runs restore; NU1301 follows when api.nuget.org is unavailable from the isolated worker. The usual cached dependency path is retained for the final successful artifact.",
+      "boundary": "This is an in-Run dependency probe in the required isolation environment, not gateway authentication failure or evidence that the Docker network pool repair failed. Preserve the literal build-error flag and the unknown label with this annotation."
+    },
+    {
+      "run_id": "MS1-001-preload-003",
+      "tool_call_ids": ["call_00_uEamFiwLaqnaSgfV25Pb5185", "call_00_qjFv3KkqZM8bQgLtCr7x2184", "call_00_GEZwvfQVl6oRkl6ZRUcO4154", "call_00_rTMHXL9PN6RpqU4Ks3tY7274"],
+      "finding": "44 calls, mean input 75,094.73 and 29/29 pass. Seed source (53,025 characters) persists for 41 later requests; startup output (51,510) for 26. Call 19 input increases by 17,990 after the startup output. A combined stop/start/build/test command at call 29 kills matching processes and times out at 300 seconds. The frozen unknown action at call 35 is a restart through the newly created stop/start scripts and succeeds.",
+      "boundary": "Large startup-output retention and process-control difficulties recur in preload as well as explore. R-016 passes here, unlike preload-002 under the same supplied source. Do not generalize the earlier lost-primary-key failure to every preload Run. Unknown labels remain unchanged."
+    },
+    {
       "run_id": "MS1-001-explained-003",
       "run_instance_id": "1f828ebd2c25483d806f9054b4ac0b74",
       "tool_call_ids": ["call_00_T0dJdQJcFV7zi8fEc7uB9229", "call_00_5RqubgKelJsvbyNmZxcg5250"],

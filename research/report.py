@@ -1,4 +1,73 @@
-# MS1-001：既存6 Runの行動分析と18枠の探索実験
+"""Render this batch's Japanese report from the final, separately checked tables.
+
+Post-acquisition reporting only; no model, evaluator, or Docker operations.
+"""
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from research.analyze import read_json
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE = ROOT / 'artifacts/exploration/20260919'
+
+
+def table(headers, rows):
+    def fmt(v):
+        if v is None: return 'null'
+        if isinstance(v, bool): return str(v)
+        if isinstance(v, int): return f'{v:,}'
+        if isinstance(v, float): return f'{v:,.1f}'
+        return str(v).replace('|', '\\|').replace('\n', ' ')
+    line = lambda row: '| ' + ' | '.join(map(fmt, row)) + ' |'
+    return '\n'.join([line(headers), line(['---'] * len(headers))] + [line(r) for r in rows])
+
+
+def main():
+    old = read_json(BASE/'pilot-v1.0.1/analysis.json')
+    new = read_json(BASE/'new-resumed-v1/analysis.json')
+    summary = read_json(BASE/'display-resumed-v2/summary.json')
+    ledger = read_json(BASE/'ledger-resumed-v1/execution-ledger.json')
+    checks = read_json(BASE/'independent-check-resumed-v1.json')
+    resume = read_json(ROOT/'runs/exploration-20260919-ms1/resume-v1/result.json')
+    assert resume['complete'] and not ledger['schedule_issues']
+    assert all(c['pass'] for c in checks)
+    jst = lambda s: datetime.fromisoformat(s).astimezone(timezone(timedelta(hours=9))).strftime('%Y-%m-%d %H:%M:%S JST')
+    started = min(r['dispatch_at'] for r in ledger['ledger'])
+    runs = old['runs'] + new['runs']
+    primary = sorted([r for r in new['runs'] if r['cohort'] == 'primary18'], key=lambda r:r['slot'])
+    supplement = [r for r in new['runs'] if r['cohort'] == 'supplement']
+    assert len(primary) == 18 and len(supplement) == 1
+    calls = old['calls'] + new['calls']
+    actions = old['actions'] + new['actions']
+    input_context = table(['条件','観測された初回input','初回user文字量','初期投入保持calls / 観測calls'], [
+        [arm, ', '.join(str(v) for v in sorted({r['first_input'] for r in runs if r['condition']==arm and r['calls']})),
+         ', '.join(str(v) for v in sorted({c['user_chars'] for c in calls if c['condition']==arm and c['call_index']==1})),
+         str(sum(r['initial_prompt_present_calls'] for r in runs if r['condition']==arm))+' / '+
+         str(sum(r['calls'] for r in runs if r['condition']==arm))] for arm in ('explore','preload','explained')])
+    context_losses = [(r['cohort']+'/'+r['run_id'],r['disappeared_message_count']) for r in runs if r['disappeared_message_count']]
+    def values(rr):
+        return table(['Run', 'calls', 'input', 'output', '合計', '平均input/call', '品質'], [
+            [r['run_id'].replace('MS1-001-', ''), r['calls'], r['input_tokens'], r['output_tokens'],
+             r['total_tokens'], r['mean_input'], str(r['quality']) + ' / ' + r['verdict']] for r in rr])
+    groups = table(['集団', '条件', '試行/既知総量/合格', '平均', '中央値', '標本SD', '最小〜最大'], [
+        [g['cohort'], g['condition'], f"{g['attempts']}/{g['total_tokens']['n']}/{g['quality_pass']}",
+         g['total_tokens']['mean'], g['total_tokens']['median'], g['total_tokens']['sd'],
+         f"{g['total_tokens']['min']:,}〜{g['total_tokens']['max']:,}" if g['total_tokens']['n'] else 'null']
+        for g in summary['groups']])
+    contrast = table(['ブロック', 'preload − explore', 'explained − explore', 'explained − preload', '全条件品質合格'], [
+        [b, *[next(x['difference'] for x in summary['block_contrasts'] if x['block']==b and x['contrast']==c)
+              for c in ('preload - explore','explained - explore','explained - preload')],
+         next(x['all_quality_pass'] for x in summary['block_contrasts'] if x['block']==b)] for b in range(1,7)])
+    mechanism = table(['集団/Run', '行動/calls', '取得', '探索', '修正', '未分類', '未変更再取得/編集後/部分重複/不明'], [
+        [r['cohort']+'/'+r['run_id'].replace('MS1-001-',''), f"{r['actions']}/{r['calls']}",
+         r['action_label_counts'].get('source_read',0), r['action_label_counts'].get('discovery',0),
+         r['action_label_counts'].get('revision',0), r['action_label_counts'].get('other_unknown',0),
+         '/'.join(str(r['read_kind_counts'].get(k,0)) for k in
+                  ('unchanged_range_reacquisition','after_observed_edit','partial_overlap','indeterminate'))]
+        for r in runs])
+    chosen = table(['条件','選定Run','合計','合格集合の中央値','人の確認'], [
+        [s['condition'],s['run_id'],s.get('total_tokens'),s.get('arm_median'),'Not run']
+        for s in summary['human_review_selection']])
+    text = f'''# MS1-001：既存6 Runの行動分析と18枠の探索実験
 
 **初回18枠と補充1枠の処理を完了した。** 初回は17件がモデル実行・完全計測、1件がモデル起動前のDocker障害である。
 その失敗を残し、全初回枠の終了後に同条件の補充1件を実行した。新規のモデル実行は合計18件、試行枠は19件で、上限24以内。
@@ -42,7 +111,7 @@ MS1-001、公開29要件、評価1.2.0、deepseek-v4.1-flash、OpenCode 1.17.11�
 原計画SHA-256：`7e4df4a319557b161368fe4fb1d68f5456229d2e6f5619e5ce37bbb58e0d318a`。
 R1計画SHA-256：`a258e0d81304f1665d83b809e928410f6e9d7189f57e687d04910fdeefb9b011`。
 各開始・終了・保存時刻、障害・補充対応は[実行台帳](../artifacts/exploration/20260919/ledger-resumed-v1/execution-ledger.csv)にある（UTC）。
-初回dispatchから補充後の保存・回収終了までは 2026-09-19 00:53:44 JST〜2026-09-19 04:51:24 JST。この区間には中断・復旧作業を含む。
+初回dispatchから補充後の保存・回収終了までは {jst(started)}〜{jst(resume['ended_at'])}。この区間には中断・復旧作業を含む。
 元の `batch-result.json` は中断時点を表し、最終状態は `resume-v1/result.json` である。
 品質不合格を理由とする補充、有意差や望ましい結果を理由とする追加はない。
 
@@ -55,58 +124,22 @@ cache readはinput、reasoningはoutputの内数なので再加算しない。Op
 
 ### 初回18枠
 
-| Run | calls | input | output | 合計 | 平均input/call | 品質 |
-| --- | --- | --- | --- | --- | --- | --- |
-| explore-001 | 60 | 4,286,645 | 50,720 | 4,337,365 | 71,444.1 | 100 / pass |
-| preload-001 | 45 | 3,472,829 | 41,052 | 3,513,881 | 77,174.0 | 93.1 / fail |
-| explained-001 | 0 | null | null | null | null | 0 / fail_critical |
-| explained-002 | 59 | 3,848,475 | 50,607 | 3,899,082 | 65,228.4 | 100 / pass |
-| preload-002 | 47 | 2,930,666 | 41,458 | 2,972,124 | 62,354.6 | 96.55 / fail |
-| explore-002 | 71 | 6,180,277 | 56,341 | 6,236,618 | 87,046.2 | 100 / pass |
-| explore-003 | 45 | 3,690,038 | 40,059 | 3,730,097 | 82,000.8 | 100 / pass |
-| explained-003 | 46 | 2,708,897 | 42,497 | 2,751,394 | 58,889.1 | 100 / pass |
-| preload-003 | 44 | 3,304,168 | 40,773 | 3,344,941 | 75,094.7 | 100 / pass |
-| explained-004 | 54 | 3,745,385 | 38,323 | 3,783,708 | 69,359.0 | 100 / pass |
-| explore-004 | 46 | 2,329,872 | 38,684 | 2,368,556 | 50,649.4 | 100 / pass |
-| preload-004 | 56 | 5,155,160 | 53,595 | 5,208,755 | 92,056.4 | 100 / pass |
-| preload-005 | 53 | 4,104,153 | 45,365 | 4,149,518 | 77,436.8 | 100 / pass |
-| explained-005 | 89 | 7,601,344 | 68,900 | 7,670,244 | 85,408.4 | 100 / pass |
-| explore-005 | 72 | 4,057,377 | 43,319 | 4,100,696 | 56,352.5 | 100 / pass |
-| preload-006 | 37 | 2,533,392 | 37,800 | 2,571,192 | 68,470.1 | 100 / pass |
-| explore-006 | 45 | 2,691,817 | 43,175 | 2,734,992 | 59,818.2 | 100 / pass |
-| explained-006 | 36 | 2,279,512 | 44,794 | 2,324,306 | 63,319.8 | 100 / pass |
+{values(primary)}
 
 explained-001は観測callsが0でもinput/output/部分和はnullである。0点は空の成果物の1不合格・28blockedで、説明投入で生成した実装の品質ではない。
 preload-001（93.1）とpreload-002（96.55）も全試行の比較に残した。失敗の早期終了を効率改善とは判定しない。
 
 ### 補充（別集計）
 
-| Run | calls | input | output | 合計 | 平均input/call | 品質 |
-| --- | --- | --- | --- | --- | --- | --- |
-| explained-007 | 50 | 4,143,530 | 54,646 | 4,198,176 | 82,870.6 | 100 / pass |
+{values(supplement)}
 
 ### 既存6 Run（診断試行・復元コピーを除く）
 
-| Run | calls | input | output | 合計 | 平均input/call | 品質 |
-| --- | --- | --- | --- | --- | --- | --- |
-| explained-001 | 45 | 3,342,070 | 40,441 | 3,382,511 | 74,268.2 | 100 / pass |
-| explained-002 | 71 | 4,380,332 | 38,941 | 4,419,273 | 61,694.8 | 100 / pass |
-| explore-001 | 62 | 4,048,388 | 57,180 | 4,105,568 | 65,296.6 | 100 / pass |
-| explore-002 | 52 | 3,160,186 | 43,466 | 3,203,652 | 60,772.8 | 100 / pass |
-| preload-001 | 38 | 2,526,844 | 46,186 | 2,573,030 | 66,495.9 | 100 / pass |
-| preload-002 | 54 | 4,096,295 | 52,945 | 4,149,240 | 75,857.3 | 100 / pass |
+{values(old['runs'])}
 
 ### 条件別分布
 
-| 集団 | 条件 | 試行/既知総量/合格 | 平均 | 中央値 | 標本SD | 最小〜最大 |
-| --- | --- | --- | --- | --- | --- | --- |
-| existing6 | explained | 2/2/2 | 3,900,892 | 3,900,892.0 | 733,101.4 | 3,382,511〜4,419,273 |
-| existing6 | explore | 2/2/2 | 3,654,610 | 3,654,610.0 | 637,750.9 | 3,203,652〜4,105,568 |
-| existing6 | preload | 2/2/2 | 3,361,135 | 3,361,135.0 | 1,114,548.8 | 2,573,030〜4,149,240 |
-| primary18 | explained | 6/5/5 | 4,085,746.8 | 3,783,708 | 2,112,928.2 | 2,324,306〜7,670,244 |
-| primary18 | explore | 6/6/6 | 3,918,054 | 3,915,396.5 | 1,372,649.0 | 2,368,556〜6,236,618 |
-| primary18 | preload | 6/6/4 | 3,626,735.2 | 3,429,411.0 | 939,246.5 | 2,571,192〜5,208,755 |
-| supplement | explained | 1/1/1 | 4,198,176 | 4,198,176 | null | 4,198,176〜4,198,176 |
+{groups}
 
 初回の既知総量ではpreloadの平均が最小だが、同条件の実装6件中2件は品質不合格である。
 explainedは同条件内で約2.32M〜7.67Mと幅が大きく、モデル起動前の欠測も1枠ある。
@@ -118,14 +151,7 @@ input/output別分布・Q1/Q3・成功Runだけの補助分析は[集計JSON](..
 全条件の総量を観測できたブロックは2〜6の5組。差の単位はtokens、負値は左の条件が少ないことを表す。
 品質不合格を含む組2も残し、品質条件を併記した。組1の欠測を補充で埋めない。
 
-| ブロック | preload − explore | explained − explore | explained − preload | 全条件品質合格 |
-| --- | --- | --- | --- | --- |
-| 1 | null | null | null | null |
-| 2 | -3,264,494 | -2,337,536 | 926,958 | False |
-| 3 | -385,156 | -978,703 | -593,547 | True |
-| 4 | 2,840,199 | 1,415,152 | -1,425,047 | True |
-| 5 | 48,822 | 3,569,548 | 3,520,726 | True |
-| 6 | -163,800 | -410,686 | -246,886 | True |
+{contrast}
 
 ![初回18枠の総量](../artifacts/exploration/20260919/display-resumed-v2/primary18-totals.png)
 ![呼び出し数と平均入力](../artifacts/exploration/20260919/display-resumed-v2/primary18-decomposition.png)
@@ -141,15 +167,11 @@ input/output別分布・Q1/Q3・成功Runだけの補助分析は[集計JSON](..
 actions.csvは各出力の文字量、実際に後続入力へ含まれた回数と文字露出を持つ。これらはトークンの因果的な寄与ではない。
 複数目的・複数ツールの要求を複合のまま残し、usageを行動ごとに按分していない。
 
-| 条件 | 観測された初回input | 初回user文字量 | 初期投入保持calls / 観測calls |
-| --- | --- | --- | --- |
-| explore | 8028 | 3967 | 453 / 453 |
-| preload | 15578 | 34391 | 374 / 374 |
-| explained | 8167 | 4715 | 450 / 450 |
+{input_context}
 
-system文字量の観測値は [9733]、ツール定義は [15661]。
+system文字量の観測値は {sorted({c['system_chars'] for c in calls})}、ツール定義は {sorted({c['tool_schema_chars'] for c in calls})}。
 preloadの20ソース、explainedの説明1ブロックは該当する全要求で残っていた。
-直前の要求から消えたメッセージhashの件数は `[('existing6/MS1-001-explained-002', 2)]`。文面のhash変化も含むため、この値を圧縮回数とは呼ばない。
+直前の要求から消えたメッセージhashの件数は `{context_losses}`。文面のhash変化も含むため、この値を圧縮回数とは呼ばない。
 初期投入を失う大きな文脈圧縮は観測されず、長いソースと会話履歴が残った。
 一方、ツール出力自体の切詰めはある。53,025文字のCompleted/SampleData.cs取得例は50 KB上限で1〜360行までを表示し、
 361行以降は別途取得する案内が付く。ファイル全体の投入とは扱わない。原本の全データと、モデルが実際に見た範囲を分けて照合した。
@@ -192,33 +214,7 @@ preloadの20ソース、explainedの説明1ブロックは該当する全要求�
 
 ### 行動と再取得
 
-| 集団/Run | 行動/calls | 取得 | 探索 | 修正 | 未分類 | 未変更再取得/編集後/部分重複/不明 |
-| --- | --- | --- | --- | --- | --- | --- |
-| existing6/explained-001 | 92/45 | 34 | 16 | 7 | 1 | 0/0/1/4 |
-| existing6/explained-002 | 70/71 | 13 | 14 | 3 | 2 | 1/0/1/5 |
-| existing6/explore-001 | 115/62 | 34 | 29 | 13 | 1 | 0/0/1/8 |
-| existing6/explore-002 | 99/52 | 31 | 23 | 6 | 1 | 0/0/0/4 |
-| existing6/preload-001 | 71/38 | 15 | 16 | 3 | 1 | 0/0/0/9 |
-| existing6/preload-002 | 85/54 | 15 | 25 | 3 | 1 | 4/0/0/3 |
-| primary18/explained-001 | 0/0 | 0 | 0 | 0 | 0 | 0/0/0/0 |
-| primary18/explained-002 | 97/59 | 29 | 18 | 12 | 0 | 0/0/0/3 |
-| primary18/explained-003 | 85/46 | 24 | 18 | 6 | 1 | 0/0/1/4 |
-| primary18/explained-004 | 103/54 | 32 | 23 | 6 | 1 | 0/0/0/4 |
-| primary18/explained-005 | 118/89 | 23 | 29 | 15 | 3 | 0/0/1/9 |
-| primary18/explained-006 | 89/36 | 32 | 16 | 3 | 3 | 0/0/1/3 |
-| supplement/explained-007 | 106/50 | 31 | 23 | 7 | 2 | 0/0/0/5 |
-| primary18/explore-001 | 112/60 | 34 | 28 | 10 | 1 | 0/0/0/7 |
-| primary18/explore-002 | 126/71 | 34 | 30 | 9 | 0 | 0/0/1/3 |
-| primary18/explore-003 | 72/45 | 12 | 18 | 3 | 0 | 0/0/0/5 |
-| primary18/explore-004 | 98/46 | 32 | 16 | 5 | 1 | 0/0/0/5 |
-| primary18/explore-005 | 71/72 | 13 | 18 | 4 | 0 | 0/0/1/9 |
-| primary18/explore-006 | 95/45 | 33 | 18 | 3 | 2 | 0/0/0/6 |
-| primary18/preload-001 | 71/45 | 20 | 21 | 2 | 0 | 1/0/1/14 |
-| primary18/preload-002 | 76/47 | 10 | 21 | 6 | 0 | 2/0/1/4 |
-| primary18/preload-003 | 80/44 | 9 | 21 | 6 | 1 | 0/0/1/3 |
-| primary18/preload-004 | 84/56 | 10 | 26 | 8 | 0 | 0/0/1/3 |
-| primary18/preload-005 | 92/53 | 13 | 24 | 8 | 1 | 0/0/0/6 |
-| primary18/preload-006 | 71/37 | 8 | 16 | 5 | 1 | 0/0/1/2 |
+{mechanism}
 
 取得・探索・修正ラベルは重複する。再取得は範囲単位であり、行動数とは一致しない。
 未変更範囲の再取得もそれだけで浪費としない。編集後確認、部分重複、判定不能を分けて残した。
@@ -264,11 +260,7 @@ provider報告値と送信原本の乖離の扱いも事前に定め、文字量
 各条件の初回枠のうち完全計測・品質合格の総量中央値に最も近いRunを選び、同値は実行順が早いものとした。
 補充と既存6は選定母集団へ混ぜない。
 
-| 条件 | 選定Run | 合計 | 合格集合の中央値 | 人の確認 |
-| --- | --- | --- | --- | --- |
-| explore | MS1-001-explore-003 | 3,730,097 | 3,915,396.5 | Not run |
-| preload | MS1-001-preload-003 | 3,344,941 | 3,747,229.5 | Not run |
-| explained | MS1-001-explained-004 | 3,783,708 | 3,783,708 | Not run |
+{chosen}
 
 [人の確認手順](ms1-exploration-20260919-human-review.md)に起動方法、通常購入、無効checkoutの状態保持、
 セッション分離、再起動後の注文保持と現行評価項目の対応を用意した。人の状態領域は自動確認と分離した。
@@ -278,8 +270,8 @@ provider報告値と送信原本の乖離の扱いも事前に定め、文字量
 
 ## 7. 原本照合と再現
 
-既存322＋新規955＝**1277呼び出し**、合計**2178行動**を照合した。
-独立したSSE再集計とハッシュ検査は**10,033ファイル、不一致0**。
+既存322＋新規{len(new['calls'])}＝**{len(calls)}呼び出し**、合計**{len(actions)}行動**を照合した。
+独立したSSE再集計とハッシュ検査は**{sum(c['files_checked'] for c in checks):,}ファイル、不一致0**。
 失敗explained-001のnative／request等の未生成による4監査指摘を残し、正常Runの結合漏れと混同しない。
 重複ID、順序、欠測保持、複合行動、編集前後の範囲分類、補充制限、ネットワーク回収条件の19テストが通過した。
 採取終了後、補充のSSEに `tool_calls: null` を確認したため解析v1.0.2で空のツール差分として読めるよう修正した。
@@ -306,8 +298,8 @@ python -m research.analyze --runs-dir runs/acceptance-64ad09cd85ca --cohort exis
 python -m research.analyze --runs-dir runs/exploration-20260919-ms1 --cohort primary18 --plan research/protocols/ms1-001-exploration-20260919-resume-v1.json --out artifacts/reproduce/new
 python -m research.ledger --batch runs/exploration-20260919-ms1 --plan research/protocols/ms1-001-exploration-20260919-resume-v1.json --out artifacts/reproduce/ledger
 python -m research.validate --analysis artifacts/reproduce/existing/analysis.json --analysis artifacts/reproduce/new/analysis.json --out artifacts/reproduce/check.json
-.\artifacts\exploration\analysis-env\Scripts\python.exe -m research.summarize --analysis artifacts/reproduce/existing/analysis.json --analysis artifacts/reproduce/new/analysis.json --plan research/protocols/ms1-001-exploration-20260919-resume-v1.json --out artifacts/reproduce/display
-.\artifacts\exploration\analysis-env\Scripts\python.exe -m research.notebook --analysis artifacts/reproduce/existing/analysis.json --analysis artifacts/reproduce/new/analysis.json --summary artifacts/reproduce/display/summary.json --out artifacts/reproduce/notebook
+.\\artifacts\\exploration\\analysis-env\\Scripts\\python.exe -m research.summarize --analysis artifacts/reproduce/existing/analysis.json --analysis artifacts/reproduce/new/analysis.json --plan research/protocols/ms1-001-exploration-20260919-resume-v1.json --out artifacts/reproduce/display
+.\\artifacts\\exploration\\analysis-env\\Scripts\\python.exe -m research.notebook --analysis artifacts/reproduce/existing/analysis.json --analysis artifacts/reproduce/new/analysis.json --summary artifacts/reproduce/display/summary.json --out artifacts/reproduce/notebook
 ```
 
 解析用環境の固定リストは `analysis-environment.txt`。日本語報告の表は `python -m research.report` で今回の最終解析から再生成できる。
@@ -318,3 +310,11 @@ python -m research.validate --analysis artifacts/reproduce/existing/analysis.jso
 最終成果物とトレースの併用は[Anthropicの評価解説](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)、
 順序設計は[NISTのブロック化](https://www.itl.nist.gov/div898/handbook/pri/section3/pri332.htm)を参照した。
 確認の反復数は[Lakensの標本サイズ設計](https://lakens.github.io/statistical_inferences/08-samplesizejustification.html)を参考に別途正当化する。
+'''
+    target = ROOT/'docs/ms1-exploration-20260919-report.md'
+    target.write_text(text, encoding='utf-8', newline='\n')
+    print(target)
+
+
+if __name__ == '__main__':
+    main()

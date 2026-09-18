@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 import re
 import statistics
 
-VERSION = '1.0.1'
+VERSION = '1.0.2'
 TOKEN_KEYS = ('input_tokens', 'output_tokens', 'cache_read_tokens',
               'cache_write_tokens', 'reasoning_tokens')
 
@@ -100,7 +100,7 @@ def provider_response(path):
                      'cache_write_tokens': (n.get('prompt_tokens_details') or {}).get('cache_write_tokens'),
                      'reasoning_tokens': (n.get('completion_tokens_details') or {}).get('reasoning_tokens')}
         for choice in value.get('choices', []):
-            for item in choice.get('delta', {}).get('tool_calls', []):
+            for item in (choice.get('delta') or {}).get('tool_calls') or []:
                 key = (choice.get('index', 0), item.get('index', 0))
                 current = calls.setdefault(key, {'id': '', 'name': '', 'arguments': ''})
                 if item.get('id'):

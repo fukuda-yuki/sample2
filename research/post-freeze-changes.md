@@ -37,3 +37,39 @@ remaining initial slots in their original order, and retains the pre-model
 Docker failure before its separately identified late supplement. The operational
 `network_recovery.py` reclaims only verified stopped and preserved Run networks,
 outside measured execution. Runtime/controller/evaluator bytes remain fixed.
+
+## Post-acquisition interpretation and delivery
+
+`resumed-case-review.json` adds semantic annotations to each completed resumed
+Run. For example, script invocations and diagnostic log reads can retain an
+`other_unknown` frozen label while their meaning is documented separately.
+The source-range overlap reconstructed for explore-003's shell loop is an
+explicit post hoc annotation, not a silent reclassification. Error-looking
+text and an actual final requirement failure are kept distinct.
+
+`evidence_review`, `prepare_reviews`, `report` and `completion` were added as
+read-only analysis, delivery and verification utilities. The review launcher
+uses copied published applications with separate automated/human state and
+the existing Docker bridge. Final report figures label a wholly unobserved
+attempt as `no usage`, rather than showing it as a measured zero. None of
+these reporting changes alter the frozen R1 extraction/acquisition sources,
+intervention contents, evaluator, or Run conditions. Human review remains
+unperformed; selection and automated preview checks are separate claims.
+
+After the nineteenth dispatch completed, the supplementary SSE originals
+exposed `tool_calls: null` chunks. Extraction v1.0.2 accepts these as empty
+tool deltas, preserving actual tool calls and final usage. The frozen R1
+source remains byte-exact under `resume-v1/frozen-research-source`; no model
+was rerun and no provider original was edited. The before/after hashes are
+in `parser-fix-v1.0.2.json`. A nullable-delta regression test brings the
+research contract checks to nineteen. Previously completed Run tables are
+compared with their earlier extraction outputs to detect unintended changes.
+
+Final visual inspection also exposed provider-reported input decreases while
+transmitted characters grew and every previous message hash remained present.
+The four decreases above 3,000 tokens are a post hoc descriptive view, recorded
+with original request/response references; their internal provider cause is
+unknown. They are not labeled as agent compaction or a proven token saving.
+The evidence index v2 adds these transitions. Display/notebook v2 clarify that
+literal SampleData.cs candidate counts miss variable-based shell reads and
+separate two overlapping plot labels; observed values are unchanged.

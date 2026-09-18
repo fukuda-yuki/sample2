@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import shutil
 
-from research.analyze import read_json, sha, write_json
+from research.analyze import read_json, sha, write_csv, write_json
 
 
 def main():
@@ -61,6 +61,20 @@ def main():
             'application':str(dest.resolve()),'human_review':'not_run'})
     write_json(a.out/'review-targets.json',{'targets':targets,'selection_population':'initial18_only',
         'human_review':'not_run','automated_check':'not_run','files':files})
+    scenarios = [
+        ('通常購入', 'R-006/008/010/011/018/020/021/025', 'C-007/009/011/012/019/021/022/026'),
+        ('同一商品の追加と削除', 'R-012/013/014/015', 'C-013/014/015/016'),
+        ('異なる商品の合計', 'R-016', 'C-017'),
+        ('無効PromoCode時の状態保持', 'R-023', 'C-024'),
+        ('必須項目欠落時の状態保持', 'R-024', 'C-025'),
+        ('セッション分離', 'R-017/022', 'C-018/023'),
+        ('再起動後の注文保持', 'R-005/019', 'C-006/020'),
+    ]
+    write_csv(a.out/'human-observation-template.csv', [
+        {'condition':t['condition'],'run_id':t.get('run_id'),'run_instance_id':t.get('run_instance_id'),
+         'scenario':name,'requirements':requirements,'checks':checks,'human_verdict':'Not run',
+         'reviewer':'','observed_at':'','before':'','after':'','evidence':'','discrepancy':''}
+        for t in targets for name,requirements,checks in scenarios])
     print({'targets':len(targets),'files_verified':len(files),'human_review':'not_run'})
 
 

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace MusicStore.Evaluator;
 
@@ -89,8 +90,12 @@ public sealed class AppHost : IDisposable
                 continue;
             }
 
-            var text = File.ReadAllText(file);
-            if (Regex.IsMatch(text, @"Sdk\s*=\s*""Microsoft\.NET\.Sdk\.Web""", RegexOptions.IgnoreCase))
+            XDocument project;
+            try { project = XDocument.Load(file); }
+            catch (System.Xml.XmlException) { continue; }
+            var sdk = project.Root?.Attribute("Sdk")?.Value;
+            if (sdk == "Microsoft.NET.Sdk.Web" || project.Descendants().Any(e =>
+                    e.Name.LocalName == "Sdk" && e.Attribute("Name")?.Value == "Microsoft.NET.Sdk.Web"))
             {
                 candidates.Add(file);
             }
@@ -184,6 +189,7 @@ public sealed class AppHost : IDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        RestrictEnvironment(startInfo);
         startInfo.ArgumentList.Add(EntryAssembly);
         startInfo.ArgumentList.Add("--urls");
         startInfo.ArgumentList.Add(BaseUrl);
@@ -351,6 +357,7 @@ public sealed class AppHost : IDisposable
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+        RestrictEnvironment(startInfo);
 
         using var proc = new Process { StartInfo = startInfo };
         var stdout = new StringBuilder();
@@ -366,6 +373,7 @@ public sealed class AppHost : IDisposable
             try
             {
                 proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(30000);
             }
             catch (Exception)
             {
@@ -376,5 +384,20 @@ public sealed class AppHost : IDisposable
 
         proc.WaitForExit();
         return (proc.ExitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    public static void RestrictEnvironment(ProcessStartInfo startInfo)
+    {
+        var allowed = new[] { "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
+            "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+            "PROGRAMW6432", "DOTNET_ROOT", "DOTNET_ROOT_X64", "NUGET_PACKAGES", "LANG", "LC_ALL" };
+        startInfo.Environment.Clear();
+        foreach (var name in allowed)
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            if (value != null) startInfo.Environment[name] = value;
+        }
+        startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
+        startInfo.Environment["DOTNET_NOLOGO"] = "1";
     }
 }

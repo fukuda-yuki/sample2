@@ -1,9 +1,17 @@
 # 評価器の校正（`inner/calibration`）
 
+The current driver defaults to evaluation 1.2.0 and saves each attempt under a
+new `runs/_calibration/<timestamp-id>/` directory. `-Docker` uses the prepared,
+pinned Linux evaluator. The latest 34-case calibration and its exact expectations
+are linked from the [delivery report](../../docs/verification-delivery-20260918.md).
+The checked-in summaries and detailed discussion below are historical records;
+new invocations do not overwrite them. Use `-EvaluationVersion 1.1.0` only when
+explicitly validating the older contract.
+
 [品質評価仕様 §7.1](../../docs/quality-spec.md) が求める 4 分類の校正を実行し、その結果を記録する。
 
 - 実行: [`run-calibration.ps1`](run-calibration.ps1)
-- 生の記録: [`calibration-summary.json`](calibration-summary.json)（実行時に生成される実際の出力）
+- 旧実行の記録: [`calibration-summary.json`](calibration-summary.json)（当時の実際の出力。現在の実行先は上記の個別ディレクトリ）
 - 過去の記録: [`calibration-summary-1.0.0.json`](calibration-summary-1.0.0.json)（評価版 `1.0.0` の 17 ケース。履歴として保持し、上書きしない）
 - 評価器の契約: [docs/evaluator.md](../../docs/evaluator.md)
 - **モデルは一切呼び出さない。** 成果物を固定し、評価器だけを検証する。

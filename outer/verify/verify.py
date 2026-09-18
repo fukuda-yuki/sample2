@@ -13,12 +13,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from harness import aggregate, evaluate, preserve, run as run_mod, util  # noqa: E402
+from harness.security import child_environment
 
 TASK_ID = 'MS1-001'
 CONDITION_ID = 'C01'
@@ -43,12 +45,13 @@ STUB_EVALUATOR = Path(__file__).resolve().parent.parent / 'tests' / 'stub_evalua
 
 
 class Report:
-    def __init__(self, repo):
+    def __init__(self, repo, output_dir=None):
         self.repo = str(repo)
         self.cases = []
         self.commands = []
         self.artifacts = {}
         self.started_at = datetime.now(timezone.utc).isoformat()
+        self.output_dir = output_dir
 
     def command(self, text):
         self.commands.append(text)
@@ -62,6 +65,8 @@ class Report:
         self.cases.append({'id': case_id, 'kind': kind, 'what': what,
                            'expected': expected, 'observed': observed,
                            'matched': matched})
+        if self.output_dir:
+            util.append_line(self.output_dir / 'cases.jsonl', self.cases[-1])
         print('{} {} {}'.format(case_id, 'OK    ' if matched else 'MISMATCH', what))
         if not matched:
             print('  expected: ' + json.dumps(expected, ensure_ascii=False, sort_keys=True))
@@ -95,6 +100,7 @@ class Report:
 def dotnet_version(repo):
     try:
         completed = subprocess.run(['dotnet', '--version'], cwd=repo,
+                                   env=child_environment(),
                                    capture_output=True, text=True, encoding='utf-8',
                                    errors='replace')
         return completed.stdout.strip()
@@ -104,9 +110,14 @@ def dotnet_version(repo):
 
 def run_step(report, command, cwd, **kwargs):
     report.command(' '.join(str(part) for part in command))
-    return subprocess.run([str(part) for part in command], cwd=str(cwd),
+    result = subprocess.run([str(part) for part in command], cwd=str(cwd),
                           capture_output=True, text=True, encoding='utf-8',
-                          errors='replace', **kwargs)
+                          errors='replace', env=kwargs.pop('env', child_environment()), **kwargs)
+    if report.output_dir:
+        prefix = str(len(report.commands)).zfill(3)
+        (report.output_dir / (prefix + '-stdout.log')).write_text(result.stdout, encoding='utf-8')
+        (report.output_dir / (prefix + '-stderr.log')).write_text(result.stderr, encoding='utf-8')
+    return result
 
 
 def build_evaluator(repo, report):
@@ -149,10 +160,11 @@ def run_unit_tests(repo, report):
     ran = re.search(r'Ran (\d+) tests', output)
     count = int(ran.group(1)) if ran else None
     failed = len(re.findall(r'^(FAIL|ERROR):', output, flags=re.MULTILINE))
+    report.artifact('unit_test_count', count)
     report.case('V-1', 'measured', '外側のテストを実行する',
-                {'failed': 0, 'ran_at_least_70': True, 'test_count': 90},
-                {'failed': failed, 'ran_at_least_70': bool(count and count >= 70),
-                 'test_count': count})
+                {'failed': 0, 'ran_at_least_90': True, 'exit_code': 0},
+                {'failed': failed, 'ran_at_least_90': bool(count and count >= 90),
+                 'exit_code': completed.returncode})
     # The five mismatch rules are checked with a stand-in evaluator, not the real
     # one. Record that the named test exists and ran green rather than claiming
     # the real evaluator was used.
@@ -586,6 +598,7 @@ def _app_processes():
               "Where-Object { $_.CommandLine -like '*MusicStore.Web.dll*' } | "
               "ForEach-Object { $_.ProcessId }")
     completed = subprocess.run(['powershell', '-NoProfile', '-Command', script],
+                               env=child_environment(),
                                capture_output=True, text=True, encoding='utf-8',
                                errors='replace')
     if completed.returncode != 0:
@@ -599,21 +612,17 @@ def main(argv=None):
     parser.add_argument('--out', type=Path)
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
-    runs = repo / 'runs' / '_verify'
-    scratch = repo / 'outer' / 'verify' / '.scratch'
-    preserve_root = Path(tempfile.gettempdir()) / PRESERVE_ROOT_NAME
-    if runs.exists():
-        shutil.rmtree(runs)
-    if scratch.exists():
-        shutil.rmtree(scratch)
-    if preserve_root.exists():
-        shutil.rmtree(preserve_root)
+    invocation = uuid.uuid4().hex
+    runs = repo / 'runs' / '_verify' / invocation
+    scratch = repo / 'tmp' / ('verify-' + invocation)
+    preserve_root = repo / 'runs' / '_preservation' / invocation[:12]
     runs.mkdir(parents=True)
     preserve_root.mkdir(parents=True)
     reference = repo / 'inner' / 'fixtures' / 'reference'
     source = make_stand_in(scratch)
     broken = make_broken_project(scratch)
-    report = Report(repo)
+    report = Report(repo, runs)
+    report.artifact('preservation_root', str(preserve_root))
     app_processes_before = _app_processes()
 
     if not build_evaluator(repo, report):
@@ -637,18 +646,18 @@ def main(argv=None):
     leaked_app_processes(report, app_processes_before)
 
     summary = report.summary()
-    out = args.out or (repo / 'outer' / 'verify' / 'verification-summary.json')
-    util.write_json_atomic(out, summary)
+    out = args.out or (runs / 'verification-summary.json')
+    util.write_new_json(out, summary)
     print('')
     print('cases: {}  mismatched: {}'.format(summary['case_count'],
                                              len(summary['mismatched'])))
     print('summary: ' + str(out))
     if scratch.exists():
         shutil.rmtree(scratch)
-    if preserve_root.exists():
-        shutil.rmtree(preserve_root)
+    # Retain this invocation's verified package and restored originals for audit.
     return 0 if report.matched() else 1
 
 
 if __name__ == '__main__':
+    sys.stdout.reconfigure(encoding='utf-8')
     sys.exit(main())

@@ -16,6 +16,10 @@ public sealed class RunState : IDisposable
 
     public string ArtifactPath { get; set; }
 
+    public string EvaluationVersion { get; set; } = Program.DefaultEvaluationVersion;
+
+    public bool ExplicitOrderContract => EvaluationVersion == "1.2.0";
+
     public bool AppReady { get; set; }
 
     public string AppStartDetail { get; set; } = string.Empty;
@@ -195,6 +199,12 @@ public sealed class RestartResult : ScenarioResult
 
 public sealed class InvalidCheckoutResult : ScenarioResult
 {
+    public OrderStore.Snapshot OrdersBefore { get; set; }
+    public OrderStore.Snapshot OrdersAfterWrongPromo { get; set; }
+    public OrderStore.Snapshot OrdersBeforeMissing { get; set; }
+    public OrderStore.Snapshot OrdersAfterMissing { get; set; }
+    public WebResponse CartBeforeMissing { get; set; }
+
     public WebResponse CartBefore { get; set; }
 
     public List<Html.CartLine> LinesBefore { get; set; } = new List<Html.CartLine>();
@@ -474,13 +484,26 @@ public static class Scenarios
         result.CartBefore = session.Get("/ShoppingCart");
         result.LinesBefore = Html.CartLines(result.CartBefore.Body);
 
+        if (state.ExplicitOrderContract) result.OrdersBefore = OrderStore.ReadIds(state.Host.DatabasePath);
+
         result.WrongPromo = session.PostForm("/Checkout/AddressAndPayment", OrderFields("NOT_FREE"));
         result.CartAfterWrongPromo = session.Get("/ShoppingCart");
         result.LinesAfterWrongPromo = Html.CartLines(result.CartAfterWrongPromo.Body);
 
+        if (state.ExplicitOrderContract)
+        {
+            result.OrdersAfterWrongPromo = OrderStore.ReadIds(state.Host.DatabasePath);
+            session = state.Session("invalid-missing");
+            session.Get("/ShoppingCart/AddToCart/1");
+            result.CartBeforeMissing = session.Get("/ShoppingCart");
+            result.OrdersBeforeMissing = OrderStore.ReadIds(state.Host.DatabasePath);
+        }
+        else result.CartBeforeMissing = result.CartBefore;
+
         result.MissingField = session.PostForm("/Checkout/AddressAndPayment", OrderFields("FREE", firstName: string.Empty));
         result.CartAfterMissingField = session.Get("/ShoppingCart");
         result.LinesAfterMissingField = Html.CartLines(result.CartAfterMissingField.Body);
+        if (state.ExplicitOrderContract) result.OrdersAfterMissing = OrderStore.ReadIds(state.Host.DatabasePath);
 
         return result;
     });
@@ -514,11 +537,12 @@ public static class Scenarios
         }
 
         result.ProjectText = File.ReadAllText(result.ProjectFile);
-        var tfm = Regex.Match(result.ProjectText, "<TargetFramework>(?<tfm>[^<]+)</TargetFramework>", RegexOptions.IgnoreCase);
-        result.TargetFramework = tfm.Success ? tfm.Groups["tfm"].Value.Trim() : null;
-        var sdk = Regex.Match(result.ProjectText, "Sdk\\s*=\\s*\"(?<sdk>[^\"]+)\"", RegexOptions.IgnoreCase);
-        result.Sdk = sdk.Success ? sdk.Groups["sdk"].Value : null;
-        result.HasSystemWeb = Regex.IsMatch(result.ProjectText, "System\\.Web", RegexOptions.IgnoreCase);
+        var project = System.Xml.Linq.XDocument.Parse(result.ProjectText);
+        result.TargetFramework = project.Descendants().FirstOrDefault(e => e.Name.LocalName == "TargetFramework")?.Value.Trim();
+        result.Sdk = project.Root?.Attribute("Sdk")?.Value
+            ?? project.Descendants().FirstOrDefault(e => e.Name.LocalName == "Sdk")?.Attribute("Name")?.Value;
+        result.HasSystemWeb = project.Descendants().Where(e => e.Name.LocalName is "Reference" or "PackageReference")
+            .Any(e => (e.Attribute("Include")?.Value ?? "").StartsWith("System.Web", StringComparison.OrdinalIgnoreCase));
 
         result.DatabasePath = state.Host.DatabasePath;
 

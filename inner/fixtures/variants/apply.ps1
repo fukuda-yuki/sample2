@@ -27,7 +27,7 @@ if (-not (Test-Path $reference)) {
 }
 
 if (Test-Path $Out) {
-    Remove-Item -Recurse -Force $Out
+    throw 'Fixture output already exists; choose a new path to preserve prior evidence.'
 }
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
@@ -86,6 +86,27 @@ function Add-File {
 }
 
 switch ($Name) {
+    'xml-sdk-notation' {
+        Edit-File 'MusicStore.Web\MusicStore.Web.csproj' `
+            '<Project Sdk="Microsoft.NET.Sdk.Web">' `
+            ("<Project Sdk = 'Microsoft.NET.Sdk.Web'>" + $nl + '<!-- <TargetFramework>net48</TargetFramework><Reference Include="System.Web" /> -->') `
+            'Equivalent XML quoting and an inert legacy comment'
+    }
+
+    'html-entity-nesting' {
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<tr id="row-@item.RecordId">' `
+            '<tr id="row&#45;@item.RecordId">' `
+            'HTML entity in an equivalent row identifier'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '@item.Count' '<span>@item.Count</span>' `
+            'Quantity inside a text-preserving child element'
+        Edit-File 'MusicStore.Web\Views\ShoppingCart\Index.cshtml' `
+            '<td id="cart-total">' `
+            '<!-- <td id="cart-total">9999.00</td> --><td id="cart-total">' `
+            'Commented markup must not replace the real total'
+    }
+
     'single-quoted-attributes' {
         # 観測される識別子の属性値を、等価な単一引用符へ変える。
         # 引用符の種類は HTML として等価であり、判定に影響させてはならない（docs/quality-spec.md §4.6）。
@@ -169,6 +190,39 @@ internal static class LegacyName
 }
 '@ `
             '旧名称の名前空間を宣言する'
+    }
+
+    'aspnetcore-launch-profile' {
+        Add-File 'MusicStore.Web\Properties\launchSettings.json' `
+            @'
+{
+  "iisSettings": { "iisExpress": { "applicationUrl": "http://localhost:1486", "sslPort": 0 } },
+  "profiles": {
+    "http": { "commandName": "Project", "applicationUrl": "http://localhost:5270" },
+    "IIS Express": { "commandName": "IISExpress", "launchBrowser": true }
+  }
+}
+'@ `
+            'Standard ASP.NET Core launch profiles do not call a legacy application'
+    }
+
+    'japanese-order-label' {
+        Edit-File 'MusicStore.Web\Views\Checkout\Complete.cshtml' `
+            '<p>Thanks for your order! Your order number is: <span id="order-number">@Model</span></p>' `
+            '<p>ご注文番号： <strong id=''order-number''><span> @Model </span></strong></p>' `
+            'Localize the label and nest the order number'
+    }
+
+    'order-denied-403' {
+        Edit-File 'MusicStore.Web\Controllers\CheckoutController.cs' `
+            'return NotFound();' 'return StatusCode(403);' 'Use the other permitted denial status'
+    }
+
+    'modern-project-legacy-name' {
+        $originalProject = (Resolve-Path -LiteralPath (Join-Path $Out 'MusicStore.Web\MusicStore.Web.csproj')).Path
+        # Rename exactly the generated fixture file; never a computed directory tree.
+        Rename-Item -LiteralPath $originalProject -NewName 'MvcMusicStore.csproj'
+        $log.Add('A modern net8.0 project retains the historical project filename')
     }
 
     default {

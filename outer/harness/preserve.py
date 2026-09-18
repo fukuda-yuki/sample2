@@ -15,20 +15,29 @@ import stat
 import uuid
 
 
+def native_path(path):
+    """Use Windows extended paths without changing machine-wide path policy."""
+    path = Path(path).absolute()
+    name = str(path)
+    if os.name == 'nt' and not name.startswith('\\\\?\\'):
+        name = ('\\\\?\\UNC\\' + name[2:]) if name.startswith('\\\\') else '\\\\?\\' + name
+    return Path(name)
+
+
 def read(path):
-    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    return json.loads(native_path(path).read_text(encoding='utf-8-sig'))
 
 
 def digest(path):
     h = hashlib.sha256()
-    with Path(path).open('rb') as stream:
+    with native_path(path).open('rb') as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b''):
             h.update(block)
     return h.hexdigest()
 
 
 def write_new(path, value):
-    path = Path(path)
+    path = native_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('x', encoding='utf-8') as stream:
         json.dump(value, stream, ensure_ascii=False, indent=2)
@@ -46,7 +55,7 @@ def safe_name(name):
 
 
 def tree(root):
-    root = Path(root)
+    root = native_path(root)
     if root.is_symlink() or (hasattr(root, 'is_junction') and root.is_junction()):
         raise ValueError('Links forbidden')
     entries = {}
@@ -76,7 +85,7 @@ def verify(archive, package_id, expected_hash=None, seen=None, cache=None):
     safe_name(package_id)
     if '/' in package_id:
         raise ValueError('Package ID must be one component')
-    package = Path(archive) / 'packages' / package_id
+    package = native_path(archive) / 'packages' / package_id
     if package.is_symlink():
         raise ValueError('Package link forbidden')
     index = package / 'package.json'
@@ -105,7 +114,7 @@ def verify(archive, package_id, expected_hash=None, seen=None, cache=None):
 
 
 def pack(archive, package_id, sources, *, metadata=None, references=()):
-    archive = Path(archive).resolve()
+    archive = native_path(archive).resolve()
     safe_name(package_id)
     if '/' in package_id:
         raise ValueError('Package ID must be one component')
@@ -120,7 +129,7 @@ def pack(archive, package_id, sources, *, metadata=None, references=()):
     payload.mkdir(parents=True)
     for relative, source in sources.items():
         safe_name(relative)
-        source = Path(source)
+        source = native_path(source)
         if source.is_symlink() or (hasattr(source, 'is_junction') and source.is_junction()):
             raise ValueError('Source link forbidden')
         source = source.resolve(strict=True)
@@ -156,12 +165,12 @@ def pack(archive, package_id, sources, *, metadata=None, references=()):
 
 def ensure_package(archive, package_id, sources, *, metadata=None, references=()):
     """Recover a committed package whose receipt write was interrupted, without overwriting."""
-    final=Path(archive)/'packages'/safe_name(package_id)
+    final=native_path(archive)/'packages'/safe_name(package_id)
     if final.exists():
         data=verify(archive,package_id)
         expected={}
         for name,source in sources.items():
-            safe_name(name);source=Path(source)
+            safe_name(name);source=native_path(source)
             if source.is_symlink() or source.is_junction():raise ValueError('Source link forbidden')
             if source.is_dir():expected.update({name+'/'+n:e for n,e in tree(source).items()})
             else:expected[name]={'sha256':digest(source),'bytes':source.stat().st_size}
@@ -175,7 +184,7 @@ def ensure_package(archive, package_id, sources, *, metadata=None, references=()
 
 
 def restore(archive, reference, destination, *, resume=False):
-    archive, destination = Path(archive).resolve(), Path(destination).absolute()
+    archive, destination = native_path(archive).resolve(), native_path(destination)
     if destination.is_relative_to(archive) or archive.is_relative_to(destination):
         raise ValueError('Restore must be independent of archive')
     data = verify(archive, reference['package_id'], reference['sha256'])
@@ -240,14 +249,23 @@ def pack_run(archive, run_root, references=(), include=()):
     manifest = read(root / 'manifest.json')
     include = [name for name in include if name in OPTIONAL_NAMES]
     names = list(PACK_NAMES) + include
+    required = list(PACK_NAMES)
+    if manifest.get('schema_version') == 2:
+        names += ['evaluation-assets', 'profiles', 'context.json', 'runtime.json', 'telemetry',
+                  'telemetry-link.json', 'state', 'stop-request.json', 'stop-result.json', 'evaluation-work']
+        names += [p.name for p in root.glob('pipeline-error-*.json')]
+        required += ['profiles', 'evaluation-assets', 'context.json', 'runtime.json', 'state', 'telemetry-link.json']
     sources = {name: root / name for name in names if (root / name).exists()}
     metadata = {'kind': 'run', 'run_id': manifest['run_id'],
-                'missing': [name for name in PACK_NAMES if name not in sources],
+                'missing': [name for name in required if name not in sources],
                 'skipped_by_choice': [name for name in OPTIONAL_NAMES if name not in sources],
                 'stop_confirmed': manifest.get('stop_confirmed'),
                 'submission_fixed': manifest.get('submission_fixed'),
                 'end_reason': manifest.get('end_reason')}
-    return pack(archive, 'run-' + manifest['run_id'], sources,
+    package_id = 'run-' + manifest['run_id']
+    if manifest.get('schema_version') == 2 and (native_path(archive) / 'package-reservations' / (package_id + '.json')).exists():
+        package_id += '-revision-' + uuid.uuid4().hex[:12]
+    return pack(archive, package_id, sources,
                 metadata=metadata, references=references)
 
 

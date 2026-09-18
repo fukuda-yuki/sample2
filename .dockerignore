@@ -1,0 +1,8 @@
+.git
+runs
+artifacts
+tmp
+work
+**/bin
+**/obj
+**/__pycache__

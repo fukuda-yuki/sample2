@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace MusicStore.Evaluator;
 
@@ -35,7 +36,9 @@ public static class LegacyScan
     {
         new Regex(@"MvcMusicStore\.(?:exe|dll|pdb|csproj|sln)\b", RegexOptions.IgnoreCase),
         new Regex(@"\bMVC-Music-Store\b", RegexOptions.IgnoreCase),
-        new Regex(@"\biisexpress\b", RegexOptions.IgnoreCase),
+        // IIS Express also hosts ASP.NET Core. Its standard launch profile alone
+        // is not evidence of a legacy application; require an explicit old path.
+        new Regex(@"\biisexpress(?:\.exe)?\b[^\r\n]*?/path\s*:[^\r\n]*?\bMvcMusicStore(?=[\\/\s""']|$)", RegexOptions.IgnoreCase),
         new Regex(@"\bSystem\.Web\b", RegexOptions.IgnoreCase),
         new Regex(@"\bnet4[0-9]{0,2}\b", RegexOptions.IgnoreCase),
         new Regex(@"\bTargetFrameworkVersion\b", RegexOptions.IgnoreCase),
@@ -65,7 +68,7 @@ public static class LegacyScan
                 continue;
             }
 
-            if (LegacyFileName.IsMatch(Path.GetFileName(file)))
+            if (LegacyFileName.IsMatch(Path.GetFileName(file)) && !IsModernProject(file))
             {
                 result.References.Add(relative + " :: 旧実装のファイルそのもの");
                 continue;
@@ -95,6 +98,23 @@ public static class LegacyScan
         result.References.Sort(StringComparer.Ordinal);
         result.Mentions.Sort(StringComparer.Ordinal);
         return result;
+    }
+
+    private static bool IsModernProject(string file)
+    {
+        if (!Path.GetExtension(file).Equals(".csproj", StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            var root = XDocument.Load(file).Root;
+            var sdk = root?.Attribute("Sdk")?.Value ?? string.Empty;
+            var webSdk = sdk.Split(';').Any(x => x.Trim().Split('/')[0] == "Microsoft.NET.Sdk.Web")
+                || root?.Elements().Any(e => e.Name.LocalName == "Sdk" && e.Attribute("Name")?.Value == "Microsoft.NET.Sdk.Web") == true;
+            var frameworks = root?.Descendants().Where(e => e.Name.LocalName is "TargetFramework" or "TargetFrameworks")
+                .SelectMany(e => e.Value.Split(';')).ToArray() ?? Array.Empty<string>();
+            return webSdk && frameworks.Length > 0 && frameworks.All(f =>
+                f.StartsWith("net", StringComparison.Ordinal) && Version.TryParse(f[3..].Split('-')[0], out var v) && v.Major >= 8);
+        }
+        catch { return false; }
     }
 
     private static void Collect(List<string> into, string relative, string text, string where)

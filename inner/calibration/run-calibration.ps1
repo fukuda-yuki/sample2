@@ -28,7 +28,9 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$EvaluationVersion = '1.1.0'
+    [ValidateSet('1.1.0', '1.2.0')][string]$EvaluationVersion = '1.2.0',
+    [switch]$Docker,
+    [string]$AdditionalArtifact
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,36 +43,29 @@ $variants = Join-Path $repo 'inner\fixtures\variants\apply.ps1'
 $reference = Join-Path $repo 'inner\fixtures\reference'
 $alternative = Join-Path $repo 'inner\fixtures\alternative'
 $specSource = Join-Path $repo 'inner\spec\requirements.json'
+if ($EvaluationVersion -eq '1.2.0') { $specSource = Join-Path $repo 'inner\spec\requirements-1.2.0.json' }
 $catalogSource = Join-Path $repo 'inner\spec\catalog.json'
-$runs = Join-Path $repo 'runs'
+$runs = Join-Path $repo ('runs/_calibration/' + [DateTime]::UtcNow.ToString('yyyyMMddTHHmmss') + '-' + [guid]::NewGuid().ToString('N'))
 $dll = Join-Path $evaluator 'bin\Release\net8.0\MusicStore.Evaluator.dll'
 
-Write-Host '評価器をビルドします。'
-& dotnet build (Join-Path $evaluator 'MusicStore.Evaluator.csproj') -c Release --nologo -v q
-if ($LASTEXITCODE -ne 0) {
-    throw '評価器のビルドに失敗しました。'
+if (-not $Docker) {
+    Write-Host '評価器をビルドします。'
+    & dotnet build (Join-Path $evaluator 'MusicStore.Evaluator.csproj') -c Release --nologo -v q
+    if ($LASTEXITCODE -ne 0) { throw '評価器のビルドに失敗しました。' }
 }
 
-if (-not (Test-Path $dll)) {
+if (-not $Docker -and -not (Test-Path $dll)) {
     throw "評価器のアセンブリがありません: $dll"
 }
 
-# 成果物ハッシュは bin/obj を無視するが、成果物の中身を追跡済みの状態に揃えておく。
-# 発行は成果物の複製に対して行うので校正が bin/obj を作ることはないが、以前の実行や
-# 手作業で残っていると、プロジェクト直下の `obj` が生成物を取り込み、二重定義で
-# ビルドに失敗する。プロジェクトの下にあるものを消す。
-foreach ($fixture in @($reference, $alternative)) {
-    foreach ($dir in Get-ChildItem -Path $fixture -Recurse -Directory -Force |
-        Where-Object { $_.Name -in @('bin', 'obj') }) {
-        Remove-Item -Recurse -Force $dir.FullName
-    }
-}
-
-if (Test-Path $runs) {
-    Remove-Item -Recurse -Force $runs
-}
-
+# Every invocation owns a new directory. Never remove past Runs or fixtures.
 New-Item -ItemType Directory -Force -Path $runs | Out-Null
+if ($Docker) {
+    $runtimeRoot = Join-Path $repo 'artifacts/runtime/MS1-001'
+    $runtimeLock = Get-Content (Join-Path $runtimeRoot 'lock.json') -Raw | ConvertFrom-Json
+    Copy-Item -LiteralPath (Join-Path $runtimeRoot 'evaluator') -Destination (Join-Path $runs 'evaluator') -Recurse
+    Copy-Item -LiteralPath (Join-Path $runtimeRoot 'lock.json') -Destination (Join-Path $runs 'runtime-lock.json')
+}
 
 $spec = [System.IO.File]::ReadAllText($specSource, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 $requirementIds = @($spec.requirements | ForEach-Object { $_.id })
@@ -216,6 +211,50 @@ Add-Case -CaseId 'var-legacy-comment-mention' -Kind '妥当な別実装' -Artifa
     -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
     -Note '旧実装への言及を説明コメントに残す。実際の参照・起動がないため R-029 が落ちないことを期待する。'
 
+Add-Case -CaseId 'var-xml-sdk-notation' -Kind '妥当な別実装' -Artifact $null -Variant 'xml-sdk-notation' -Sequence 24 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note 'Equivalent XML quoting and commented legacy references must preserve all verdicts.'
+
+Add-Case -CaseId 'var-html-entity-nesting' -Kind '妥当な別実装' -Artifact $null -Variant 'html-entity-nesting' -Sequence 25 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note 'HTML entities, nested quantity text and misleading comments must preserve all verdicts.'
+
+Add-Case -CaseId 'var-aspnetcore-launch-profile' -Kind 'valid launch settings' -Artifact $null -Variant 'aspnetcore-launch-profile' -Sequence 26 `
+    -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+    -Note 'IIS Express is also an ASP.NET Core host; a standard launch profile must not fail R-029.'
+
+if ($EvaluationVersion -eq '1.2.0') {
+    Add-Case -CaseId 'var-modern-project-legacy-name' -Kind 'equivalent project name' -Artifact $null -Variant 'modern-project-legacy-name' -Sequence 29 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'A net8.0 Web project is not a legacy project solely because it retains its filename.'
+    Add-Case -CaseId 'var-japanese-order-label' -Kind 'equivalent order display' -Artifact $null -Variant 'japanese-order-label' -Sequence 30 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'A Japanese label and nested DOM must pass without English phrase matching.'
+    Add-Case -CaseId 'var-order-denied-403' -Kind 'equivalent denial' -Artifact $null -Variant 'order-denied-403' -Sequence 31 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'Both public denial statuses are valid.'
+    Add-Case -CaseId 'neg-order-marker-wrong' -Kind 'order display defect' -Artifact $null -Negative 'order-marker-wrong' -Sequence 32 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-021') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-order-marker-comment' -Kind 'order display defect' -Artifact $null -Negative 'order-marker-comment' -Sequence 33 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-021') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-order-marker-duplicate' -Kind 'order display defect' -Artifact $null -Negative 'order-marker-duplicate' -Sequence 34 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-021') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-other-session-alternate-label' -Kind 'order ownership defect' -Artifact $null -Negative 'other-session-alternate-label' -Sequence 35 `
+        -ExpectedVerdict 'fail_critical' -ExpectedFailed @('R-022') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-invalid-promo-mutates-cart' -Kind 'invalid checkout defect' -Artifact $null -Negative 'invalid-promo-mutates-cart' -Sequence 36 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-023') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-missing-field-mutates-cart' -Kind 'invalid checkout defect' -Artifact $null -Negative 'missing-field-mutates-cart' -Sequence 37 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-024') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-invalid-promo-stores-order' -Kind 'invalid checkout defect' -Artifact $null -Negative 'invalid-promo-stores-order' -Sequence 38 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-023') -ExpectedBlocked @()
+    Add-Case -CaseId 'neg-missing-field-stores-order' -Kind 'invalid checkout defect' -Artifact $null -Negative 'missing-field-stores-order' -Sequence 39 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-024') -ExpectedBlocked @()
+}
+
+if ($AdditionalArtifact) {
+    if ($EvaluationVersion -ne '1.1.0') { throw 'The saved diagnostic artifact predates contract 1.2.0. Use -EvaluationVersion 1.1.0.' }
+    Add-Case -CaseId 'regression-saved-model-artifact' -Kind 'saved real-model regression' -Artifact $AdditionalArtifact -Sequence 27 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() `
+        -Note 'Re-evaluate the unchanged frozen diagnostic artifact after repairing the launch-profile false failure. No model call.'
+}
+
 $missingArtifact = Join-Path $runs 'no-such-artifact'
 Add-Case -CaseId 'fault-missing-artifact' -Kind '評価側の障害' -Artifact $missingArtifact -Sequence 90 `
     -ExpectedVerdict 'error' -ExpectedFailed @() -ExpectedBlocked @() -ExpectedExitCode 2 -ExpectedQualityNull $true `
@@ -227,7 +266,9 @@ $specCopyDir = Join-Path $runs 'fault-unimplemented-check'
 New-Item -ItemType Directory -Force -Path $specCopyDir | Out-Null
 $specCopy = Join-Path $specCopyDir 'requirements.json'
 $specText = [System.IO.File]::ReadAllText($specSource, [System.Text.Encoding]::UTF8)
-$specText = $specText.Replace('{ "id": "C-001",', '{ "id": "C-999", "observation": "実装のない検査。" },{ "id": "C-001",')
+$faultSpec = $specText | ConvertFrom-Json
+$faultSpec.requirements[0].checks += [pscustomobject]@{ id = 'C-999'; observation = 'Unimplemented calibration check' }
+$specText = $faultSpec | ConvertTo-Json -Depth 20
 [System.IO.File]::WriteAllText($specCopy, $specText)
 
 Add-Case -CaseId 'fault-unimplemented-check' -Kind '評価側の障害' -Artifact $reference -Sequence 91 -Spec $specCopy -Catalog $catalogSource `
@@ -237,6 +278,7 @@ Add-Case -CaseId 'fault-unimplemented-check' -Kind '評価側の障害' -Artifac
 # ---------------------------------------------------------------------------
 # 実行
 # ---------------------------------------------------------------------------
+$plan | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 (Join-Path $runs 'calibration-plan.json')
 function Invoke-Evaluation {
     param(
         [string]$CaseId,
@@ -266,8 +308,49 @@ function Invoke-Evaluation {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & dotnet @arguments 1> $stdoutPath 2> $stderrPath
-        $exitCode = $LASTEXITCODE
+        if ($Docker) {
+            $artifactSnapshot = Join-Path $out 'frozen-input'
+            $containerArtifact = '/artifact'
+            if (Test-Path -LiteralPath $Artifact -PathType Container) {
+                & python -c 'import sys; sys.path.insert(0,sys.argv[1]); from outer.harness import util; util.collect(sys.argv[2],sys.argv[3])' $repo $Artifact $artifactSnapshot
+                if ($LASTEXITCODE -ne 0) { throw 'Calibration source snapshot failed' }
+            }
+            else {
+                New-Item -ItemType Directory -Path $artifactSnapshot | Out-Null
+                $containerArtifact = '/artifact/missing'
+            }
+            $assets = Join-Path $out 'assets'
+            $work = Join-Path $out 'work'
+            New-Item -ItemType Directory -Path $assets, $work | Out-Null
+            Copy-Item -LiteralPath $(if ($Spec) { $Spec } else { $specSource }) -Destination (Join-Path $assets 'requirements.json')
+            Copy-Item -LiteralPath $(if ($Catalog) { $Catalog } else { $catalogSource }) -Destination (Join-Path $assets 'catalog.json')
+            $containerName = 's2-cal-' + [guid]::NewGuid().ToString('N')
+            $dockerArguments = @('run', '--name', $containerName, '--network', 'none', '--read-only',
+                '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=512', '--memory=6g', '--cpus=4',
+                '--tmpfs', '/tmp:rw,exec,size=2g',
+                '--mount', "type=bind,source=$artifactSnapshot,target=/artifact,readonly",
+                '--mount', "type=bind,source=$assets,target=/assets,readonly",
+                '--mount', "type=bind,source=$(Join-Path $runs 'evaluator'),target=/evaluator,readonly",
+                '--mount', "type=bind,source=$out,target=/result",
+                '--mount', "type=bind,source=$work,target=/work",
+                $runtimeLock.images.evaluator, 'dotnet', '/evaluator/MusicStore.Evaluator.dll',
+                '--artifact', $containerArtifact, '--out', '/result', '--work', '/work',
+                '--spec', '/assets/requirements.json', '--catalog', '/assets/catalog.json',
+                '--evaluation-version', $EvaluationVersion, '--sequence', "$Sequence")
+            $dockerArguments | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $out 'container-command.json')
+            try {
+                & docker @dockerArguments 1> $stdoutPath 2> $stderrPath
+                $exitCode = $LASTEXITCODE
+            }
+            finally {
+                & docker rm -f $containerName 1> (Join-Path $out 'container-removal.txt') 2>&1
+                if ($LASTEXITCODE -ne 0) { throw 'Calibration container stop was not confirmed' }
+            }
+        }
+        else {
+            & dotnet @arguments 1> $stdoutPath 2> $stderrPath
+            $exitCode = $LASTEXITCODE
+        }
     }
     finally {
         $ErrorActionPreference = $previous

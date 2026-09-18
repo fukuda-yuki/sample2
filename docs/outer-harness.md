@@ -1,7 +1,7 @@
 # 外側：実験実行基盤（最小経路）の仕様
 
 対応 Issue: [#5](https://github.com/fukuda-yuki/sample2/issues/5)
-状態: 仕様。実装は [`outer/`](../outer/README.md) に置く。**実モデル接続は本仕様の範囲外であり、`outer/` にモデルを呼ぶ経路は無い。**
+状態: Schema 1 の仕様。実装は [`outer/`](../outer/README.md) に置く。実モデルの新経路は [Schema 2 検証機ガイド](verification-machine.md) を参照する。本仕様の非モデル経路と過去Runは引き続き利用できる。
 
 ## 0. この文書が主張しないこと
 

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import run as run_mod
 from . import util
+from .security import child_environment
 
 DEFAULT_EVALUATOR_DLL = 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll'
 SCORING_TIMEOUT_SECONDS = 1800
@@ -114,7 +115,7 @@ def kill_process_tree(process):
         return
     if os.name == 'nt':
         subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)],
-                       capture_output=True)
+                       capture_output=True, env=child_environment())
     else:
         import signal
         try:
@@ -155,9 +156,20 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     if not manifest.get('submission_fixed'):
         raise RuntimeError('成果物を固定していない Run は採点しません: ' + run_id)
     condition = util.read_json(run_dir / 'condition.json')
+    isolated = condition.get('schema_version') == 2
+    if isolated:
+        from . import profiles
+        profiles.validate_run(run_dir)
+        if evaluator is not None:
+            raise ValueError('Isolated Runs must use their frozen evaluator bundle')
+        if evaluation_version is not None and evaluation_version != condition['evaluation']['evaluation_version']:
+            raise ValueError('Isolated Runs must use their frozen evaluation version')
     evaluation = condition.get('evaluation') or {}
-    spec = repo / (evaluation.get('spec_path') or 'inner/spec/requirements.json')
-    catalog = repo / (evaluation.get('catalog_path') or 'inner/spec/catalog.json')
+    asset_root = run_dir if isolated else repo
+    spec = asset_root / (evaluation.get('spec_path') or 'inner/spec/requirements.json')
+    catalog = asset_root / (evaluation.get('catalog_path') or 'inner/spec/catalog.json')
+    if isolated:
+        evaluator = run_dir / 'evaluation-assets/evaluator' / evaluation['assembly']
     frozen = run_dir / 'frozen'
     if not frozen.is_dir():
         raise FileNotFoundError(frozen)
@@ -246,15 +258,31 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     temporary = evaluations / ('.tmp-{}-{}'.format(sequence, uuid.uuid4().hex))
     temporary.mkdir(parents=True)
     command[command.index('--out') + 1] = str(temporary)
+    container_name = None
+    if isolated:
+        from . import runtime
+        container_name, command = runtime.scoring_command(condition, frozen, temporary, work_dir,
+            run_dir / 'evaluation-assets', str(version), sequence)
     evidence = run_dir / 'evidence'
     evidence.mkdir(exist_ok=True)
-    environment = dict(os.environ)
+    environment = child_environment()
+    # The repository's explicit non-model test double accepts three control inputs.
+    # These are not inherited by real evaluators or isolated submissions.
+    if evaluator_path.resolve() == (Path(__file__).resolve().parents[1] / 'tests/stub_evaluator.py'):
+        environment.update({k: os.environ[k] for k in
+            ('HARNESS_STUB_MODE', 'HARNESS_STUB_INVOCATIONS', 'HARNESS_STUB_MARKER') if k in os.environ})
     environment['PYTHONIOENCODING'] = 'utf-8'
     # 'xb' は既存のログを切り詰めない。使用済み連番は上で拒否しているので、
     # ここで既存のログを開くことはない。
     with (evidence / 'scoring-{:03d}-stdout.log'.format(sequence)).open('xb') as out, \
             (evidence / 'scoring-{:03d}-stderr.log'.format(sequence)).open('xb') as err:
-        exit_code, timed_out = run_evaluator(command, repo, environment, out, err, timeout)
+        try:
+            exit_code, timed_out = run_evaluator(command, repo, environment, out, err, timeout)
+        finally:
+            if container_name:
+                stopped = runtime.docker('rm', '-f', container_name, check=False)
+                if stopped.returncode != 0:
+                    raise RuntimeError('Evaluator container stop could not be confirmed: ' + container_name)
     produced = temporary / 'evaluation.json'
     if timed_out or not produced.is_file():
         target = evaluations / ('fault-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
@@ -271,7 +299,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
         _append_index(run_dir, record)
         return record
     output = util.read_json(produced)
-    if exit_code == 2:
+    if exit_code != 0:
         state, mismatches = 'evaluator_fault', []
     else:
         mismatches = check_mismatches(output, condition, version, frozen, independent_hash,
@@ -320,7 +348,8 @@ def check_mismatches(output, condition, version, frozen, independent_hash, spec,
                        'actual': output.get('evaluationVersion')})
     reported = output.get('artifactPath')
     try:
-        same_path = Path(reported or '').resolve() == Path(frozen).resolve()
+        same_path = (reported == '/artifact' if condition.get('schema_version') == 2 else
+                     Path(reported or '').resolve() == Path(frozen).resolve())
     except OSError:
         same_path = False
     if not same_path:
@@ -453,5 +482,5 @@ def publish_evaluator(repo):
     """Build the evaluator once. Not a scoring step."""
     project = Path(repo) / 'inner' / 'evaluator' / 'MusicStore.Evaluator' / 'MusicStore.Evaluator.csproj'
     completed = subprocess.run(['dotnet', 'build', str(project), '-c', 'Release', '--nologo', '-v', 'q'],
-                               cwd=str(repo))
+                               cwd=str(repo), env=child_environment())
     return completed.returncode

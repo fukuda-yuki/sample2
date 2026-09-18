@@ -107,122 +107,89 @@ public sealed class WebSession : IDisposable
 
 public static class Html
 {
-    // 属性値の引用符は " と ' のどちらも等価な HTML である（docs/quality-spec.md §4.6）。
-    // 契約は識別子と値であり、引用符の種類は判定に影響させない。
-    // 属性名と値の間の空白・タブ・改行も等価な HTML である。`=` の前後を \s* で
-    // 許容し、属性の順序にも依存しない。HTML 全体の空白を削る前処理はしない
-    // （表示内容や値を変えてしまうため）。
-    public static readonly Regex CartRowRegex = new Regex(
-        "<tr[^>]*id\\s*=\\s*[\"']row-(?<recordId>\\d+)[\"'][^>]*>(?<inner>.*?)</tr>",
-        RegexOptions.Singleline | RegexOptions.IgnoreCase);
+    private static AngleSharp.Dom.IDocument Document(string html)
+    {
+        var doc = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html ?? string.Empty);
+        foreach (var node in doc.QuerySelectorAll("script,style,template")) node.Remove();
+        return doc;
+    }
 
-    public static readonly Regex AlbumLinkRegex = new Regex(
-        "href\\s*=\\s*[\"'](?:[^\"']*?)?/Store/Details/(?<albumId>\\d+)[\"']",
-        RegexOptions.IgnoreCase);
+    private static int? Number(string value) => int.TryParse(value, NumberStyles.None,
+        CultureInfo.InvariantCulture, out var number) ? number : null;
 
-    public static readonly Regex ItemCountRegex = new Regex(
-        "id\\s*=\\s*[\"']item-count-(?<recordId>\\d+)[\"'][^>]*>\\s*(?<count>\\d+)\\s*<",
-        RegexOptions.IgnoreCase);
+    private static int? Album(AngleSharp.Dom.IElement link)
+    {
+        var href = link?.GetAttribute("href");
+        if (href == null || !Uri.TryCreate(new Uri("http://localhost"), href, out var uri)) return null;
+        var match = Regex.Match(uri.AbsolutePath, @"^/Store/Details/(?<id>[0-9]+)$", RegexOptions.IgnoreCase);
+        return match.Success ? Number(match.Groups["id"].Value) : null;
+    }
 
-    public static readonly Regex CartTotalRegex = new Regex(
-        "id\\s*=\\s*[\"']cart-total[\"'][^>]*>\\s*(?<total>-?[0-9][0-9,]*(?:\\.[0-9]+)?)\\s*<",
-        RegexOptions.IgnoreCase);
-
-    public static readonly Regex CartStatusRegex = new Regex(
-        "id\\s*=\\s*[\"']cart-status[\"'][^>]*>(?<text>[^<]*)<",
-        RegexOptions.IgnoreCase);
-
-    public static readonly Regex OrderNumberRegex = new Regex(
-        "order number is:\\s*(?<id>[0-9]+)",
-        RegexOptions.IgnoreCase);
-
-    /// <summary>
-    /// 完了画面が示す注文番号。旧 Views/Checkout/Complete.cshtml の文言
-    /// 「Your order number is: @Model」を外部契約として維持する。
-    /// </summary>
     public static int? OrderNumber(string html)
     {
-        var match = OrderNumberRegex.Match(Text(html));
-        return match.Success ? int.Parse(match.Groups["id"].Value, CultureInfo.InvariantCulture) : (int?)null;
+        var match = Regex.Match(Text(html), @"order number is:\s*(?<id>[0-9]+)", RegexOptions.IgnoreCase);
+        return match.Success ? Number(match.Groups["id"].Value) : null;
+    }
+
+    public static int? MarkedOrderNumber(string html)
+    {
+        var nodes = Document(html).QuerySelectorAll("[id='order-number']");
+        return nodes.Length == 1 ? Number(nodes[0].TextContent.Trim()) : null;
+    }
+
+    public static bool HasOrderMarker(string html) => Document(html).QuerySelector("[id='order-number']") != null;
+
+    public static bool HasCheckoutForm(string html) => Document(html).QuerySelectorAll("form input")
+        .Any(e => string.Equals(e.GetAttribute("name"), "PromoCode", StringComparison.OrdinalIgnoreCase));
+
+    public static bool SameCart(string before, string after)
+    {
+        var a = CartLines(before).Select(x => (x.AlbumId, x.Count)).OrderBy(x => x).ToArray();
+        var b = CartLines(after).Select(x => (x.AlbumId, x.Count)).OrderBy(x => x).ToArray();
+        var total = Money(before);
+        return a.Length > 0 && a.SequenceEqual(b) && total.HasValue && total == Money(after);
     }
 
     public sealed class CartLine
     {
         public int RecordId { get; set; }
-
         public int AlbumId { get; set; }
-
         public int Count { get; set; }
     }
 
     public static List<CartLine> CartLines(string html)
     {
         var lines = new List<CartLine>();
-        foreach (Match match in CartRowRegex.Matches(html ?? string.Empty))
+        foreach (var row in Document(html).QuerySelectorAll("tr[id^='row-']"))
         {
-            var inner = match.Groups["inner"].Value;
-            var album = AlbumLinkRegex.Match(inner);
-            var count = ItemCountRegex.Match(inner);
-            if (!album.Success || !count.Success)
-            {
-                continue;
-            }
-
-            lines.Add(new CartLine
-            {
-                RecordId = int.Parse(match.Groups["recordId"].Value, CultureInfo.InvariantCulture),
-                AlbumId = int.Parse(album.Groups["albumId"].Value, CultureInfo.InvariantCulture),
-                Count = int.Parse(count.Groups["count"].Value, CultureInfo.InvariantCulture),
-            });
+            var record = Number(row.Id.Substring(4));
+            var album = row.QuerySelectorAll("a[href]").Select(Album).FirstOrDefault(x => x.HasValue);
+            var count = record.HasValue ? Number(row.QuerySelector($"[id='item-count-{record}']")?.TextContent.Trim()) : null;
+            if (record.HasValue && album.HasValue && count.HasValue)
+                lines.Add(new CartLine { RecordId = record.Value, AlbumId = album.Value, Count = count.Value });
         }
-
         return lines;
     }
 
-    public static List<int> AlbumIds(string html) =>
-        AlbumLinkRegex.Matches(html ?? string.Empty)
-            .Select(m => int.Parse(m.Groups["albumId"].Value, CultureInfo.InvariantCulture))
-            .ToList();
+    public static List<int> AlbumIds(string html) => Document(html).QuerySelectorAll("a[href]")
+        .Select(Album).Where(x => x.HasValue).Select(x => x.Value).ToList();
 
     public static int? CartCount(string html)
     {
-        var match = CartStatusRegex.Match(html ?? string.Empty);
-        if (!match.Success)
-        {
-            return null;
-        }
-
-        var digits = Regex.Match(match.Groups["text"].Value, "\\((?<n>\\d+)\\)");
-        return digits.Success ? int.Parse(digits.Groups["n"].Value, CultureInfo.InvariantCulture) : (int?)null;
+        var text = Document(html).GetElementById("cart-status")?.TextContent ?? string.Empty;
+        var match = Regex.Match(text, @"\((?<n>\d+)\)");
+        return match.Success ? Number(match.Groups["n"].Value) : null;
     }
 
-    public static decimal? Money(string html)
-    {
-        var match = CartTotalRegex.Match(html ?? string.Empty);
-        if (!match.Success)
-        {
-            return null;
-        }
-
-        return ParseMoney(match.Groups["total"].Value);
-    }
-
+    public static decimal? Money(string html) => ParseMoney(Document(html).GetElementById("cart-total")?.TextContent);
     public static decimal? ParseMoney(string text)
     {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
-
-        var normalized = text.Trim().Replace(",", string.Empty);
-        return decimal.TryParse(normalized, NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : (decimal?)null;
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        return decimal.TryParse(text.Trim().Replace(",", string.Empty), NumberStyles.Number,
+            CultureInfo.InvariantCulture, out var value) ? value : null;
     }
-
     public static string Money2(decimal value) => value.ToString("0.00", CultureInfo.InvariantCulture);
-
-    public static string Text(string html) =>
-        WebUtility.HtmlDecode(Regex.Replace(html ?? string.Empty, "<[^>]*>", " "));
-
-    public static bool Contains(string html, string needle) =>
-        (html ?? string.Empty).Contains(needle, StringComparison.OrdinalIgnoreCase);
+    public static string Text(string html) => Document(html).Body?.TextContent ?? string.Empty;
+    public static bool Contains(string html, string needle) => Text(html).Contains(needle, StringComparison.OrdinalIgnoreCase)
+        || Document(html).QuerySelectorAll("input").Any(e => e.GetAttribute("name") == needle);
 }

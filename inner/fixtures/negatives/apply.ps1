@@ -26,7 +26,7 @@ if (-not (Test-Path $reference)) {
 }
 
 if (Test-Path $Out) {
-    Remove-Item -Recurse -Force $Out
+    throw 'Fixture output already exists; choose a new path to preserve prior evidence.'
 }
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
@@ -189,6 +189,42 @@ internal static class LegacyBridge
 }
 '@ `
             '旧実装を起動する記述を残す'
+    }
+
+    'order-marker-wrong' {
+        Edit-File 'MusicStore.Web\Views\Checkout\Complete.cshtml' `
+            '<span id="order-number">@Model</span>' '<span id="order-number">@(Model + 1)</span>' 'Display a wrong order ID'
+    }
+
+    'order-marker-comment' {
+        Edit-File 'MusicStore.Web\Views\Checkout\Complete.cshtml' `
+            '<span id="order-number">@Model</span>' '<!-- <span id="order-number">@Model</span> -->' 'Hide the marker in a comment'
+    }
+
+    'order-marker-duplicate' {
+        Edit-File 'MusicStore.Web\Views\Checkout\Complete.cshtml' `
+            '<span id="order-number">@Model</span>' '<span id="order-number">@Model</span><b id="order-number">@(Model + 1)</b>' 'Conflicting order identifiers'
+    }
+
+    'other-session-alternate-label' {
+        Edit-File 'MusicStore.Web\Controllers\CheckoutController.cs' `
+            'return NotFound();' 'return Content("Order ID: " + id);' 'Leak the order through a different label with HTTP 200'
+    }
+
+    { $_ -in 'invalid-promo-mutates-cart', 'missing-field-mutates-cart', 'invalid-promo-stores-order', 'missing-field-stores-order' } {
+        if ($Name.StartsWith('invalid-promo')) {
+            $anchor = '            ModelState.AddModelError("promoCode", "We''re sorry, but the promo code you entered is not valid.");'
+        }
+        else {
+            $anchor = '        if (!ModelState.IsValid)' + $nl + '        {'
+        }
+        if ($Name.EndsWith('mutates-cart')) {
+            $mutation = '            foreach (var item in cart.GetCartItems()) item.Count += 1;' + $nl + '            db.SaveChanges();'
+        }
+        else {
+            $mutation = '            order.Username = cart.CartId;' + $nl + '            order.OrderDate = DateTime.Now;' + $nl + '            db.Orders.Add(order);' + $nl + '            db.SaveChanges();'
+        }
+        Edit-File 'MusicStore.Web\Controllers\CheckoutController.cs' $anchor ($anchor + $nl + $mutation) $Name
     }
 
     default {

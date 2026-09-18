@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "NEW-001",
+  "task_title": "REPLACE: modernization slice",
+  "start_state": {
+    "kind": "legacy-source",
+    "source_repository": "REPLACE/REPLACE",
+    "source_commit": "REPLACE_WITH_FULL_COMMIT",
+    "license_note": "REPLACE: verified license"
+  },
+  "environment": {"runtime": "dotnet", "sdk": "8.0.425", "target_framework": "net8.0", "network": "gateway-only"},
+  "migration_request": "REPLACE: final public-request.md text",
+  "input_policy": {"allowlist": ["legacy-source"], "denied": ["inner/", "docs/", "previous Runs"]},
+  "context_files": ["REPLACE/RelevantController.cs", "REPLACE/RelevantModel.cs"],
+  "explanation": "REPLACE: existing processing description with no target solution",
+  "evaluation": {
+    "evaluation_version": "1.0.0",
+    "spec_path": "inner/spec/NEW-001/requirements.json",
+    "catalog_path": "inner/spec/NEW-001/catalog.json",
+    "spec_sha256": "REPLACE_WITH_LEDGER_SHA256",
+    "project": "NewTask.Evaluator/NewTask.Evaluator.csproj",
+    "assembly": "NewTask.Evaluator.dll"
+  }
+}

@@ -130,7 +130,7 @@ app.MapGet("/Checkout/Complete/{id:int}", (HttpContext context, int id) =>
 {
     if (!store.OwnsOrder(CartId(context), id))
     {
-        return Html(context, Pages.Error("We're sorry, but that order was not found."), "Error");
+        return Results.NotFound();
     }
 
     return Html(context, Pages.Complete(id), "Checkout Complete");

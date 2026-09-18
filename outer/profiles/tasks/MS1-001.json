@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "task_id": "MS1-001",
+  "task_title": "MVC Music Store の .NET モダナイズ（部分移行）",
+  "start_state": {
+    "kind": "legacy-source",
+    "source_repository": "chack411/MVC-Music-Store",
+    "source_branch": "net48",
+    "source_commit": "2967afb9d69488641df0d154e2ad5827a7820e71",
+    "license_note": "LICENSE ファイルなし。readme.txt に「コードは Ms-PL、チュートリアル文書は CC BY 3.0」と記載。教材本体を sample2 へ取り込まず、参照コミットと取得手順のみを記録する。",
+    "fetch_note": "prepare fetches this exact commit; create copies the verified source snapshot into read-only inputs.",
+    "repository_size_note": "リポジトリに存在する情報量は、渡した入力の総バイト数として inputs-manifest.json に記録する。これはモデルの実入力ではない。"
+  },
+  "environment": {
+    "runtime": "dotnet",
+    "sdk": "8.0.425",
+    "network": "gateway-only",
+    "target_framework": "net8.0",
+    "packages": [
+      "Microsoft.EntityFrameworkCore.Sqlite/8.0.31",
+      "Microsoft.Data.Sqlite/8.0.31"
+    ]
+  },
+  "migration_request": "ASP.NET MVC 5 / .NET Framework 4.8 の MVC Music Store から、HomeController（トップ）、StoreController（ジャンル一覧・ジャンル別アルバム一覧・アルバム詳細・ジャンルメニュー）、ShoppingCartController（かご表示・追加・削除・件数サマリ）、CheckoutController（住所入力・注文確定・注文完了）と、それらが依存するモデル・サンプルデータを、ASP.NET Core MVC / .NET 8 以降へ移行する。StoreManagerController（管理 CRUD・画像アップロード）と AccountController（会員登録・ログイン）は対象外。\n\n【起動と構成】成果物内の Web プロジェクトは Microsoft.NET.Sdk.Web を使い、TargetFramework を net8.0 以降にする。dotnet publish でビルドでき、System.Web を参照せず、net4x を対象にしない。旧アプリのプロジェクト・アセンブリ・実行ファイル（MvcMusicStore の .exe / .dll / .csproj / .sln）を起動も参照もしない。接続先は構成キー ConnectionStrings:MusicStoreEntities（環境変数 ConnectionStrings__MusicStoreEntities）から読み、Data Source に指定されたパスへ SQLite ファイルを作る。起動引数 --urls を受け付け、GET / が 200 を返すまでに応答する。評価ごとに、空の作業ディレクトリと、まだ存在しない SQLite ファイルが渡される。\n\n【初期データ】カタログが空のときだけサンプルデータを投入する。ジャンルは 10 件（Rock, Jazz, Metal, Alternative, Disco, Blues, Latin, Reggae, Pop, Classical）、アルバムは 246 件、価格はすべて 8.99。アルバム ID は投入順に 1 から採番し、ID 1 は 'The Best Of Men At Work'、ID 2 のジャンルは Classical。ジャンル別のアルバム件数は Rock=111, Jazz=12, Metal=34, Alternative=5, Disco=3, Blues=6, Latin=35, Reggae=4, Pop=2, Classical=34。\n\n【HTTP 契約】GET / は 200 で 10 ジャンルの名前と、かごの合計数量を表す 'Cart (N)' を返す。GET /Store は 200 で 10 ジャンルの名前を返す。GET /Store/Browse?genre=<ジャンル名> は 200 でそのジャンルのアルバムだけを返し、存在しないジャンルは 404。GET /Store/Details/{アルバムID} は 200 でタイトル・ジャンル名・アーティスト名・価格を返し、存在しない ID は 404。GET /ShoppingCart/AddToCart/{アルバムID} は 302 で /ShoppingCart へ誘導する。GET /ShoppingCart は 200 でかごを表示する。POST /ShoppingCart/RemoveFromCart はフォーム項目 id（かご明細 ID）を受け取り、JSON で残数量を返す。数量 2 からの削除は数量を 1 に減らし、数量 1 からの削除は明細を消して残数量 0 を返す。GET /Checkout/AddressAndPayment は 200 で住所入力フォームを返す。POST /Checkout/AddressAndPayment はフォーム項目 FirstName, LastName, Address, City, State, PostalCode, Country, Phone, Email, PromoCode を受け取り、PromoCode が FREE（大文字小文字を区別しない）で住所項目がすべて埋まっていれば注文を確定し、302 で /Checkout/Complete/{注文番号} へ誘導する。PromoCode が一致しない場合、または住所項目が欠けている場合は注文を作らず、200 で PromoCode 入力を含む画面を再表示し、かごのアルバム・数量・合計と保存済みの注文を変更しない。GET /Checkout/Complete/{注文番号} は注文したセッションに 200 でその注文番号を表示する。別セッションからの要求には 403 または 404 を返し、注文完了画面を表示しない。ログイン操作なしで注文できる。\n\n【表示契約】次は外部から観測される識別子である。属性値の引用符は二重引用符と単一引用符のどちらでもよい。金額は 0.00 形式（小数点は .、小数 2 桁）で書く。かご明細行は <tr id=\"row-{明細ID}\">、その行のアルバムリンクは /Store/Details/{アルバムID} を指し、数量は <td id=\"item-count-{明細ID}\">N</td> に出す。かご合計は <td id=\"cart-total\">金額</td>、かご件数は共通レイアウト内に id=\"cart-status\" で 'Cart (N)' として出す。削除要求への応答 JSON は残数量を itemCount として含む。注文完了画面の注文番号は、一意な id=\"order-number\" の要素内に整数だけで表示する（例: <span id=\"order-number\">123</span>）。子要素や前後の空白は許容し、周囲の説明文の言語は問わない。この注文表示・別セッション拒否の契約は評価版 1.2.0 で追加し、過去の Run には遡って適用しない。\n\n【状態】かごはセッションごとに独立し、注文確定後は空になる。同じアルバムの重複追加は明細を増やさず数量を増やす。注文は再起動をまたいで保持され、再起動後も同じセッションで続けて注文できる。再起動後の注文番号は再起動前の注文番号と異なる。再起動でカタログを破棄せず、重複もさせない。\n\n【保存契約】注文は、接続先の SQLite ファイル内の Orders 表に、注文番号を表す主キー列 OrderId（整数、重複しない）として保存する。注文番号はこの OrderId の値である。評価器はこの表と列を読み取り専用で参照し、再起動の前後で同じ注文番号の行が残っているかを確認する。この契約は本条件の改訂で追加したものであり、改訂前に収集した成果物には遡って適用しない。\n\n【差とみなさないもの】明細行の表示順、HTML の空白・属性順・改行、要素の追加、アルバムアートの URL、セッション ID・注文番号・かご明細 ID の値そのもの、追加のページ・ルート・API、ログ出力、Content-Type の細かな差異。",
+  "input_policy": {
+    "allowlist": [
+      "legacy-source"
+    ],
+    "denied": [
+      "inner/",
+      "docs/",
+      "outer/conditions/ 以外の outer/",
+      "旧実験の条件名・採点分母・実行許可",
+      "inner/spec/requirements.json",
+      "inner/fixtures/"
+    ],
+    "note": "許可リストは入力の名前に一致するものだけを通す。解決後のパスが inner/ または docs/ の下になる入力を拒否する。"
+  },
+  "evaluation": {
+    "evaluation_version": "1.2.0",
+    "spec_path": "inner/spec/requirements-1.2.0.json",
+    "catalog_path": "inner/spec/catalog.json",
+    "spec_sha256": "fbec6c9e370aa7690460d854c167e486ca7b88eb8f5f0305805ca4fe4a98b2e4",
+    "project": "MusicStore.Evaluator/MusicStore.Evaluator.csproj",
+    "assembly": "MusicStore.Evaluator.dll"
+  },
+  "context_files": [
+    "MvcMusicStore-Completed/MvcMusicStore/Controllers/HomeController.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Controllers/StoreController.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Controllers/ShoppingCartController.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Controllers/CheckoutController.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/Album.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/Artist.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/Cart.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/Genre.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/MusicStoreEntities.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/Order.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/OrderDetail.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/ShoppingCart.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Views/Store/*.cshtml",
+    "MvcMusicStore-Completed/MvcMusicStore/Views/ShoppingCart/*.cshtml",
+    "MvcMusicStore-Completed/MvcMusicStore/Views/Checkout/*.cshtml"
+  ],
+  "explanation": "The storefront reads a seeded catalog of genres, artists and albums. Browse filters albums by genre; Details identifies a single album. The shopping cart belongs to a browser session and groups additions of the same album into a quantity. Removal decrements quantity and deletes an empty line. Checkout validates address and promo code, records an order from the current cart, then clears that cart. The completion page belongs to the purchasing session. The legacy source uses System.Web MVC, Entity Framework and session identifiers; examine the controllers, models and views together to understand their interactions. These notes describe the existing processing, not a proposed target implementation."
+}

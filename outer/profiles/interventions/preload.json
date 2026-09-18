@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "id": "preload",
+  "title": "事前投入",
+  "method": "preload"
+}

@@ -1,5 +1,7 @@
 # sample2
 
+実モデル対応CLIの操作は [検証機ガイド](docs/verification-machine.md)、実測結果・修正内容・確認範囲は [納品報告](docs/verification-delivery-20260918.md) にあります。`MS1-001` の3介入×2回が実モデルで完走し、全322呼び出しの原本照合と、復元後の再採点を確認しました。
+
 既存システムのモダナイズを題材に、**Context Engineering**（特にモデルが実際に受け取る Input コンテキスト）の効果を、品質と Run 全体の input/output token の両面から追う研究のための作業リポジトリ。
 
 `sample1` は旧実験の保存・参照元として残し、旧実験の前提（条件名 `normal` / `anti`、AP-001、旧要件ID、固定分母 57、旧実行許可など）は本リポジトリへ持ち込まない。
@@ -16,6 +18,7 @@
 | [#3](https://github.com/fukuda-yuki/sample2/issues/3) | 題材・移行課題の選定 | [docs/topic-selection.md](docs/topic-selection.md) |
 | [#4](https://github.com/fukuda-yuki/sample2/issues/4) | 内側: 品質評価仕様と評価器 | [docs/quality-spec.md](docs/quality-spec.md), [docs/evaluator.md](docs/evaluator.md), [inner/](inner/) |
 | [#5](https://github.com/fukuda-yuki/sample2/issues/5) | 外側: 実験実行基盤 | [docs/outer-harness.md](docs/outer-harness.md), [outer/](outer/) |
+| [#6](https://github.com/fukuda-yuki/sample2/issues/6) | 実モデルでの検証機受入 | [納品報告・7項目の証拠対応](docs/verification-delivery-20260918.md) |
 
 表の「成果物」は各 Issue で作る予定のもの。**未作成のものは上のように明示する。**
 

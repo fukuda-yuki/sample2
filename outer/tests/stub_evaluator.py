@@ -134,6 +134,8 @@ def main():
     if mode == 'work-marker':
         # Leaves something behind, like a scoring run's SQLite file would.
         (work / 'store.sqlite').write_text('leftover\n', encoding='utf-8')
+    if mode == 'unexpected-exit':
+        return 3
     return 0
 
 

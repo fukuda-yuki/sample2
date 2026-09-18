@@ -2,10 +2,16 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from research.analyze import classify, numbered_lines, provider_response, reread_kind, shell_source_ranges
+from research.analyze import classify, numbered_lines, observed_total, provider_response, reread_kind, shell_source_ranges
 
 
 class AnalysisContracts(unittest.TestCase):
+    def test_empty_or_unreported_partial_sum_is_missing_but_reported_zero_is_zero(self):
+        self.assertIsNone(observed_total([]))
+        self.assertIsNone(observed_total([None,None]))
+        self.assertEqual(observed_total([0,None]),0)
+        self.assertEqual(observed_total([8,None,3]),11)
+
     def test_provider_totals_include_breakdowns_and_unknown_cache_write(self):
         data = 'data: {"model":"m","usage":{"prompt_tokens":100,"completion_tokens":30,"prompt_tokens_details":{"cached_tokens":80},"completion_tokens_details":{"reasoning_tokens":20}},"choices":[]}\n\ndata: [DONE]\n'
         with tempfile.TemporaryDirectory() as d:

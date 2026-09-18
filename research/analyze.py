@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 import re
 import statistics
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 TOKEN_KEYS = ('input_tokens', 'output_tokens', 'cache_read_tokens',
               'cache_write_tokens', 'reasoning_tokens')
 
@@ -56,6 +56,12 @@ def text_hash(value):
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+
+
+def observed_total(values):
+    """No reported values is missing, not a measured zero (post-freeze fix)."""
+    known = [value for value in values if isinstance(value, int)]
+    return sum(known) if known else None
 
 
 def strings(value):
@@ -438,7 +444,8 @@ def analyze_run(root, cohort, slot=None):
               'started_at': manifest.get('started_at'), 'execution': row['execution'],
               'quality': row['quality'], 'verdict': row['verdict'], 'scoring': row['scoring'],
               'usage_complete': complete, **totals, 'total_tokens': total,
-              'observed_input_tokens': cumulative_in, 'observed_output_tokens': cumulative_out,
+              'observed_input_tokens': observed_total(c.get('input_tokens') for c in calls),
+              'observed_output_tokens': observed_total(c.get('output_tokens') for c in calls),
               'calls': len(calls), 'actions': len(actions),
               'mean_input': totals['input_tokens']/len(calls) if totals['input_tokens'] is not None and calls else None,
               'first_input': calls[0].get('input_tokens') if calls else None,

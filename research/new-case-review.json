@@ -1,0 +1,46 @@
+{
+  "cohort": "primary18",
+  "root": "runs/exploration-20260919-ms1",
+  "stage": "post_acquisition_case_review",
+  "classification_rules_changed": false,
+  "cases": [
+    {
+      "run_id": "MS1-001-explore-001",
+      "tool_call_ids": ["call_00_seh7UmVSe2HIn2d2ZOAz1779"],
+      "finding": "A 53,025-character SampleData.cs output at call 5 is delivered in 55 later requests. Call 6 input increases by 16,386 tokens. The association repeats a historical mechanism; it does not isolate this text's token contribution."
+    },
+    {
+      "run_id": "MS1-001-preload-001",
+      "tool_call_ids": ["call_00_xxbP4JFZ0r1zBF74l7Fe1018", "call_00_li7f18C8rEwwvuUAI1M18634"],
+      "finding": "The Assets SampleData.cs read exposes 53,013 characters and remains in 42 later requests. A separate SQL-source filtering command prints 51,244 characters, retained in 38 later requests. Its next request increases by 18,700 input tokens. Large output retention is not restricted to unfiltered read tools."
+    },
+    {
+      "run_id": "MS1-001-preload-001",
+      "tool_call_ids": ["call_00_ET_5W3eKaOREQcUUDpOkh3o4954", "call_00_5OQXa6WPqpSw6AnXf0VP6022", "call_00_ET_Js33kQmrTDH2TtuPwUpG4854"],
+      "finding": "Call 32 reports two CS1501 errors for ViewComponent.Content with two arguments. Call 33 removes the text/html argument in both components. Call 34 builds successfully. The final artifact returns Content(html), rendering escaped HTML as visible text; the browser review reproduced the broken cart and genre navigation. R-010 fails in the preserved evaluator result.",
+      "boundary": "This is one observed repair-to-quality sequence, not a condition-level effect or a human acceptance result."
+    },
+    {
+      "run_id": "MS1-001-preload-001",
+      "finding": "R-029 is also marked fail solely for MvcMusicStore.sln. That solution points to a new Microsoft.NET.Sdk.Web net8.0 project. LegacyScan.IsModernProject only exempts .csproj; .sln is rejected by filename without inspecting project targets.",
+      "boundary": "A concrete evaluator false-failure concern. The official 1.2.0 score remains 93.1; no adjusted quality replaces it. Resolve and calibrate before a future batch."
+    },
+    {
+      "run_id": "MS1-001-explore-001",
+      "tool_call_ids": ["call_00_UomsV375yAXj9AJNjXDk2678"],
+      "finding": "An agent-authored test reports 22/23 passes and then FileNotFoundError for a kill executable. It is a compound validation/cleanup call. The final fixed artifact scores 29/29 in the evaluator; this literal test-failure flag is not the final quality verdict."
+    },
+    {
+      "run_id": "MS1-001-explained-001",
+      "finding": "docker network create fails because all predefined address pools have been fully subnetted. No worker/gateway/model call starts. Runtime stop is confirmed; no isolation receipt or native agent trace exists. Empty artifact score 0 is retained with 1 failed and 28 blocked requirements; provider totals and observed token sums are null.",
+      "boundary": "Environment failure, not evidence of the explained policy's model behavior. The batch stopped with 15 undispatched primary slots and no supplements."
+    }
+  ],
+  "unknown_action_annotations": [
+    {
+      "run_id": "MS1-001-explore-001",
+      "tool_call_id": "call_00_m1RyktApy6rkHZWRwcbk9484",
+      "interpretation": "Inspection of the generated publish web.config, not retrieval of original legacy source. The frozen other_unknown label is retained."
+    }
+  ]
+}

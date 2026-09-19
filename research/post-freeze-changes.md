@@ -73,3 +73,31 @@ unknown. They are not labeled as agent compaction or a proven token saving.
 The evidence index v2 adds these transitions. Display/notebook v2 clarify that
 literal SampleData.cs candidate counts miss variable-based shell reads and
 separate two overlapping plot labels; observed values are unchanged.
+
+## Authorized core repair and correction audit
+
+The user subsequently authorized a core repair, original-first independent
+audit, R-029 correction evaluation, and a full local portable handoff. The
+current controller now reclaims verified owned private networks. This is a
+post-acquisition build; no existing Run's conditions or evaluator were replaced.
+
+Extraction 1.1.0 propagates inventory/audit defects into incomplete usage and
+null authoritative totals. Independent audit 2.0.1 derives its expected Run and
+request population from preserved plans, packages, and original journals. It
+does not import the extraction/normalization summation code. Missing or foreign
+records, corrupt SSE and unexpected audit issues fail the gate. New results are
+under `artifacts/corrections/ms1-20260919-v1`; all earlier receipts remain.
+
+R-029 resolves solution/project references rather than rejecting the solution
+name. Contract 1.2.0 and all 29 requirements are retained. A separately pinned
+evaluator build changes one of 24 artifacts' R-029 outcomes; a dedicated isolated
+correction evaluation changes new preload-001 from 93.1 to 96.55, still failing
+R-010. The original score and evaluator bundle remain untouched. Human selection
+is unchanged. The review launcher resolves copied application paths from the
+current package root without rewriting the original material receipt.
+
+All 1,277 usage calls remain in analysis, including four final-usage schema
+transitions coinciding with large input decreases. This is post hoc descriptive
+evidence, not proof of an internal provider cause. Future primary analysis will
+retain such Runs and predefine auxiliary format/character/retention analyses.
+No new model execution, intervention, human acceptance, or upload occurred.

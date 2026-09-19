@@ -52,6 +52,8 @@ class IndependentAuditTests(unittest.TestCase):
 
     def assert_bad(self, marker):
         result=self.audit();self.assertFalse(result['pass']);self.assertTrue(any(marker in e for e in result['failures']),result['failures'])
+        self.assertFalse(result['runs'][0]['usage_complete'])
+        self.assertIsNone(result['runs'][0]['total_tokens'])
 
     def test_control(self): self.assertTrue(self.audit()['pass'])
 
@@ -75,6 +77,10 @@ class IndependentAuditTests(unittest.TestCase):
     def test_broken_sse_even_with_refreshed_hashes_cannot_pass(self):
         p=self.root/'run/usage/raw/req0.response.sse';p.write_text(p.read_text()+'data: {\n',encoding='utf-8')
         self.refresh_receipts();self.assert_bad('invalid_sse')
+
+    def test_non_utf8_sse_saves_an_incomplete_audit(self):
+        p=self.root/'run/usage/raw/req0.response.sse';p.write_bytes(p.read_bytes()+b'data: \xff\n')
+        self.refresh_receipts();self.assert_bad('invalid_sse_encoding')
 
     def test_normalized_sum_mismatch_cannot_pass(self):
         p=self.root/'run/usage/normalized.json';n=json.loads(p.read_text());n['input_tokens']=301

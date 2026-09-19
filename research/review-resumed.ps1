@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $receiptPath)) { throw 'Post-exploration review
 $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
 $target = $receipt.targets | Where-Object { $_.condition -eq $Condition }
 if ($target.material_state -ne 'prepared') { throw 'No application is available for this condition; inspect failure records' }
-$application = $target.application
+$application = Join-Path $materialRoot "$Condition/application"
 $reviewState = Join-Path $materialRoot "$Condition/$Session-state"
 $containerName = "ms1-review-20260919-r1-$Condition-$Session"
 $imageId = 'sha256:a0bd46f3cebfc2502fe930cb50827379180b7c3f4f297d5a9e2f7201f38d5c3d'
@@ -35,7 +35,12 @@ if ($Action -in @('Stop', 'Restart')) {
     if ($LASTEXITCODE -ne 0) { throw 'Review start failed' }
 } else {
     foreach ($file in ($receipt.files | Where-Object { $_.condition -eq $Condition })) {
-        if ((Get-FileHash -LiteralPath $file.destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) {
+        $relativeFile = [System.IO.Path]::GetRelativePath($target.application, $file.destination)
+        $currentFile = [System.IO.Path]::GetFullPath((Join-Path $application $relativeFile))
+        if (-not $currentFile.StartsWith([System.IO.Path]::GetFullPath($application) + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Review receipt file escapes the relocated application'
+        }
+        if ((Get-FileHash -LiteralPath $currentFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256) {
             throw 'Prepared review copy changed'
         }
     }

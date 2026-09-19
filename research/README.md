@@ -1,7 +1,8 @@
 # MS1 exploratory analysis
 
 This directory contains research code, not an alternative agent/evaluator.
-Start with the [Japanese findings](../docs/ms1-exploration-20260919-report.md),
+Start with the [correction and original-first audit](../docs/ms1-correction-20260919-report.md),
+[historical Japanese findings](../docs/ms1-exploration-20260919-report.md),
 [frozen protocol](../docs/ms1-exploration-20260919-protocol.md), and
 [post-freeze change log](post-freeze-changes.md).
 
@@ -27,14 +28,26 @@ analysis contains 955 new calls; the historical six retain exactly 322 calls.
   overlap; output character exposure is not causal token attribution.
 - `ledger`: all eighteen scheduled slots and any actually dispatched
   supplements, including missing/unstarted states and preservation receipts.
-- `validate`: independently parse provider usage and recheck source hashes.
+- `validate`: require a plan-backed expected-Run inventory and corpus root;
+  independently enumerate requests from original journals, reconcile IDs,
+  reparse SSE usage, and verify normalized/analysis values and original hashes.
 - `notebook`: produce an executed ipynb and readable standalone HTML companion.
 - `prepare_reviews` / `review-resumed.ps1`: prepare and run the final selected copies, with separate human and
   automation state. This is not a model Run, and does not edit fixed artifacts.
 - `review.ps1` is retained for the earlier stopped-segment materials only.
-- `completion`: independently check the finished continuation's schedule,
-  preservation packages, original journal prefix, frozen files, fresh sessions,
-  initial requests, and stopped containers with reclaimed private networks.
+- `completion`: require the revised independent audit, expected inventory,
+  original-file receipt, and acquisition-era code; reject unexpected audit
+  issues and verify archived packages and frozen conditions. It is portable
+  and does not require the original host's Docker containers.
+- `correction_inventory`: bind planned and dispatched attempts to preserved
+  packages without consulting analytical tables.
+- `rejudge`: compare R-029 with the old/new evaluator DLLs and separately score
+  changed artifacts using all original requirements and the original sandbox.
+  Ordinary frozen `rescore` safeguards remain unchanged.
+- `correction_report`: reproduce quality impact, representative selection and
+  all-call provider usage format tables without model execution.
+- `handoff`: build a full local bundle including raw data and evaluator image,
+  then verify it under an explicitly relocated root. Never uploads artifacts.
 - `report`: regenerate this batch's Japanese report and tables from final analysis.
 - `evidence_review`: post-acquisition evidence index for every Run, linking large
   input increases, retained outputs, error-text review candidates and quality.
@@ -67,3 +80,8 @@ null. Post-acquisition v1.0.2 also accepts nullable SSE tool deltas, with a
 recorded regression comparison of all prior rows. Measured values and frozen
 classification rules are unchanged. The continuation's frozen source copies
 remain available even though the current reader includes this correction.
+
+The latest core controller was repaired after acquisition. Do not use current
+controller hashes to judge whether the preserved acquisition code changed.
+Follow the correction report or the bundle's `README-ja.md` for the new audit
+commands; the original completion receipt is historical, not the current gate.

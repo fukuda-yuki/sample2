@@ -9,7 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 
-VERSION = '2.0.0'
+VERSION = '2.0.1'
 TOKEN_KEYS = ('input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens')
 
 
@@ -47,7 +47,12 @@ def journal(path, errors, label):
 def raw_usage(path):
     usage, errors, done, models = None, [], False, set()
     if not path.is_file(): return {}, ['missing_response'], False, []
-    for number, line in enumerate(path.read_text(encoding='utf-8-sig').splitlines(), 1):
+    for number, raw_line in enumerate(path.read_bytes().splitlines(), 1):
+        try:
+            line = raw_line.decode('utf-8-sig')
+        except UnicodeError:
+            errors.append('invalid_sse_encoding:' + str(number))
+            continue
         if not line.startswith('data:'): continue
         raw = line[5:].strip()
         if raw == '[DONE]':
@@ -188,10 +193,13 @@ def validate(source, inventory, root, group):
             file_count += 1
         unexcepted = [e for e in errors if e not in allowed]
         failures.extend(group + '/' + run_id + '/' + e for e in unexcepted)
+        complete = bool(ids) and not unexcepted and bool(normalized.get('usage_complete'))
         rows.append({'group': group, 'cohort': expected['cohort'], 'run_id': run_id, 'run_instance_id': instance,
             'started': len(starts), 'terminal': len(ends), 'normalized': len(events), 'analysis_calls': len(calls),
             'observed_input_tokens': totals['input_tokens'], 'observed_output_tokens': totals['output_tokens'],
-            'original_total_tokens': observed_total, 'expected_exceptions': sorted(set(errors) & allowed), 'issues': unexcepted})
+            'observed_total_tokens': observed_total, 'usage_complete': complete,
+            'total_tokens': observed_total if complete else None,
+            'expected_exceptions': sorted(set(errors) & allowed), 'issues': unexcepted})
     check(len(request_ids) == len(set(request_ids)), 'duplicate_request_across_runs')
     return {'auditor_version': VERSION, 'analysis': str(source), 'analysis_sha256': digest(source), 'group': group,
         'files_checked': file_count, 'runs': rows, 'request_ids': request_ids, 'failures': failures, 'pass': not failures}

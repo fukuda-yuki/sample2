@@ -1,6 +1,7 @@
 """Portable completion gate for corrected analysis, preserving acquisition truth."""
 import argparse
 from collections import Counter
+import hashlib
 import json
 from pathlib import Path
 
@@ -19,6 +20,21 @@ def audit(root, inventory_path, independent_path, originals_path, acquisition_co
     check(independent['inventory_sha256'] == digest(inventory_path), 'inventory_changed_since_independent_audit')
     check(inventory['all_originals_receipt_sha256'] == digest(originals_path), 'originals_receipt_changed')
     check(Counter(r['cohort'] for r in inventory['runs']) == {'pilot':6,'primary18':18,'supplement':1}, 'expected_cohorts')
+    def fingerprint(value):
+        return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode('utf-8')).hexdigest()
+    initial = read(root/'runs/exploration-20260919-ms1/frozen-plan.json')
+    resumed = read(root/'runs/exploration-20260919-ms1/resume-v1/resumed-plan.json')
+    pilot = read(root/'runs/acceptance-64ad09cd85ca/acceptance-plan.json')
+    frozen_checks=0
+    for plan, code in [(initial,Path(acquisition_code).parent/'initial-research-source'),
+                       (resumed,root/'runs/exploration-20260919-ms1/resume-v1/frozen-research-source')]:
+        for name, sha in plan['research_code_hashes'].items():
+            p = safe_path(code,name)
+            check(p.is_file() and digest(p)==sha,'frozen_research_mismatch:'+str(p))
+            frozen_checks+=1
+        check(digest(root/'docs/ms1-exploration-20260919-protocol.md')==plan['protocol_sha256'],'frozen_protocol_mismatch')
+    amendment=resumed['resume_amendment']
+    check(digest(root/amendment['amendment_doc'])==amendment['amendment_doc_sha256'],'retry_amendment_mismatch')
     for result in independent['results']:
         source = safe_path(root, result['analysis'])
         check(digest(source) == result['analysis_sha256'], 'analysis_changed:' + result['group'])
@@ -44,6 +60,12 @@ def audit(root, inventory_path, independent_path, originals_path, acquisition_co
     for entry in inventory['runs']:
         run_root = safe_path(root, entry['root'])
         condition = read(run_root/'condition.json')
+        expected = (pilot if entry['cohort']=='pilot' else initial)['condition_fingerprints']
+        for key in ('task','runtime'):
+            check(fingerprint(read(run_root/'profiles'/(key+'.json')))==expected[key],'frozen_profile:'+entry['run_instance_id']+':'+key)
+        intervention=read(run_root/'profiles/intervention.json')
+        check(fingerprint(intervention)==expected['interventions'][condition['condition_id']], 'frozen_intervention:'+entry['run_instance_id'])
+        check(fingerprint(condition['runtime_lock'])==expected['runtime_lock'],'frozen_runtime_lock:'+entry['run_instance_id'])
         for name, sha in condition['runtime_lock']['controller_files'].items():
             p = Path(acquisition_code)/'outer/harness'/name
             check(p.is_file() and digest(p) == sha, 'acquisition_controller_mismatch:' + name)
@@ -55,6 +77,7 @@ def audit(root, inventory_path, independent_path, originals_path, acquisition_co
     return {'pass':not issues, 'issues':issues, 'independent_audit_sha256':digest(independent_path),
         'inventory_sha256':digest(inventory_path), 'original_files_rechecked':len(originals),
         'calls':len(all_calls), 'actions':len(all_actions), 'attempts':len(all_runs), 'native_sessions':len(sessions),
+        'frozen_research_files_checked':frozen_checks,
         'archives':archives, 'human_review':'not_run', 'confirmation_experiment':'not_run',
         'scope':'original completeness, immutable acquisition provenance and corrected analytical integrity'}
 

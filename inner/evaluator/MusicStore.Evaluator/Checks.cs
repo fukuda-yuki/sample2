@@ -557,10 +557,12 @@ public static class Checks
 
         var itemCount = ExtractItemCount(scenario.RemoveFromTwo.Body);
         var expected = state.Catalog.ById(1).Price;
+        var browser = state.BrowserCartReview?.For("C-015");
         var ok = itemCount == 1
             && scenario.LinesAfterRemoveFromTwo.Count == 1
             && scenario.LinesAfterRemoveFromTwo[0].Count == 1
-            && scenario.TotalAfterRemoveFromTwo == expected;
+            && scenario.TotalAfterRemoveFromTwo == expected
+            && (browser?.Pass ?? true);
 
         return Verdict(
             state,
@@ -568,7 +570,8 @@ public static class Checks
             "C-015",
             input,
             ok,
-            $"応答 {Scenarios.JsonSummary(scenario.RemoveFromTwo.Body)}（ItemCount={Describe(itemCount)}）、{Scenarios.DescribeCart(scenario.LinesAfterRemoveFromTwo)}、合計 {Scenarios.DescribeMoney(scenario.TotalAfterRemoveFromTwo)} / 期待 {Html.Money2(expected)}",
+            $"応答 {Scenarios.JsonSummary(scenario.RemoveFromTwo.Body)}（ItemCount={Describe(itemCount)}）、{Scenarios.DescribeCart(scenario.LinesAfterRemoveFromTwo)}、合計 {Scenarios.DescribeMoney(scenario.TotalAfterRemoveFromTwo)} / 期待 {Html.Money2(expected)}。"
+                + (browser?.Detail ?? "HTTP再読込のみ。ブラウザーの削除操作と表示更新は未観測。"),
             state.Transcript("cart"));
     }
 
@@ -588,9 +591,11 @@ public static class Checks
         }
 
         var itemCount = ExtractItemCount(scenario.RemoveFromOne.Body);
+        var browser = state.BrowserCartReview?.For("C-016");
         var ok = itemCount == 0
             && scenario.LinesAfterRemoveFromOne.Count == 0
-            && scenario.TotalAfterRemoveFromOne == 0m;
+            && scenario.TotalAfterRemoveFromOne == 0m
+            && (browser?.Pass ?? true);
 
         return Verdict(
             state,
@@ -598,7 +603,8 @@ public static class Checks
             "C-016",
             input,
             ok,
-            $"応答 {Scenarios.JsonSummary(scenario.RemoveFromOne.Body)}（ItemCount={Describe(itemCount)}）、{Scenarios.DescribeCart(scenario.LinesAfterRemoveFromOne)}、合計 {Scenarios.DescribeMoney(scenario.TotalAfterRemoveFromOne)} / 期待 0.00",
+            $"応答 {Scenarios.JsonSummary(scenario.RemoveFromOne.Body)}（ItemCount={Describe(itemCount)}）、{Scenarios.DescribeCart(scenario.LinesAfterRemoveFromOne)}、合計 {Scenarios.DescribeMoney(scenario.TotalAfterRemoveFromOne)} / 期待 0.00。"
+                + (browser?.Detail ?? "HTTP再読込のみ。ブラウザーの削除操作と表示更新は未観測。"),
             state.Transcript("cart"));
     }
 

@@ -48,6 +48,8 @@ public sealed class RunState : IDisposable
 
     public CartResult Cart { get; set; }
 
+    public BrowserCartReview BrowserCartReview { get; set; }
+
     public OrderResult Order { get; set; }
 
     public RestartResult Restart { get; set; }

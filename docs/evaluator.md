@@ -323,3 +323,27 @@ is not classified as the old application solely by that filename. Actual
 Framework projects and explicit legacy launch commands remain negative cases.
 Static legacy detection remains a documented heuristic, not proof against
 arbitrary obfuscated wrappers.
+# Independent browser evidence for cart removal (PMO review)
+
+The optional pair `--browser-cart-evidence <receipt.json> --review-run-instance-id <id>`
+adds independently collected, post-click browser DOM observations to C-015/C-016.
+Both the existing HTTP check and the browser observation must pass. A later GET
+cannot replace the captured post-click screen. Public requirements and JSON field
+requirements are unchanged; `cartTotal` is not made a mandatory response field.
+
+The schema and validation are in `BrowserCartReview.cs`. A receipt declares an agent
+actor, artifact/spec hashes, Run instance ID, and exactly two removals. Each removal
+references hashed before/after browser JSON and screenshots under the receipt's
+directory. Captures must have the same tab and cart URL, increasing timestamps, and
+the correct populated starting state. Invalid provenance is an evaluator error,
+not a product failure. Hashes verify byte identity; the independent collector is
+trusted for action attribution and screenshot authenticity.
+
+Without a receipt, compatibility scoring remains HTTP-only and emits
+`browserCartCoverage: not_run_http_only`; it does **not** establish UI acceptance.
+With valid evidence it emits `agent_observed_C-015_C-016`, the receipt hash and Run
+instance ID. This is a bounded evidence adapter, not an automatic browser runner.
+`research/pmo_scenario_correction.py` saves isolated controls and corrections from
+the three PMO review targets without changing original evaluations or research Runs.
+See [the review report](ms1-pmo-scenario-review-20260919.md) for actual browser
+observations, remaining limitations, and the gate decision.

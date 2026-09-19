@@ -124,6 +124,12 @@ public sealed class RequirementOutcome
 
 public sealed class EvaluationOutput
 {
+    public string BrowserCartCoverage { get; set; } = "not_run_http_only";
+
+    public string BrowserCartEvidenceSha256 { get; set; }
+
+    public string ReviewRunInstanceId { get; set; }
+
     public string EvaluationId { get; set; }
 
     public string TaskId { get; set; }

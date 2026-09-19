@@ -86,6 +86,22 @@ public static class Program
         var artifactHash = Sha256Directory(options.ArtifactPath);
         var evaluationId = $"{ledger.TaskId}-{artifactHash.Substring(0, 12)}-{options.EvaluationVersion}-{options.Sequence:000}";
 
+        BrowserCartReview browserReview = null;
+        if (options.BrowserCartEvidence != null)
+        {
+            try
+            {
+                browserReview = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash,
+                    specHash, options.ReviewRunInstanceId, catalog);
+                File.Copy(options.BrowserCartEvidence, Path.Combine(evidenceDir, "browser-cart-receipt.json"));
+            }
+            catch (Exception ex)
+            {
+                WriteFaultOutput(options, ledger, startedAt, new List<string> { "Browser evidence: " + ex.Message });
+                return 2;
+            }
+        }
+
         using var host = new AppHost(options.ArtifactPath, options.WorkDir, evidenceDir);
         using var state = new RunState
         {
@@ -94,6 +110,7 @@ public static class Program
             Catalog = catalog,
             ArtifactPath = options.ArtifactPath,
             EvaluationVersion = options.EvaluationVersion,
+            BrowserCartReview = browserReview,
         };
 
         Console.WriteLine($"[evaluator] evaluation id: {evaluationId}");
@@ -140,6 +157,9 @@ public static class Program
         }
 
         var output = BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
+        output.BrowserCartCoverage = browserReview == null ? "not_run_http_only" : "agent_observed_C-015_C-016";
+        output.BrowserCartEvidenceSha256 = browserReview?.ReceiptSha256;
+        output.ReviewRunInstanceId = browserReview?.RunInstanceId;
         WriteResults(options, ledger, results, output);
 
         var manifest = new EvaluatorManifest
@@ -471,7 +491,7 @@ public static class Program
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("usage: MusicStore.Evaluator --artifact <dir> --out <dir> [--spec <requirements.json>] [--catalog <catalog.json>] [--evaluation-version <v>] [--sequence <n>] [--work <dir>]");
+        Console.Error.WriteLine("usage: MusicStore.Evaluator --artifact <dir> --out <dir> [--spec <requirements.json>] [--catalog <catalog.json>] [--evaluation-version <v>] [--sequence <n>] [--work <dir>] [--browser-cart-evidence <receipt.json> --review-run-instance-id <id>]");
     }
 }
 
@@ -486,6 +506,10 @@ public sealed class CliOptions
     public string SpecPath { get; private set; }
 
     public string CatalogPath { get; private set; }
+
+    public string BrowserCartEvidence { get; private set; }
+
+    public string ReviewRunInstanceId { get; private set; }
 
     public string EvaluationVersion { get; private set; } = Program.DefaultEvaluationVersion;
 
@@ -519,6 +543,12 @@ public sealed class CliOptions
                 case "--catalog":
                     options.CatalogPath = Next();
                     break;
+                case "--browser-cart-evidence":
+                    options.BrowserCartEvidence = Next();
+                    break;
+                case "--review-run-instance-id":
+                    options.ReviewRunInstanceId = Next();
+                    break;
                 case "--evaluation-version":
                     options.EvaluationVersion = Next();
                     break;
@@ -539,6 +569,8 @@ public sealed class CliOptions
         {
             return null;
         }
+
+        if ((options.BrowserCartEvidence == null) != (options.ReviewRunInstanceId == null)) return null;
 
         options.ArtifactPath = Path.GetFullPath(options.ArtifactPath);
         options.OutDir = Path.GetFullPath(options.OutDir);

@@ -82,7 +82,7 @@ current controller now reclaims verified owned private networks. This is a
 post-acquisition build; no existing Run's conditions or evaluator were replaced.
 
 Extraction 1.1.0 propagates inventory/audit defects into incomplete usage and
-null authoritative totals. Independent audit 2.0.1 derives its expected Run and
+null authoritative totals. Independent audit 2.0.2 derives its expected Run and
 request population from preserved plans, packages, and original journals. It
 does not import the extraction/normalization summation code. Missing or foreign
 records, corrupt SSE and unexpected audit issues fail the gate. New results are
@@ -101,3 +101,10 @@ transitions coinciding with large input decreases. This is post hoc descriptive
 evidence, not proof of an internal provider cause. Future primary analysis will
 retain such Runs and predefine auxiliary format/character/retention analyses.
 No new model execution, intervention, human acceptance, or upload occurred.
+
+Relocation testing rejected the first ZIP: normal Windows path enumeration
+silently omitted files at MAX_PATH even though extended-path copies contained
+them. The handoff and read-only auditors now use extended paths for file I/O.
+Two regression checks cover long-path inventory, ZIP membership and auditing.
+The failed ZIP's receipt and original-first audit remain recorded; it is not an
+accepted delivery. No acquisition files or measurement conditions were changed.

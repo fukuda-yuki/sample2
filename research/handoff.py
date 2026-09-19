@@ -20,6 +20,14 @@ def copy_tree(source, destination, *, code=False):
         ignore=shutil.ignore_patterns('bin','obj','__pycache__') if code else None)
 
 
+def files_in(root):
+    # Normal Path.is_file() can silently return False at Windows MAX_PATH.
+    # Use extended paths for enumeration, hashing and ZIP reads, not just copy.
+    base=preserve.native_path(root)
+    for path in base.rglob('*'):
+        if path.is_file():yield path.relative_to(base).as_posix(),path
+
+
 def create(repo, destination, probes, calibration):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if destination.exists(): raise ValueError('Handoff destination already exists; retain it')
@@ -85,6 +93,17 @@ python -B -m research.handoff verify --root . --out ../ms1-verification
 全ファイルのハッシュ、独立した呼び出し一覧、1,277呼び出し、原本・保存パッケージを検証します。
 この検算はPython標準ライブラリのみを使用し、DockerもAPIキーも不要です。
 
+解析表も原本から再生成する場合は、新しい出力先で次を実行します。
+旧報告に残るコマンドは当時のCLI向けなので、この手順を使ってください。
+
+```powershell
+python -B -m research.analyze --runs-dir runs/acceptance-64ad09cd85ca --cohort pilot --out ../ms1-reanalysis-pilot
+python -B -m research.analyze --runs-dir runs/exploration-20260919-ms1 --cohort primary18 --plan runs/exploration-20260919-ms1/resume-v1/resumed-plan.json --out ../ms1-reanalysis-new
+python -B -m research.validate --root . --inventory artifacts/corrections/ms1-20260919-v1/baseline/inventory.json --analysis ../ms1-reanalysis-pilot/analysis.json --group pilot --analysis ../ms1-reanalysis-new/analysis.json --group new --out ../ms1-reanalysis-audit.json
+```
+
+ここで再生成される品質欄は採取当時の評価です。訂正品質はrejudgement-v1とsummary-v1で別に管理しています。
+
 訂正評価の再現にはDockerのLinuxコンテナーが必要です。
 images/index.jsonにあるイメージを `docker load -i <path>` で読み込んでから実行します。
 同じSDK・依存キャッシュを使用し、評価コンテナーのネットワークはnoneです。
@@ -103,7 +122,7 @@ verification-evidence/container-probes は合成providerを使った本体検証
 人の確認手順は docs/ms1-exploration-20260919-human-review.md を参照してください。
 ''',encoding='utf-8')
     print('Hashing handoff files',flush=True)
-    files={p.relative_to(destination).as_posix():digest(p) for p in destination.rglob('*') if p.is_file()}
+    files={name:digest(p) for name,p in files_in(destination)}
     manifest={'created_at':datetime.now(timezone.utc).isoformat(),'source_commit':runtime.command(['git','rev-parse','HEAD'],cwd=repo).stdout.strip(),
         'files':files,'file_count':len(files),'external_upload':False,'evaluator_images':saved}
     write_new(destination/'handoff-manifest.json',manifest)
@@ -111,8 +130,7 @@ verification-evidence/container-probes は合成providerを使った本体検証
     if archive.exists():raise ValueError('Archive already exists')
     print('Writing ZIP64 archive',flush=True)
     with zipfile.ZipFile(archive,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=1,allowZip64=True) as z:
-        for p in destination.rglob('*'):
-            if p.is_file():z.write(p,p.relative_to(destination).as_posix())
+        for name,p in files_in(destination):z.write(p,name)
     receipt={'archive':str(archive),'archive_sha256':digest(archive),'bytes':archive.stat().st_size,
         'manifest_sha256':digest(destination/'handoff-manifest.json'),'files':len(files)}
     write_new(destination.with_suffix('.receipt.json'),receipt)
@@ -126,9 +144,9 @@ def verify(root, out):
     manifest=read(root/'handoff-manifest.json')
     failures=[]
     for name,expected in manifest['files'].items():
-        p=safe_path(root,name)
+        p=preserve.native_path(safe_path(root,name))
         if not p.is_file() or digest(p)!=expected:failures.append(name)
-    actual={p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file()}
+    actual={name for name,p in files_in(root)}
     extras=actual-set(manifest['files'])-{'handoff-manifest.json'}
     write_new(out/'files.json',{'pass':not failures and not extras,'failures':failures,'extra_files':sorted(extras),'files':len(manifest['files'])})
     if failures or extras:raise RuntimeError('Handoff file verification failed; use python -B and an unchanged extraction')

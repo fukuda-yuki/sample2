@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import shutil
 
-from outer.harness import evaluate, profiles, runtime, util
+from outer.harness import evaluate, profiles, runtime, util, preserve
 from research.correction_inventory import write_new
 from research.validate import digest, read, safe_path
 
@@ -28,14 +28,14 @@ def scan(tool, artifact, assembly, image=None):
 
 def rejudge(root, entry, bundle, lock, out):
     run_root = safe_path(root, entry['root'])
-    condition = profiles.validate_run(run_root)
+    condition = profiles.validate_run(preserve.native_path(run_root))
     snapshot = read(run_root/'snapshot.json')
-    original = evaluate.last_scoring(run_root)
+    original = evaluate.last_scoring(preserve.native_path(run_root))
     frozen = run_root/'frozen'
-    artifact_hash = util.artifact_hash(frozen)
+    artifact_hash = util.artifact_hash(preserve.native_path(frozen))
     if artifact_hash != snapshot['artifact_sha256'] or artifact_hash != original['artifact_sha256_outer']:
         raise ValueError('Frozen artifact hash mismatch')
-    if util.tree_hashes(bundle) != lock['evaluator_files']:
+    if util.tree_hashes(preserve.native_path(bundle)) != lock['evaluator_files']:
         raise ValueError('Correction evaluator bundle differs from pinned build')
     out.mkdir(parents=True)
     assets = out/'assets'; assets.mkdir()
@@ -72,7 +72,7 @@ def rejudge(root, entry, bundle, lock, out):
         artifact_hash, assets/'requirements.json', spec_hash)
     reported = read(result_dir/'evaluator-manifest.json')['evaluatorSha256']
     if reported != lock['evaluator_sha256']: mismatches.append({'check':'corrected_evaluator_sha256'})
-    if util.artifact_hash(frozen) != artifact_hash: mismatches.append({'check':'artifact_changed_during_correction'})
+    if util.artifact_hash(preserve.native_path(frozen)) != artifact_hash: mismatches.append({'check':'artifact_changed_during_correction'})
     original_output = read(run_root/original['directory']/'evaluation.json')
     def failed(value): return [r['id'] for r in value['requirements'] if r['judgement']=='fail']
     receipt = {**intent, 'pass':not mismatches and process.returncode==0, 'mismatches':mismatches,
@@ -99,12 +99,12 @@ def main():
     if a.out.exists(): raise SystemExit('Correction output already exists')
     a.out.mkdir(parents=True)
     inv, lock = read(a.inventory), read(a.runtime_lock)
-    if util.tree_hashes(a.bundle) != lock['evaluator_files']: raise ValueError('Unpinned corrected bundle')
+    if util.tree_hashes(preserve.native_path(a.bundle)) != lock['evaluator_files']: raise ValueError('Unpinned corrected bundle')
     rows, corrections = [], []
     for entry in inv['runs']:
         run_root=safe_path(a.root,entry['root'])
         if read(run_root/'manifest.json').get('model_called') is not True: continue
-        original = evaluate.last_scoring(run_root)
+        original = evaluate.last_scoring(preserve.native_path(run_root))
         scan_image = read(run_root/'condition.json')['runtime_lock']['images']['evaluator'] if a.scan_in_docker else None
         old = scan(a.scan_tool,run_root/'frozen',run_root/'evaluation-assets/evaluator/MusicStore.Evaluator.dll',scan_image)
         new = scan(a.scan_tool,run_root/'frozen',a.bundle/'MusicStore.Evaluator.dll',scan_image)

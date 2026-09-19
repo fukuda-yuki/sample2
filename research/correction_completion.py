@@ -7,7 +7,7 @@ from pathlib import Path
 
 from outer.harness import preserve
 from research.correction_inventory import write_new
-from research.validate import digest, read, safe_path, issue_code
+from research.validate import digest, read, safe_path, issue_code, file_exists
 
 
 def audit(root, inventory_path, independent_path, originals_path, acquisition_code):
@@ -30,7 +30,7 @@ def audit(root, inventory_path, independent_path, originals_path, acquisition_co
                        (resumed,root/'runs/exploration-20260919-ms1/resume-v1/frozen-research-source')]:
         for name, sha in plan['research_code_hashes'].items():
             p = safe_path(code,name)
-            check(p.is_file() and digest(p)==sha,'frozen_research_mismatch:'+str(p))
+            check(file_exists(p) and digest(p)==sha,'frozen_research_mismatch:'+str(p))
             frozen_checks+=1
         check(digest(root/'docs/ms1-exploration-20260919-protocol.md')==plan['protocol_sha256'],'frozen_protocol_mismatch')
     amendment=resumed['resume_amendment']
@@ -56,7 +56,7 @@ def audit(root, inventory_path, independent_path, originals_path, acquisition_co
         sessions.update(current)
     for name, sha in originals.items():
         p = safe_path(root, name)
-        check(p.is_file() and digest(p) == sha, 'original_changed:' + name)
+        check(file_exists(p) and digest(p) == sha, 'original_changed:' + name)
     for entry in inventory['runs']:
         run_root = safe_path(root, entry['root'])
         condition = read(run_root/'condition.json')
@@ -68,7 +68,7 @@ def audit(root, inventory_path, independent_path, originals_path, acquisition_co
         check(fingerprint(condition['runtime_lock'])==expected['runtime_lock'],'frozen_runtime_lock:'+entry['run_instance_id'])
         for name, sha in condition['runtime_lock']['controller_files'].items():
             p = Path(acquisition_code)/'outer/harness'/name
-            check(p.is_file() and digest(p) == sha, 'acquisition_controller_mismatch:' + name)
+            check(file_exists(p) and digest(p) == sha, 'acquisition_controller_mismatch:' + name)
         try:
             package = preserve.verify(safe_path(root, entry['archive']), entry['package']['package_id'], entry['package']['sha256'])
             archives.append({'run_instance_id':entry['run_instance_id'], 'package':entry['package'], 'files':len(package['files']), 'verified':True})

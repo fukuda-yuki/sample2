@@ -7,18 +7,32 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import os
 from pathlib import Path
 
-VERSION = '2.0.1'
+VERSION = '2.0.2'
 TOKEN_KEYS = ('input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens')
 
 
+def io_path(path):
+    """Keep long Windows corpus paths visible without changing global policy."""
+    path = Path(path).absolute()
+    name = str(path)
+    if os.name == 'nt' and not name.startswith('\\\\?\\'):
+        name = ('\\\\?\\UNC\\' + name[2:]) if name.startswith('\\\\') else '\\\\?\\' + name
+    return Path(name)
+
+
+def file_exists(path):
+    return io_path(path).is_file()
+
+
 def read(path):
-    return json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    return json.loads(io_path(path).read_text(encoding='utf-8-sig'))
 
 
 def digest(path):
-    with Path(path).open('rb') as f:
+    with io_path(path).open('rb') as f:
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
@@ -30,6 +44,7 @@ def safe_path(root, name):
 
 
 def journal(path, errors, label):
+    path = io_path(path)
     if not path.is_file():
         errors.append('missing:' + label)
         return []
@@ -45,6 +60,7 @@ def journal(path, errors, label):
 
 
 def raw_usage(path):
+    path = io_path(path)
     usage, errors, done, models = None, [], False, set()
     if not path.is_file(): return {}, ['missing_response'], False, []
     for number, raw_line in enumerate(path.read_bytes().splitlines(), 1):
@@ -103,7 +119,7 @@ def validate(source, inventory, root, group):
         if not ok: failures.append(issue)
     for name, expected in inventory.get('anchors', {}).items():
         p = safe_path(root, name)
-        check(p.is_file() and digest(p) == expected, 'anchor_changed:' + name)
+        check(file_exists(p) and digest(p) == expected, 'anchor_changed:' + name)
     info = inventory['groups'][group]
     receipt_path = safe_path(root, info['source_hashes'])
     check(digest(receipt_path) == info['source_hashes_sha256'], 'source_receipts_changed')
@@ -151,8 +167,8 @@ def validate(source, inventory, root, group):
                 errors.append('unsafe_original_path:' + rid); continue
             referenced.update(names)
             request_path, response_path = [run_root/'usage/raw'/n for n in names]
-            require(request_path.is_file() and digest(request_path) == event.get('request_sha256'), 'request_hash:' + rid)
-            require(response_path.is_file() and digest(response_path) == end.get('response_sha256'), 'response_hash:' + rid)
+            require(file_exists(request_path) and digest(request_path) == event.get('request_sha256'), 'request_hash:' + rid)
+            require(file_exists(response_path) and digest(response_path) == end.get('response_sha256'), 'response_hash:' + rid)
             tokens, packet_errors, done, models = raw_usage(response_path)
             errors.extend(rid + '/' + error for error in packet_errors)
             require(end.get('status') == 'completed' and not end.get('policy_error') and done, 'incomplete_response:' + rid)
@@ -162,7 +178,7 @@ def validate(source, inventory, root, group):
             if rid in by_id:
                 require(by_id[rid].get('response_ref') == 'usage/raw/' + names[1] and by_id[rid].get('request_ref') == 'usage/raw/' + names[0], 'analysis_original_ref:' + rid)
             values.append(tokens)
-        actual_files = {p.name for p in (run_root/'usage/raw').glob('*') if p.name.endswith(('.request.json', '.response.sse'))}
+        actual_files = {p.name for p in io_path(run_root/'usage/raw').glob('*') if p.name.endswith(('.request.json', '.response.sse'))}
         require(actual_files == referenced, 'orphan_or_missing_original')
         require(normalized.get('observed_request_count') == len(ids), 'normalized_call_count')
         totals = {k: observed(v.get(k) for v in values) for k in TOKEN_KEYS}
@@ -189,7 +205,7 @@ def validate(source, inventory, root, group):
                 require(r.get('total_tokens') is None and r.get('input_tokens') is None and r.get('output_tokens') is None, 'missing_total_not_null')
         for name, expected_hash in receipts.get(run_id, {}).items():
             path = safe_path(run_root, name)
-            require(path.is_file() and digest(path) == expected_hash, 'changed:' + name)
+            require(file_exists(path) and digest(path) == expected_hash, 'changed:' + name)
             file_count += 1
         unexcepted = [e for e in errors if e not in allowed]
         failures.extend(group + '/' + run_id + '/' + e for e in unexcepted)

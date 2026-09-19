@@ -105,6 +105,7 @@ No new model execution, intervention, human acceptance, or upload occurred.
 Relocation testing rejected the first ZIP: normal Windows path enumeration
 silently omitted files at MAX_PATH even though extended-path copies contained
 them. The handoff and read-only auditors now use extended paths for file I/O.
-Two regression checks cover long-path inventory, ZIP membership and auditing.
+Three regression checks cover long-path inventory, ZIP membership, auditing and
+normalization of parent-relative output paths before adding the Windows prefix.
 The failed ZIP's receipt and original-first audit remain recorded; it is not an
 accepted delivery. No acquisition files or measurement conditions were changed.

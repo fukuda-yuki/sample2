@@ -16,7 +16,7 @@ TOKEN_KEYS = ('input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write
 
 def io_path(path):
     """Keep long Windows corpus paths visible without changing global policy."""
-    path = Path(path).absolute()
+    path = Path(path).resolve()
     name = str(path)
     if os.name == 'nt' and not name.startswith('\\\\?\\'):
         name = ('\\\\?\\UNC\\' + name[2:]) if name.startswith('\\\\') else '\\\\?\\' + name

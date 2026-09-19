@@ -32,3 +32,11 @@ class HandoffPathTests(unittest.TestCase):
         self.assertTrue(file_exists(self.file))
         self.assertEqual(read(self.file),{'preserved':True})
         self.assertEqual(digest(self.file),digest(native_path(self.file)))
+
+    def test_parent_relative_output_is_normalized_before_extended_prefix(self):
+        sibling=self.root/'correction-output';sibling.mkdir()
+        (sibling/'requirements.json').write_bytes(b'{"requirements":29}')
+        nested=self.root/'staging';nested.mkdir()
+        path=nested/'..'/'correction-output'/'requirements.json'
+        self.assertEqual(read(path),{'requirements':29})
+        self.assertEqual(digest(path),digest(sibling/'requirements.json'))

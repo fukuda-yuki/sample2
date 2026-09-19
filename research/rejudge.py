@@ -96,6 +96,7 @@ def main():
     p.add_argument('--scan-only',action='store_true')
     p.add_argument('--scan-in-docker',action='store_true',help='Use the saved evaluator image; no host .NET runtime needed')
     a=p.parse_args()
+    a.root=a.root.resolve();a.out=a.out.resolve()
     if a.out.exists(): raise SystemExit('Correction output already exists')
     a.out.mkdir(parents=True)
     inv, lock = read(a.inventory), read(a.runtime_lock)

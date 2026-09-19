@@ -28,7 +28,7 @@ def files_in(root):
         if path.is_file():yield path.relative_to(base).as_posix(),path
 
 
-def create(repo, destination, probes, calibration):
+def create(repo, destination, probes, calibration, stage_only=False):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if destination.exists(): raise ValueError('Handoff destination already exists; retain it')
     for gate in ('independent-audit-v3.json','completion-audit-v5.json'):
@@ -123,7 +123,8 @@ Pythonによる監査と、実評価器による訂正評価の再現は別の�
 verification-evidence/container-probes は合成providerを使った本体検証で、研究Runに含めません。
 人の確認手順は docs/ms1-exploration-20260919-human-review.md を参照してください。
 ''',encoding='utf-8')
-    seal(repo,destination)
+    if stage_only:print('Copy complete; not sealed: '+str(destination),flush=True)
+    else:seal(repo,destination)
 
 
 def seal(repo,destination):
@@ -184,10 +185,11 @@ def main():
     sub=p.add_subparsers(dest='command',required=True)
     c=sub.add_parser('create');c.add_argument('--repo',type=Path,default=Path.cwd());c.add_argument('--out',type=Path,required=True)
     c.add_argument('--probe',type=Path,required=True,action='append');c.add_argument('--calibration',type=Path,required=True)
+    c.add_argument('--stage-only',action='store_true')
     s=sub.add_parser('seal');s.add_argument('--repo',type=Path,default=Path.cwd());s.add_argument('--root',type=Path,required=True)
     v=sub.add_parser('verify');v.add_argument('--root',type=Path,required=True);v.add_argument('--out',type=Path,required=True)
     a=p.parse_args()
-    if a.command=='create':create(a.repo,a.out,a.probe,a.calibration)
+    if a.command=='create':create(a.repo,a.out,a.probe,a.calibration,a.stage_only)
     elif a.command=='seal':seal(a.repo,a.root)
     else:verify(a.root,a.out)
 

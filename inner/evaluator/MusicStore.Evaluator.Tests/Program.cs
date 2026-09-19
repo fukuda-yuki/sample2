@@ -69,6 +69,7 @@ try
 finally { Directory.Delete(root, true); }
 
 // Only synthetic markers: no discovery or reading of the user's credential.
+BrowserCartReviewTests.Run(Check);
 Environment.SetEnvironmentVariable("OPENCODE_GO_API_KEY", "synthetic-canary");
 Environment.SetEnvironmentVariable("UNRELATED_SECRET", "synthetic-canary");
 var result = AppHost.RunProcess("dotnet", $"\"{typeof(Program).Assembly.Location}\" --environment-child", Environment.CurrentDirectory, 10);

@@ -31,6 +31,8 @@ def files_in(root):
 def create(repo, destination, probes, calibration):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if destination.exists(): raise ValueError('Handoff destination already exists; retain it')
+    for gate in ('independent-audit-v3.json','completion-audit-v5.json'):
+        if not read(repo/BASE/gate)['pass']:raise ValueError('Finish the latest correction audit before copying')
     destination.mkdir(parents=True)
     inv=read(repo/BASE/'baseline/inventory.json')
     for name in ('outer','research','inner','docs'):
@@ -121,6 +123,17 @@ Pythonによる監査と、実評価器による訂正評価の再現は別の�
 verification-evidence/container-probes は合成providerを使った本体検証で、研究Runに含めません。
 人の確認手順は docs/ms1-exploration-20260919-human-review.md を参照してください。
 ''',encoding='utf-8')
+    seal(repo,destination)
+
+
+def seal(repo,destination):
+    """Seal a completed copy, also allowing an interrupted pre-seal build to resume."""
+    repo,destination=Path(repo).resolve(),Path(destination).resolve()
+    if destination==repo or (destination/'handoff-manifest.json').exists() or destination.with_suffix('.zip').exists():
+        raise ValueError('Only an unsealed separate handoff copy may be sealed')
+    for gate in ('independent-audit-v3.json','completion-audit-v5.json'):
+        if not read(destination/BASE/gate)['pass']:raise ValueError('Copied correction audit is not complete')
+    saved=read(destination/'images/index.json')
     print('Hashing handoff files',flush=True)
     files={name:digest(p) for name,p in files_in(destination)}
     manifest={'created_at':datetime.now(timezone.utc).isoformat(),'source_commit':runtime.command(['git','rev-parse','HEAD'],cwd=repo).stdout.strip(),
@@ -171,9 +184,11 @@ def main():
     sub=p.add_subparsers(dest='command',required=True)
     c=sub.add_parser('create');c.add_argument('--repo',type=Path,default=Path.cwd());c.add_argument('--out',type=Path,required=True)
     c.add_argument('--probe',type=Path,required=True,action='append');c.add_argument('--calibration',type=Path,required=True)
+    s=sub.add_parser('seal');s.add_argument('--repo',type=Path,default=Path.cwd());s.add_argument('--root',type=Path,required=True)
     v=sub.add_parser('verify');v.add_argument('--root',type=Path,required=True);v.add_argument('--out',type=Path,required=True)
     a=p.parse_args()
     if a.command=='create':create(a.repo,a.out,a.probe,a.calibration)
+    elif a.command=='seal':seal(a.repo,a.root)
     else:verify(a.root,a.out)
 
 

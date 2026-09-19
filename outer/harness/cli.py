@@ -204,6 +204,9 @@ def main(argv=None):
         from .machine import acceptance
         result = acceptance(repo, runs_dir, args.task, args.runtime)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    if args.command in ('start', 'stop', 'run') and result.get('network_cleanup') is not None:
+        if not result['network_cleanup'].get('confirmed'):
+            return 1
     if args.command == 'acceptance' and not result.get('complete'):
         return 1
     if args.command == 'start' and result.get('end_reason') != 'completed':

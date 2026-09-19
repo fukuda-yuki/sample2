@@ -262,6 +262,8 @@ public sealed class StaticResult : ScenarioResult
     /// コメント・説明文での旧名称の言及。診断情報であり、依存の根拠にしない。
     /// </summary>
     public List<string> LegacyMentions { get; set; } = new List<string>();
+
+    public List<string> LegacyUnresolved { get; set; } = new List<string>();
 }
 
 public static class Scenarios
@@ -549,6 +551,7 @@ public static class Scenarios
         var scan = LegacyScan.Scan(state.ArtifactPath);
         result.LegacyReferences = scan.References;
         result.LegacyMentions = scan.Mentions;
+        result.LegacyUnresolved = scan.Unresolved;
 
         return result;
     });

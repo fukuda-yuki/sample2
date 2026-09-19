@@ -224,6 +224,10 @@ Add-Case -CaseId 'var-aspnetcore-launch-profile' -Kind 'valid launch settings' -
     -Note 'IIS Express is also an ASP.NET Core host; a standard launch profile must not fail R-029.'
 
 if ($EvaluationVersion -eq '1.2.0') {
+    Add-Case -CaseId 'var-modern-solution-legacy-name' -Kind 'equivalent solution name' -Artifact $null -Variant 'modern-solution-legacy-name' -Sequence 40 `
+        -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'Resolve solution project references; historical names alone are not legacy dependencies.'
+    Add-Case -CaseId 'neg-legacy-solution-reference' -Kind 'legacy dependency' -Artifact $null -Negative 'legacy-solution-reference' -Sequence 41 `
+        -ExpectedVerdict 'fail' -ExpectedFailed @('R-029') -ExpectedBlocked @() -Note 'A solution referencing a .NET Framework project must still fail R-029.'
     Add-Case -CaseId 'var-modern-project-legacy-name' -Kind 'equivalent project name' -Artifact $null -Variant 'modern-project-legacy-name' -Sequence 29 `
         -ExpectedVerdict 'pass' -ExpectedFailed @() -ExpectedBlocked @() -Note 'A net8.0 Web project is not a legacy project solely because it retains its filename.'
     Add-Case -CaseId 'var-japanese-order-label' -Kind 'equivalent order display' -Artifact $null -Variant 'japanese-order-label' -Sequence 30 `

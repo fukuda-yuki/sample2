@@ -9,7 +9,7 @@ from research.ledger import build_ledger
 from research.network_recovery import docker, inventory
 
 
-def main():
+def historical_main():
     repo = Path(__file__).resolve().parents[1]
     base = repo/'artifacts/exploration/20260919'
     batch = repo/'runs/exploration-20260919-ms1'
@@ -104,6 +104,13 @@ def main():
     write_json(target, receipt)
     print(json.dumps({k:v for k,v in receipt.items() if k!='archive_verifications'}, ensure_ascii=True))
     return int(bool(problems))
+
+
+def main():
+    # Historical receipts remain reproducible with their frozen code. A revised
+    # completion audit must use an explicit corpus, independent audit and roots.
+    from research.correction_completion import main as corrected_main
+    return corrected_main()
 
 
 if __name__ == '__main__':

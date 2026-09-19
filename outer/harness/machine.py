@@ -48,6 +48,7 @@ def execute(repo, runs_dir, task, intervention, attempt, runtime_id, archive, *,
         reference = preserve.pack_run(archive, root, include=['evidence', 'workspace'])
         util.write_new_json(root / 'archive-reference.json', reference)
     row = aggregate.row_for(runs_dir, rid)
+    row['network_cleanup'] = run.load_manifest(runs_dir, rid).get('network_cleanup')
     row['archive'] = reference
     print(rid + ': ' + str(row['execution']['state']) + ', quality=' + str(row['quality']), flush=True)
     return row
@@ -77,7 +78,7 @@ def acceptance(repo, runs_dir, task, runtime_id):
         telemetry = util.read_json(root / rid / 'telemetry-link.json')
         healthy = (row['execution']['state'] == 'completed' and row['scoring']['state'] == 'scored'
                    and usage.get('usage_complete') and usage.get('input_reached')
-                   and telemetry.get('verified'))
+                   and telemetry.get('verified') and (row.get('network_cleanup') or {}).get('confirmed'))
         results.append({'run_id': rid, 'healthy': bool(healthy), 'row': row})
         util.write_json_atomic(root / 'acceptance-progress.json', {'runs': results, 'complete': False})
         if not healthy:

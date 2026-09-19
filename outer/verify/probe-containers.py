@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parents[2]
 CANARY = 'synthetic-container-credential-canary'
 CASES = ('normal', 'timeout', 'operator_stop', 'controller_crash',
          'http_error', 'missing_usage', 'wrong_model', 'cut_stream',
-         'slow_stream', 'active_request_stop')
+         'slow_stream', 'active_request_stop', 'partial_start', 'cleanup_retry', 'cli_run', 'normal_repeat')
 
 GATEWAY_FIXTURE = r'''
 import json, sys, threading, uuid, time
@@ -79,6 +79,16 @@ else:
         time.sleep(.2)
 '''
 
+CLI_WORKER_FIXTURE = r'''
+import json, shutil, uuid, urllib.request
+from pathlib import Path
+shutil.copytree('/fixtures/reference', '/workspace', dirs_exist_ok=True)
+body = {'model':'deepseek-v4.1-flash','stream':True,'messages':[{'role':'user','content':Path('/input/prompt.txt').read_text()}]}
+request = urllib.request.Request('http://gateway:8080/v1/chat/completions', data=json.dumps(body).encode(), headers={'Content-Type':'application/json'})
+urllib.request.urlopen(request, timeout=30).read()
+print(json.dumps({'type':'step_finish','sessionID':'synthetic-'+uuid.uuid4().hex,'part':{'reason':'stop'}}), flush=True)
+'''
+
 
 def controller(root, case):
     """Child controller, terminated deliberately by the crash-recovery case."""
@@ -93,22 +103,39 @@ def controller(root, case):
         return condition
     def docker(*args, **kwargs):
         args = list(args)
+        if case == 'cleanup_retry' and args[:2] == ['network','rm']:
+            raise RuntimeError('Synthetic network removal failure; stop CLI must retry')
         if args[0] == 'create' and '--name' in args:
             name = args[args.index('--name') + 1]
             lock = util.read_json(REPO/'artifacts/runtime/MS1-001/lock.json')
             if name.startswith('s2-gateway-'):
+                if case == 'partial_start':
+                    raise RuntimeError('Synthetic failure after network creation')
                 at = args.index(lock['images']['gateway'])
                 session_id = args[args.index('--session-id')+1]
                 args = args[:at] + ['--entrypoint','python3', *runtime.mount(root/'fixtures','/fixtures',True),
                     lock['images']['gateway'], '/fixtures/gateway.py', case, 'MS1-001-explore-001', session_id]
-            elif name.startswith('s2-worker-') and case in ('timeout','operator_stop','controller_crash'):
+            elif name.startswith('s2-worker-') and case in ('timeout','operator_stop','controller_crash','cli_run'):
                 at = args.index(lock['images']['worker'])
                 args = args[:at] + [*runtime.mount(root/'fixtures','/fixtures',True),
-                    lock['images']['worker'],'python3','/fixtures/worker.py']
+                    lock['images']['worker'],'python3','/fixtures/cli-worker.py' if case == 'cli_run' else '/fixtures/worker.py']
         return original_docker(*args, **kwargs)
     with patch.object(profiles, 'resolve', resolve), patch.object(runtime, 'docker', docker), \
          patch.object(runtime, '_gateway_credential', return_value=CANARY), \
          patch.dict(os.environ, {'OPENCODE_GO_API_KEY':CANARY, 'UNRELATED_SECRET':CANARY}):
+        if case == 'cli_run':
+            from harness import cli
+            original_start = runtime.start
+            def diagnostic_start(*args, **kwargs):
+                value = original_start(*args, **kwargs)
+                value.update(synthetic=True, model_called=False, diagnostic_injection={'case':case,'provider':'container-local mock'})
+                run.save_manifest(root, value['run_id'], value)
+                return value
+            with patch.object(runtime, 'start', diagnostic_start):
+                code = cli.main(['--repo',str(REPO),'--runs-dir',str(root),'run','--task','MS1-001','--intervention','explore'])
+            util.write_new_json(root/'cli-result.json', {'exit_code':code, 'ordinary_command':'run'})
+            if code: raise RuntimeError('Ordinary run CLI failed')
+            return
         manifest = profiles.create(REPO, root, 'MS1-001', 'explore', 1)
         rid = manifest['run_id']
         runtime.start(REPO, root, rid)
@@ -137,6 +164,7 @@ def main():
         return 0
     batch = REPO/'runs'/('_container-probe-'+uuid.uuid4().hex[:12])
     batch.mkdir(parents=True)
+    networks_before = set(runtime.docker('network','ls','--no-trunc','-q').stdout.split())
     util.write_new_json(batch/'plan.json', {'synthetic':True, 'model_called':False,
         'cases':list(CASES), 'controller_files':runtime.controller_files(REPO),
         'expected':{'normal':'completed, complete usage and input',
@@ -156,6 +184,8 @@ def main():
         fixtures.mkdir(parents=True)
         (fixtures/'gateway.py').write_text(GATEWAY_FIXTURE, encoding='utf-8')
         (fixtures/'worker.py').write_text(WORKER_FIXTURE, encoding='utf-8')
+        (fixtures/'cli-worker.py').write_text(CLI_WORKER_FIXTURE, encoding='utf-8')
+        if case == 'cli_run': util.collect(REPO/'inner/fixtures/reference', fixtures/'reference')
         rid = 'MS1-001-explore-001'
         run_root = root/rid
         with (root/'controller.log').open('xb') as log:
@@ -185,6 +215,14 @@ def main():
                     process.kill(); process.wait(timeout=10)
                 if (run_root/'runtime.json').exists(): runtime.stop_owned(run_root)
         manifest = run.load_manifest(root, rid)
+        first_cleanup = manifest.get('network_cleanup')
+        if case == 'cleanup_retry':
+            if first_cleanup is None or first_cleanup['confirmed']: raise RuntimeError('Removal failure injection was not observed')
+            prior_interval = {k:manifest[k] for k in ('ended_at','duration_seconds','end_reason')}
+            repaired = runtime.request_stop(run_root)
+            manifest = run.load_manifest(root, rid)
+            if not repaired['network_cleanup']['confirmed'] or any(manifest[k] != v for k,v in prior_interval.items()):
+                raise RuntimeError('Cleanup retry changed the measured interval or did not recover')
         manifest.update(synthetic=True, model_called=False)
         run.save_manifest(root, rid, manifest)
         live_usage.collect(run_root)
@@ -200,11 +238,11 @@ def main():
             item = runtime.inspect_container(state[role])
             if item and CANARY in json.dumps(item): credentials_absent = False
         records_safe = all(CANARY.encode() not in p.read_bytes() for p in (run_root/'usage').rglob('*') if p.is_file())
-        expected = ('timeout' if case == 'timeout' else 'operator_stop' if case in ('operator_stop','controller_crash','active_request_stop')
+        expected = ('environment_failure' if case == 'partial_start' else 'timeout' if case == 'timeout' else 'operator_stop' if case in ('operator_stop','controller_crash','active_request_stop')
                     else 'provider_failure' if case in ('http_error','wrong_model','cut_stream') else 'completed')
         passed = (manifest['end_reason'] == expected and stopped and children_stopped
                   and credentials_absent and records_safe)
-        if case in ('normal','slow_stream'): passed = passed and usage['usage_complete'] and usage['input_reached']
+        if case in ('normal','normal_repeat','slow_stream','cleanup_retry','cli_run'): passed = passed and usage['usage_complete'] and usage['input_reached']
         else: passed = passed and not usage['usage_complete']
         cancelled_recorded = None
         if case == 'active_request_stop':
@@ -218,11 +256,15 @@ def main():
             'credentials_absent_from_container_metadata':credentials_absent,
             'records_redacted':records_safe,'usage_complete':usage['usage_complete'],
             'input_reached':usage.get('input_reached'),'cancelled_terminal_recorded':cancelled_recorded}
+        after = set(runtime.docker('network','ls','--no-trunc','-q').stdout.split())
+        result.update(network_cleanup=manifest.get('network_cleanup'), network_inventory_unchanged=after == networks_before,
+                      first_cleanup=first_cleanup if case == 'cleanup_retry' else None)
+        result['passed'] = bool(passed and manifest.get('network_cleanup',{}).get('confirmed') and after == networks_before)
         util.write_new_json(root/'result.json', result)
         results.append(result)
         util.write_json_atomic(batch/'progress.json', {'results':results,'complete':False})
         print(json.dumps(result), flush=True)
-        if not passed: raise RuntimeError('Container probe failed; retained '+str(root))
+        if not result['passed']: raise RuntimeError('Container probe failed; retained '+str(root))
     util.write_new_json(batch/'result.json', {'passed':all(r['passed'] for r in results),
         'synthetic':True,'model_called':False,'results':results,'directory':str(batch)})
     print(str(batch), flush=True)

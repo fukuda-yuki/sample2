@@ -218,6 +218,15 @@ internal static class LegacyName
             'return NotFound();' 'return StatusCode(403);' 'Use the other permitted denial status'
     }
 
+    'modern-solution-legacy-name' {
+        $originalProject = (Resolve-Path -LiteralPath (Join-Path $Out 'MusicStore.Web\MusicStore.Web.csproj')).Path
+        Rename-Item -LiteralPath $originalProject -NewName 'MvcMusicStore.csproj'
+        $solution = 'Microsoft Visual Studio Solution File, Format Version 12.00' + $nl +
+            'Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MvcMusicStore", "MusicStore.Web\MvcMusicStore.csproj", "{472C4947-C282-4C2D-9FAB-838DF7CD6752}"' + $nl + 'EndProject' + $nl
+        [System.IO.File]::WriteAllText((Join-Path $Out 'MvcMusicStore.sln'), $solution, [System.Text.UTF8Encoding]::new($false))
+        $log.Add('A modern solution and its project retain the historical filenames')
+    }
+
     'modern-project-legacy-name' {
         $originalProject = (Resolve-Path -LiteralPath (Join-Path $Out 'MusicStore.Web\MusicStore.Web.csproj')).Path
         # Rename exactly the generated fixture file; never a computed directory tree.

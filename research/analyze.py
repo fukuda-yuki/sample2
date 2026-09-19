@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 import re
 import statistics
 
-VERSION = '1.0.2'
+VERSION = '1.1.0'
 TOKEN_KEYS = ('input_tokens', 'output_tokens', 'cache_read_tokens',
               'cache_write_tokens', 'reasoning_tokens')
 
@@ -273,6 +273,8 @@ def analyze_run(root, cohort, slot=None):
             issues.append('run_identity_mismatch:' + name)
     if {e.get('request_id') for _, e in begins} != {e.get('request_id') for _, e in ends}:
         issues.append('incomplete_start_terminal_inventory')
+    if {e.get('request_id') for _, e in begins} != {e.get('request_id') for _, e in events}:
+        issues.append('incomplete_normalized_inventory')
     native_tools = {}
     for line, entry in native:
         if entry.get('type') == 'tool_use':
@@ -432,6 +434,8 @@ def analyze_run(root, cohort, slot=None):
         known = [v for v in vals if isinstance(v, int)]
         if complete and known and len(known) == len(vals) and sum(known) != normalized.get(key):
             issues.append('normalized_sum_mismatch:' + key)
+    complete = complete and not issues and bool(calls) and all(
+        c.get('input_tokens') is not None and c.get('output_tokens') is not None for c in calls)
     top = sorted(actions, key=lambda a: a['subsequent_input_char_exposure'], reverse=True)[:5]
     totals = {key: sum(c[key] for c in calls) if complete and calls and all(c.get(key) is not None for c in calls) else None
               for key in TOKEN_KEYS}
@@ -467,6 +471,9 @@ def analyze_run(root, cohort, slot=None):
     # Hash again after extraction so input changes during the analysis are detected.
     changed = [name for name, digest in receipts.items() if sha(root/name) != digest]
     result['audit_issues'] += ['source_changed_during_analysis:' + n for n in changed]
+    if changed:
+        result.update(usage_complete=False, total_tokens=None, mean_input=None,
+                      **{key: None for key in TOKEN_KEYS})
     return result, calls, actions, reads, receipts
 
 

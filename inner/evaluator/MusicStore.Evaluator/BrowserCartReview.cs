@@ -73,12 +73,12 @@ public sealed class BrowserCartReview
             var afterUrl = new Uri(a.GetProperty("page").GetProperty("url").GetString());
             if (string.IsNullOrWhiteSpace(b.GetProperty("tabId").GetString())
                 || b.GetProperty("tabId").GetString() != a.GetProperty("tabId").GetString()
-                || beforeUrl.GetLeftPart(UriPartial.Path) != afterUrl.GetLeftPart(UriPartial.Path)
+                || beforeUrl.GetLeftPart(UriPartial.Authority) != afterUrl.GetLeftPart(UriPartial.Authority)
                 || beforeUrl.AbsolutePath.TrimEnd('/') != "/ShoppingCart"
                 || b.GetProperty("at").GetDateTimeOffset() >= a.GetProperty("at").GetDateTimeOffset())
                 throw new InvalidDataException("Browser before/after session, route or time mismatch.");
-            var beforeHtml = b.GetProperty("page").GetProperty("html").GetString();
-            var afterHtml = a.GetProperty("page").GetProperty("html").GetString();
+            var beforeHtml = ObservedHtml(b);
+            var afterHtml = ObservedHtml(a);
             var lines = Html.CartLines(beforeHtml);
             var countBefore = removal.CheckId == "C-015" ? 2 : 1;
             var album = lines.Count == 1 ? catalog.ById(lines[0].AlbumId) : null;
@@ -98,6 +98,12 @@ public sealed class BrowserCartReview
                 + $"Before={removal.Before.Path}; after={removal.After.Path}; receipt SHA-256={review.ReceiptSha256}.");
         }
         return review;
+    }
+
+    private static string ObservedHtml(JsonElement capture)
+    {
+        var page = capture.GetProperty("page");
+        return (page.TryGetProperty("visibleCartHtml", out var visible) ? visible : page.GetProperty("html")).GetString();
     }
 
     private static bool WellFormedCart(string html)

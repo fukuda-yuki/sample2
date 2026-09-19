@@ -14,6 +14,24 @@ def run(arm, attempt, total, verdict='pass', cohort='primary18', block=1):
 
 
 class SummaryContracts(unittest.TestCase):
+    def test_saved_http_only_pass_is_not_research_quality(self):
+        row = run('explore', 1, 123)
+        row['scoring'] = {'evaluation_version': '1.2.0', 'browser_cart_coverage': 'not_run_http_only'}
+        value = summarize({'runs': [row], 'calls': [], 'actions': []})
+        self.assertEqual(0, value['groups'][0]['quality_pass'])
+        self.assertEqual(1, value['groups'][0]['quality_missing'])
+        self.assertEqual(123, value['groups'][0]['total_tokens']['mean'])
+        self.assertEqual('pass', row['verdict'])  # original analysis not overwritten
+
+    def test_http_only_cannot_claim_complete_and_a_verified_result_can_pass(self):
+        row = run('explore', 1, 123)
+        row['scoring'] = {'evaluation_version': '1.2.0', 'research_status': 'complete',
+                          'browser_cart_coverage': 'not_run_http_only'}
+        data = {'runs': [row], 'calls': [], 'actions': []}
+        self.assertEqual(0, summarize(data)['groups'][0]['quality_pass'])
+        row['scoring']['browser_cart_coverage'] = 'agent_observed_C-015_C-016'
+        self.assertEqual(1, summarize(data)['groups'][0]['quality_pass'])
+
     def test_unknown_values_do_not_become_zero(self):
         self.assertEqual(distribution([None,None])['n'],0)
         self.assertIsNone(distribution([None])['mean'])

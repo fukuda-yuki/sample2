@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import run as run_mod
 from . import util
+from . import browser_cart
 from .security import child_environment
 
 DEFAULT_EVALUATOR_DLL = 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll'
@@ -257,11 +258,14 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     work_dir.mkdir(parents=True)
     temporary = evaluations / ('.tmp-{}-{}'.format(sequence, uuid.uuid4().hex))
     temporary.mkdir(parents=True)
-    command[command.index('--out') + 1] = str(temporary)
+    browser_required = browser_cart.required(str(version))
+    http_out = temporary / 'http-only' if browser_required else temporary
+    http_out.mkdir(exist_ok=True)
+    command[command.index('--out') + 1] = str(http_out)
     container_name = None
     if isolated:
         from . import runtime
-        container_name, command = runtime.scoring_command(condition, frozen, temporary, work_dir,
+        container_name, command = runtime.scoring_command(condition, frozen, http_out, work_dir,
             run_dir / 'evaluation-assets', str(version), sequence)
     evidence = run_dir / 'evidence'
     evidence.mkdir(exist_ok=True)
@@ -283,6 +287,14 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                 stopped = runtime.docker('rm', '-f', container_name, check=False)
                 if stopped.returncode != 0:
                     raise RuntimeError('Evaluator container stop could not be confirmed: ' + container_name)
+    if browser_required and not timed_out and exit_code == 0 and (http_out / 'evaluation.json').is_file():
+        if isolated:
+            exit_code = browser_cart.complete_evaluation(repo, condition, frozen, http_out, work_dir / 'publish',
+                run_dir / 'evaluation-assets', temporary, manifest.get('run_instance_id'), sequence)
+        else:
+            # The research browser runner requires the frozen isolated runtime.
+            # Keep legacy HTTP output as evidence, never adopt it as research quality.
+            exit_code = 2
     produced = temporary / 'evaluation.json'
     if timed_out or not produced.is_file():
         target = evaluations / ('fault-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
@@ -299,7 +311,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
         _append_index(run_dir, record)
         return record
     output = util.read_json(produced)
-    if exit_code != 0:
+    if exit_code != 0 or (browser_required and not browser_cart.coverage_complete(output)):
         state, mismatches = 'evaluator_fault', []
     else:
         mismatches = check_mismatches(output, condition, version, frozen, independent_hash,
@@ -392,6 +404,9 @@ def _base_record(run_id, sequence, version, exit_code, independent_hash, spec_sh
         'artifact_sha256_frozen': artifact_sha256_frozen,
         'work_dir': work_dir,
         'verdict': (output or {}).get('verdict'),
+        'browser_cart_coverage': (output or {}).get('browserCartCoverage', 'not_run_http_only'),
+        'browser_cart_evidence_sha256': (output or {}).get('browserCartEvidenceSha256'),
+        'research_status': (output or {}).get('researchStatus', 'incomplete'),
         'quality': (output or {}).get('quality'),
         'requirement_count': (output or {}).get('requirementCount'),
         'passed_count': (output or {}).get('passedCount'),
@@ -475,6 +490,7 @@ def _append_index(run_dir, record):
                         'scoring_state', 'adopted', 'evaluator_exit_code',
                         'evaluator_sha256', 'evaluator_sha256_pinned', 'verdict',
                         'quality', 'spec_sha256', 'artifact_sha256_outer', 'mismatches',
+                        'browser_cart_coverage', 'browser_cart_evidence_sha256', 'research_status',
                         'work_dir', 'recorded_at', 'directory') if key in record})
 
 

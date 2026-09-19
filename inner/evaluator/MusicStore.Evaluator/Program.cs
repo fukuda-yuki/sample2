@@ -7,7 +7,7 @@ namespace MusicStore.Evaluator;
 public static class Program
 {
     /// <summary>評価器自身の版。ビルドの同一性は evaluator_sha256 が表す。</summary>
-    public const string EvaluatorVersion = "1.0.0";
+    public const string EvaluatorVersion = "1.1.0";
 
     /// <summary>
     /// 判定の意味（検査集合・合否規則・配点）の既定版。--evaluation-version で上書きできる。
@@ -86,6 +86,20 @@ public static class Program
         var artifactHash = Sha256Directory(options.ArtifactPath);
         var evaluationId = $"{ledger.TaskId}-{artifactHash.Substring(0, 12)}-{options.EvaluationVersion}-{options.Sequence:000}";
 
+        if (options.BrowserCartBaseline != null)
+        {
+            try
+            {
+                return BrowserCartCorrection.Apply(options, ledger, catalog, evaluationId,
+                    artifactHash, specHash, startedAt);
+            }
+            catch (Exception ex)
+            {
+                WriteFaultOutput(options, ledger, startedAt, new List<string> { "Browser correction: " + ex.Message });
+                return 2;
+            }
+        }
+
         BrowserCartReview browserReview = null;
         if (options.BrowserCartEvidence != null)
         {
@@ -160,6 +174,8 @@ public static class Program
         output.BrowserCartCoverage = browserReview == null ? "not_run_http_only" : "agent_observed_C-015_C-016";
         output.BrowserCartEvidenceSha256 = browserReview?.ReceiptSha256;
         output.ReviewRunInstanceId = browserReview?.RunInstanceId;
+        output.ResearchStatus = browserReview != null && output.ErrorCount == 0 && output.BlockedCount == 0
+            ? "complete" : "incomplete";
         WriteResults(options, ledger, results, output);
 
         var manifest = new EvaluatorManifest
@@ -320,7 +336,7 @@ public static class Program
         }
     }
 
-    private static EvaluationOutput BuildOutput(
+    internal static EvaluationOutput BuildOutput(
         Ledger ledger,
         CliOptions options,
         string evaluationId,
@@ -433,7 +449,7 @@ public static class Program
         return output;
     }
 
-    private static void WriteResults(CliOptions options, Ledger ledger, List<CheckResult> results, EvaluationOutput output)
+    internal static void WriteResults(CliOptions options, Ledger ledger, List<CheckResult> results, EvaluationOutput output)
     {
         WriteJson(Path.Combine(options.OutDir, "evaluation.json"), output);
 
@@ -491,7 +507,7 @@ public static class Program
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("usage: MusicStore.Evaluator --artifact <dir> --out <dir> [--spec <requirements.json>] [--catalog <catalog.json>] [--evaluation-version <v>] [--sequence <n>] [--work <dir>] [--browser-cart-evidence <receipt.json> --review-run-instance-id <id>]");
+        Console.Error.WriteLine("usage: MusicStore.Evaluator --artifact <dir> --out <dir> [--spec <requirements.json>] [--catalog <catalog.json>] [--evaluation-version <v>] [--sequence <n>] [--work <dir>] [--browser-cart-evidence <receipt.json> --review-run-instance-id <id>] [--browser-cart-baseline <evaluation-directory>]");
     }
 }
 
@@ -510,6 +526,8 @@ public sealed class CliOptions
     public string BrowserCartEvidence { get; private set; }
 
     public string ReviewRunInstanceId { get; private set; }
+
+    public string BrowserCartBaseline { get; private set; }
 
     public string EvaluationVersion { get; private set; } = Program.DefaultEvaluationVersion;
 
@@ -545,6 +563,9 @@ public sealed class CliOptions
                     break;
                 case "--browser-cart-evidence":
                     options.BrowserCartEvidence = Next();
+                    break;
+                case "--browser-cart-baseline":
+                    options.BrowserCartBaseline = Next();
                     break;
                 case "--review-run-instance-id":
                     options.ReviewRunInstanceId = Next();

@@ -25,6 +25,16 @@ def distribution(values):
 
 
 def summarize(data, plan=None):
+    # Saved acquisition tables are historical HTTP observations. New summaries
+    # cannot silently relabel them as research quality with browser coverage.
+    data = {**data, 'runs': [dict(row) for row in data['runs']]}
+    for row in data['runs']:
+        scoring = row.get('scoring') or {}
+        if scoring.get('evaluation_version') == '1.2.0' and (
+                scoring.get('research_status') != 'complete'
+                or scoring.get('browser_cart_coverage') != 'agent_observed_C-015_C-016'):
+            row['quality'] = None
+            row['verdict'] = None
     groups=defaultdict(list)
     for r in data['runs']:
         groups[(r['cohort'],r['condition'])].append(r)

@@ -1,7 +1,8 @@
 # MS1 exploratory analysis
 
 This directory contains research code, not an alternative agent/evaluator.
-Start with the [correction and original-first audit](../docs/ms1-correction-20260919-report.md),
+Start with the [uniform browser correction](../docs/ms1-browser-cart-20260919-report.md),
+[correction and original-first audit](../docs/ms1-correction-20260919-report.md),
 [historical Japanese findings](../docs/ms1-exploration-20260919-report.md),
 [frozen protocol](../docs/ms1-exploration-20260919-protocol.md), and
 [post-freeze change log](post-freeze-changes.md).
@@ -46,6 +47,12 @@ analysis contains 955 new calls; the historical six retain exactly 322 calls.
   Ordinary frozen `rescore` safeguards remain unchanged.
 - `correction_report`: reproduce quality impact, representative selection and
   all-call provider usage format tables without model execution.
+- `browser_rejudge`: apply the ordinary scorer's real-browser C-015/C-016 phase
+  to the inventory of saved artifacts; retain the R-029 baseline and save new
+  results. `--observations` reuses bound captures for a judgement-only correction.
+- `verify_browser_path`: exercise `score_run` and `aggregate.row_for` on disposable
+  copies of specified saved instances, with an explicit expected verdict. These
+  are evaluation integration controls, never additional research/model Runs.
 - `handoff`: build a full local bundle including raw data and evaluator image,
   then verify it under an explicitly relocated root. Never uploads artifacts.
 - `report`: regenerate this batch's Japanese report and tables from final analysis.

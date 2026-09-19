@@ -88,7 +88,12 @@ static class BrowserCartReviewTests
         Reject("browser rejects path traversal", f => f.Receipt.Removals[0].After.Path = "../after.json");
         Reject("browser rejects different context", f => f.Receipt.Removals[0].After = f.Capture("other.json", Cart(1, "8.99"), true, "tab-B"));
         Reject("browser rejects different origin", f => f.Receipt.Removals[0].After = f.Capture("other.json", Cart(1, "8.99"), true, url: "http://other.localhost/ShoppingCart"));
-        Reject("browser rejects non-cart route", f => f.Receipt.Removals[0].After = f.Capture("other.json", Cart(1, "8.99"), true, url: "http://review.localhost/"));
+        using var navigation = new Fixture();
+        navigation.Receipt.Removals[0].After = navigation.Capture("redirect.json", Cart(1, "8.99"), true, url: "http://review.localhost/ShoppingCart/Index");
+        check("application navigation to a valid cart is allowed", navigation.Load().For("C-015").Pass);
+        navigation.Receipt.Removals[0].After = navigation.Capture("json-page.json", "<pre>{\"itemCount\":1}</pre>", true,
+            url: "http://review.localhost/ShoppingCart/RemoveFromCart");
+        check("application navigation to JSON is an observed product failure", !navigation.Load().For("C-015").Pass);
         Reject("browser rejects non-increasing timestamps", f => f.Receipt.Removals[0].After = f.Capture("other.json", Cart(1, "8.99"), false));
         var ledger = new Ledger { Requirements = new() { new() { Id = "R-014" }, new() { Id = "R-015" } } };
         using var state = new RunState { AppReady = true, Ledger = ledger, Catalog = Catalog, Cart = new()
@@ -110,5 +115,63 @@ static class BrowserCartReviewTests
         check("browser pass cannot mask wrong server JSON", Checks.Registry["C-015"](state).Judgement == Judgement.Fail
             && Checks.Registry["C-016"](state).Judgement == Judgement.Fail);
         check("browser CLI requires instance pairing", CliOptions.Parse(new[] { "--artifact", ".", "--out", ".", "--browser-cart-evidence", "receipt.json" }) == null);
+        CheckComposition(check);
+    }
+
+    static void CheckComposition(Action<string, bool> check)
+    {
+        using var f = new Fixture(Cart(1, "17.98"), Cart(0, "8.99"));
+        var artifact = Path.Combine(f.Root, "artifact"); Directory.CreateDirectory(artifact);
+        var baseline = Path.Combine(f.Root, "baseline"); Directory.CreateDirectory(baseline);
+        var spec = Path.Combine(f.Root, "spec.json");
+        var ledger = new Ledger { TaskId = "MS1-001", SpecVersion = "1.2.0", Requirements = new()
+        {
+            new() { Id = "R-014", Severity = "major", Checks = new() { new() { Id = "C-015" } } },
+            new() { Id = "R-015", Severity = "major", Checks = new() { new() { Id = "C-016" } } },
+            new() { Id = "R-029", Severity = "major", Checks = new() { new() { Id = "C-030" } } },
+        } };
+        System.IO.File.WriteAllText(spec, JsonSerializer.Serialize(ledger));
+        var catalog = Path.Combine(f.Root, "catalog.json"); System.IO.File.WriteAllText(catalog, JsonSerializer.Serialize(Catalog));
+        var ah = MusicStore.Evaluator.Program.Sha256Directory(artifact);
+        var sh = MusicStore.Evaluator.Program.Sha256File(spec);
+        f.Receipt.ArtifactSha256 = ah; f.Receipt.SpecSha256 = sh;
+        var receipt = Path.Combine(f.Root, "receipt.json"); System.IO.File.WriteAllText(receipt, JsonSerializer.Serialize(f.Receipt));
+        var before = new EvaluationOutput { TaskId = "MS1-001", SpecVersion = "1.2.0", EvaluationVersion = "1.2.0",
+            ArtifactSha256 = ah, SpecSha256 = sh, Verdict = "pass", Quality = 100,
+            Requirements = ledger.Requirements.Select(r => new RequirementOutcome { Id = r.Id, Judgement = "pass" }).ToList() };
+        var baselineJson = Path.Combine(baseline, "evaluation.json");
+        void SaveBaseline() => System.IO.File.WriteAllText(baselineJson, JsonSerializer.Serialize(before));
+        SaveBaseline();
+        var resultLines = ledger.Requirements.Select(r => JsonSerializer.Serialize(new CheckResult
+            { RequirementId = r.Id, CheckId = r.Checks[0].Id, Judgement = "pass", Observation = "saved HTTP" })).ToArray();
+        var resultsPath = Path.Combine(baseline, "results.jsonl"); System.IO.File.WriteAllLines(resultsPath, resultLines);
+        (int Code, EvaluationOutput Value) Run(string name, string evidence = null)
+        {
+            var output = Path.Combine(f.Root, name);
+            var code = MusicStore.Evaluator.Program.Main(new[] { "--artifact", artifact, "--out", output, "--spec", spec,
+                "--catalog", catalog, "--evaluation-version", "1.2.0", "--browser-cart-baseline", baseline,
+                "--browser-cart-evidence", evidence ?? receipt, "--review-run-instance-id", Instance });
+            var value = JsonSerializer.Deserialize<EvaluationOutput>(System.IO.File.ReadAllText(Path.Combine(output, "evaluation.json")),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return (code, value);
+        }
+        var corrected = Run("corrected");
+        check("composition retains corrected R-029 and vetoes exactly two HTTP passes", corrected.Code == 0
+            && corrected.Value.ResearchStatus == "complete" && corrected.Value.FailedCount == 2
+            && corrected.Value.Requirements.Single(r => r.Id == "R-029").Judgement == "pass");
+        check("composition does not execute any application scenario", !Directory.Exists(Path.Combine(f.Root, "corrected", "work")));
+        var missing = Run("missing", Path.Combine(f.Root, "absent.json"));
+        check("missing browser evidence is evaluator fault, never HTTP fallback", missing.Code == 2
+            && missing.Value.Verdict == "error" && missing.Value.Quality == null && missing.Value.ResearchStatus == "incomplete");
+        before.ArtifactSha256 = "other"; SaveBaseline();
+        check("composition rejects other target baseline", Run("other").Code == 2);
+        before.ArtifactSha256 = ah; before.Quality = 0; SaveBaseline();
+        check("composition rejects inconsistent baseline scores", Run("inconsistent").Code == 2);
+        before.Quality = 100; SaveBaseline();
+        System.IO.File.WriteAllLines(resultsPath, resultLines.Take(2));
+        check("composition rejects missing baseline check instead of assuming pass", Run("omitted").Code == 2);
+        System.IO.File.WriteAllLines(resultsPath, resultLines);
+        f.Receipt.RunInstanceId = "other"; System.IO.File.WriteAllText(receipt, JsonSerializer.Serialize(f.Receipt));
+        check("composition rejects evidence from another Run", Run("other-receipt").Code == 2);
     }
 }

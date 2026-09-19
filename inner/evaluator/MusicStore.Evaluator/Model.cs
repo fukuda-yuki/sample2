@@ -124,6 +124,14 @@ public sealed class RequirementOutcome
 
 public sealed class EvaluationOutput
 {
+    public string ResearchStatus { get; set; } = "incomplete";
+
+    public string ObservationScope { get; set; } = "HTTP/static checks; browser coverage recorded separately";
+
+    public string BaselineEvaluationSha256 { get; set; }
+
+    public string BaselineResultsSha256 { get; set; }
+
     public string BrowserCartCoverage { get; set; } = "not_run_http_only";
 
     public string BrowserCartEvidenceSha256 { get; set; }

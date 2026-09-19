@@ -62,6 +62,27 @@ class RunFixture:
 
 class ScoreTestCase(RunFixture, unittest.TestCase):
 
+    def test_research_http_only_is_not_adopted_by_ordinary_scoring(self):
+        condition = util.read_json(self.run_dir / 'condition.json')
+        condition['evaluation']['evaluation_version'] = '1.2.0'
+        util.write_json_atomic(self.run_dir / 'condition.json', condition)
+        result = self.score('ok')
+        self.assertEqual('evaluator_fault', result['scoring_state'])
+        self.assertFalse(result['adopted'])
+        self.assertIsNone(aggregate.row_for(self.runs, self.run_dir.name)['quality'])
+
+    def test_aggregate_does_not_trust_historical_http_only_pass(self):
+        scored = self.score('ok')
+        index = self.run_dir / 'evaluations/index.jsonl'
+        saved = util.read_lines(index)
+        saved[-1]['evaluation_version'] = '1.2.0'
+        index.write_text('\n'.join(__import__('json').dumps(r) for r in saved) + '\n', encoding='utf-8')
+        row = aggregate.row_for(self.runs, self.run_dir.name)
+        self.assertIsNone(row['quality'])
+        self.assertIsNone(row['verdict'])
+        self.assertEqual(100, row['reported_http_or_prior_quality'])
+        self.assertEqual('evaluation_incomplete', row['scoring']['state'])
+
     def test_success_json_from_a_failed_evaluator_is_not_adopted(self):
         record = self.score('unexpected-exit')
         self.assertEqual('evaluator_fault', record['scoring_state'])

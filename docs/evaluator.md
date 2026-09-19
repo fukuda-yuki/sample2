@@ -334,16 +334,73 @@ requirements are unchanged; `cartTotal` is not made a mandatory response field.
 The schema and validation are in `BrowserCartReview.cs`. A receipt declares an agent
 actor, artifact/spec hashes, Run instance ID, and exactly two removals. Each removal
 references hashed before/after browser JSON and screenshots under the receipt's
-directory. Captures must have the same tab and cart URL, increasing timestamps, and
-the correct populated starting state. Invalid provenance is an evaluator error,
+directory. Captures must have the same tab and origin, start at the cart URL, have
+increasing timestamps, and show the correct populated starting state. Invalid provenance is an evaluator error,
 not a product failure. Hashes verify byte identity; the independent collector is
 trusted for action attribution and screenshot authenticity.
 
 Without a receipt, compatibility scoring remains HTTP-only and emits
 `browserCartCoverage: not_run_http_only`; it does **not** establish UI acceptance.
 With valid evidence it emits `agent_observed_C-015_C-016`, the receipt hash and Run
-instance ID. This is a bounded evidence adapter, not an automatic browser runner.
+instance ID. This original adapter is now connected to the automatic runner below.
 `research/pmo_scenario_correction.py` saves isolated controls and corrections from
 the three PMO review targets without changing original evaluations or research Runs.
 See [the review report](ms1-pmo-scenario-review-20260919.md) for actual browser
 observations, remaining limitations, and the gate decision.
+
+## Required browser phase for research evaluation 1.2.0
+
+`outer.harness.evaluate.score_run` first saves the HTTP/static evaluation under
+`http-only/`, then calls `browser_cart.complete_evaluation`. A read-only copy of
+that evaluation's published application runs in the original Docker image with
+a fresh SQLite database, a dedicated bridge (outbound masquerading disabled),
+and an ephemeral port bound to host loopback. The browser loads the application's
+subresources normally, including external scripts; their URL, response status and
+body hash are recorded. Failed external-script observation is incomplete, not a
+product failure. No local-only dependency requirement is imposed on submissions.
+The fixed source and evaluator assets are never writable application mounts.
+
+`inner/browser/cart-review.cjs` uses an installed Playwright and Chromium. Set
+`NODE_PATH` when Playwright is supplied outside local Node module resolution;
+`SAMPLE2_BROWSER_EXECUTABLE` selects an existing executable explicitly. Optional
+`SAMPLE2_NODE` selects Node. Missing prerequisites produce evaluator faults, not
+an HTTP-only fallback. See the [installed-browser API](https://playwright.dev/docs/browsers)
+and [isolated contexts](https://playwright.dev/docs/api/class-browser#browser-new-context).
+No browser or model is downloaded or dispatched by the scorer.
+
+Each check has a new browser context. Preparation uses the public AddToCart route
+before verifying exactly one row with quantity 2 or 1 and total 17.98 or 8.99.
+The collector clicks the row's visible removal link/button (public identifier,
+accessible name, or removal form), and reads the same live page every 200 ms.
+It stops after the expected visible state remains stable for 500 ms with no
+outstanding requests, or after 10 seconds. Navigation has a 15-second limit and
+click actionability a 5-second limit. Application navigation and asynchronous
+updates are observed; no collector reload, separate post-click GET, direct
+removal POST, injected handler, or application patch supplies the after-state.
+The receipt records DOM, visible DOM projection, PNG, timestamps, network events,
+Playwright trace, browser/library/executable identity, and these timing conditions.
+
+The same-origin page reached by the application is the observed result. A form
+that navigates to a raw JSON document fails the visible-cart requirement; it is
+not an evaluator fault. An origin/tab/Run/artifact/spec identity mismatch or
+missing/corrupt evidence is an evaluator fault. Both populated preconditions are
+validated independently by `BrowserCartReview`.
+
+`--browser-cart-baseline <directory>` composes the two captures with a bound,
+complete saved HTTP result set. It never executes unrelated scenarios, cannot
+turn an HTTP failure into a pass, and inherits all other requirements unchanged.
+The result includes the baseline evaluation/results hashes and observation scope.
+This lets saved R-029 corrections remain the baseline for a subsequent browser
+correction without rewriting any acquisition files. The evaluator implementation
+is 1.1.0; the public spec and evaluation contract stay 1.2.0.
+
+HTTP-only compatibility output has `researchStatus: incomplete`. Ordinary research
+scoring requires observed evidence and complete evaluation before adoption.
+Aggregation rechecks the receipt and every referenced DOM/PNG hash rather than
+trusting a stored `pass` or coverage string. Historical HTTP-only scores remain
+available as `reported_http_or_prior_quality/verdict`; research `quality/verdict`
+are null when browser verification is absent. Research summaries also exclude
+saved HTTP-only passes from quality-pass counts. No acquisition output is edited.
+
+Actual positive, defective, launch-fault and evidence-fault controls, the 24-artifact
+application and reproduction commands are in the [uniform correction report](ms1-browser-cart-20260919-report.md).

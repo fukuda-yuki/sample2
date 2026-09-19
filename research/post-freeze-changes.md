@@ -1,5 +1,23 @@
 # Changes after acquisition began
 
+## Browser correction after the PMO review
+
+The subsequent user instruction keeps defective fixed artifacts as research
+outcomes. Completion requires detecting defects consistently, not making every
+artifact pass. `score_run` now requires real C-015/C-016 browser coverage for the
+1.2.0 research path; legacy HTTP-only results cannot supply a research pass.
+The 24 saved artifacts received the same two independent click observations.
+Only those checks were newly observed; the other 27 requirement outcomes include
+the retained R-029 correction. Final results are 9 pass / 15 fail, no incomplete
+artifact evaluation, plus one separate pre-model/no-artifact slot. The previous
+representatives and human `not_run` records remain fixed. See the
+[report](../docs/ms1-browser-cart-20260919-report.md) for evidence and limitations.
+No model execution, artifact regeneration, full ZIP rebuild, or all-call token
+re-audit was performed. The two catalog-return conditions can now be specified
+and frozen before a separately authorized acquisition.
+
+## Earlier changes (historical)
+
 The frozen pre-acquisition protocol and extraction v1.0.0 are at Git commit
 `5fa49775c24a5462238f2ca6b05aab0f2001e4c1`. The byte-exact dispatched plan is
 `runs/exploration-20260919-ms1/frozen-plan.json`. Neither that plan nor the

@@ -9,6 +9,7 @@ from pathlib import Path
 from . import evaluate
 from . import run as run_mod
 from . import util
+from . import browser_cart
 
 
 def build(runs_dir):
@@ -50,6 +51,16 @@ def row_for(runs_dir, run_id):
     else:
         scored = scoring_state == 'scored'
     issues = []
+
+    browser_required = browser_cart.required((scoring or {}).get('evaluation_version'))
+    browser_verified = False
+    if browser_required and scored:
+        browser_verified = browser_cart.stored_coverage_complete(run_dir / scoring.get('directory', ''),
+            manifest.get('run_instance_id'), snapshot.get('artifact_sha256'), scoring.get('spec_sha256'))
+        if not browser_verified:
+            scored = False
+            scoring_state = 'evaluation_incomplete'
+            issues.append({'kind': 'browser_unobserved', 'detail': 'C-015/C-016 browser evidence missing, mismatched or incomplete'})
 
     if execution != 'completed':
         issues.append({'kind': 'execution', 'detail': execution})
@@ -96,9 +107,15 @@ def row_for(runs_dir, run_id):
                     'sequence': (scoring or {}).get('sequence'),
                     'evaluation_version': (scoring or {}).get('evaluation_version'),
                     'evaluator_sha256': (scoring or {}).get('evaluator_sha256'),
+                    'browser_cart_coverage': browser_cart.OBSERVED if browser_verified else
+                        (scoring or {}).get('browser_cart_coverage', 'not_run_http_only'),
+                    'research_status': 'complete' if browser_verified else 'incomplete',
+                    'browser_execution': browser_cart.execution_identity(run_dir / scoring['directory']) if browser_verified else None,
                     'evaluator_sha256_pinned': (scoring or {}).get('evaluator_sha256_pinned')},
         'quality': scoring.get('quality') if scored else None,
         'verdict': scoring.get('verdict') if scored else None,
+        'reported_http_or_prior_quality': (scoring or {}).get('quality'),
+        'reported_http_or_prior_verdict': (scoring or {}).get('verdict'),
         'usage': {'state': usage.get('state'),
                   'usage_complete': usage.get('usage_complete'),
                   'input_reached': usage.get('input_reached'),
@@ -124,7 +141,8 @@ def compare(runs_dir):
         identity = {'task': row['task_id'], 'intervention': row['condition_id'],
                     'condition_sha256': manifest.get('condition_sha256'),
                     'profiles': {k: v['sha256'] for k, v in profile_files.items()},
-                    'evaluator_sha256': row['scoring'].get('evaluator_sha256')}
+                    'evaluator_sha256': row['scoring'].get('evaluator_sha256'),
+                    'browser_execution': row['scoring'].get('browser_execution')}
         key = json.dumps(identity, sort_keys=True)
         group = groups.setdefault(key, {'identity': identity, 'run_ids': [], 'quality': [],
             'verdicts': [], 'usage': [], 'execution_states': [], 'measured_count': 0})

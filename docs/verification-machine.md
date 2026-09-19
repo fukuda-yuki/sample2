@@ -217,3 +217,28 @@ not all order details or `Order.Total`. Publish and version broader criteria
 before collecting new Runs. See the [task template](../outer/templates/task/README.md)
 for adding another task. Additional task validation and statistical claims are
 outside this delivery.
+
+## Post-acquisition network repair and correction audit
+
+The production controller now stops its gateway and worker, fixes the measured
+end time, then reclaims the verified private network by immutable ID. New Run
+resources carry the instance ID as well as the Run ID. Stopped containers and
+research originals are retained. `network_cleanup` is separate from
+`stop_confirmed`, with timestamps and failure evidence.
+
+If cleanup fails, the ordinary `run` flow still completes possible collection,
+scoring and preservation, then returns nonzero. Retry cleanup without invoking
+the model through the ordinary stop command:
+
+```powershell
+python -m outer.harness.cli --runs-dir <batch-root> stop --run <run-id>
+```
+
+Ended Runs retry the same ownership checks; an unavailable Docker daemon is
+never proof that a network was removed. Do not prune global Docker resources.
+Archived historical cleanup uses separately stored maintenance receipts.
+
+The repaired core and R-029 evaluator are later builds. Saved Runs retain their
+original conditions and evaluator bundles; ordinary `rescore` cannot substitute
+the new build. See the [correction report](ms1-correction-20260919-report.md) for
+the dedicated correction evaluation and portable original-first audit commands.

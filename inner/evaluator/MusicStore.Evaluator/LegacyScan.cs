@@ -21,6 +21,8 @@ public static class LegacyScan
 
         /// <summary>コメント・説明文での言及。診断情報であり、依存の根拠にしない。</summary>
         public List<string> Mentions { get; } = new List<string>();
+
+        public List<string> Unresolved { get; } = new List<string>();
     }
 
     private static readonly string[] ScannedExtensions =
@@ -68,6 +70,12 @@ public static class LegacyScan
                 continue;
             }
 
+            if (Path.GetExtension(file).Equals(".sln", StringComparison.OrdinalIgnoreCase))
+            {
+                ScanSolution(artifactPath, file, result);
+                continue;
+            }
+
             if (LegacyFileName.IsMatch(Path.GetFileName(file)) && !IsModernProject(file))
             {
                 result.References.Add(relative + " :: 旧実装のファイルそのもの");
@@ -91,13 +99,91 @@ public static class LegacyScan
             }
 
             var (code, comments) = SplitComments(text, extension);
+            if (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+            {
+                // Resolve project references before the generic name signals.
+                // A reference to a modern project named MvcMusicStore is valid.
+                try
+                {
+                    var document = XDocument.Parse(code);
+                    foreach (var reference in document.Descendants().Where(e => e.Name.LocalName == "ProjectReference").ToArray())
+                    {
+                        ResolveProject(artifactPath, file, reference.Attribute("Include")?.Value, result, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                        reference.Remove();
+                    }
+                    code = document.ToString();
+                }
+                catch (Exception ex)
+                {
+                    result.Unresolved.Add(relative + " :: project parse: " + ex.GetType().Name);
+                }
+            }
             Collect(result.References, relative, code, "記述");
             Collect(result.Mentions, relative, comments, "コメント");
         }
 
         result.References.Sort(StringComparer.Ordinal);
         result.Mentions.Sort(StringComparer.Ordinal);
+        result.Unresolved.Sort(StringComparer.Ordinal);
         return result;
+    }
+
+    private static void ScanSolution(string root, string solution, Result result)
+    {
+        var relative = Path.GetRelativePath(root, solution);
+        try
+        {
+            var text = File.ReadAllText(solution);
+            if (!text.Contains("Microsoft Visual Studio Solution File", StringComparison.Ordinal))
+                throw new FormatException("Solution header missing");
+            var pattern = new Regex("^\\s*Project\\(\\\"(?<type>[^\\\"]+)\\\"\\)\\s*=\\s*\\\"[^\\\"]*\\\",\\s*\\\"(?<path>[^\\\"]+)\\\",\\s*\\\"[^\\\"]+\\\"\\s*$");
+            foreach (var line in text.Split('\n'))
+            {
+                if (!Regex.IsMatch(line, @"^\s*Project\(")) continue;
+                var match = pattern.Match(line.TrimEnd('\r'));
+                if (!match.Success) throw new FormatException("Unrecognized project entry");
+                if (match.Groups["type"].Value.Equals("{2150E333-8FDC-42A3-9474-1A3956D46DE8}", StringComparison.OrdinalIgnoreCase)) continue;
+                ResolveProject(root, solution, match.Groups["path"].Value, result, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            }
+        }
+        catch (Exception ex)
+        {
+            result.Unresolved.Add(relative + " :: solution parse: " + ex.GetType().Name);
+        }
+    }
+
+    private static void ResolveProject(string root, string owner, string reference, Result result, HashSet<string> visited)
+    {
+        var origin = Path.GetRelativePath(root, owner);
+        try
+        {
+            if (string.IsNullOrWhiteSpace(reference) || reference.Contains("$(", StringComparison.Ordinal))
+                throw new FormatException("Project path is not a literal");
+            var path = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(owner)!, reference.Replace('\\', Path.DirectorySeparatorChar)));
+            var relative = Path.GetRelativePath(Path.GetFullPath(root), path);
+            if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                throw new IOException("Project outside artifact");
+            if (!File.Exists(path) || !Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Project missing or unsupported");
+            for (var part = new FileInfo(path) as FileSystemInfo; part != null && part.FullName != Path.GetFullPath(root); part = part is FileInfo f ? f.Directory : ((DirectoryInfo)part).Parent)
+                if ((part.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Linked project path");
+            if (!visited.Add(path)) return;
+            var document = XDocument.Load(path);
+            var frameworks = document.Descendants().Where(e => e.Name.LocalName is "TargetFramework" or "TargetFrameworks" or "TargetFrameworkVersion")
+                .SelectMany(e => e.Value.Split(';')).Select(v => v.Trim()).ToArray();
+            if (frameworks.Length == 0 || frameworks.Any(v => v.Contains("$(", StringComparison.Ordinal)))
+                throw new FormatException("Unresolved framework");
+            var legacy = frameworks.Any(v => Regex.IsMatch(v, @"^(?:net4\d*|v4(?:\.|$))", RegexOptions.IgnoreCase))
+                || document.Descendants().Any(e => e.Name.LocalName is "Reference" or "PackageReference"
+                    && (e.Attribute("Include")?.Value ?? "").StartsWith("System.Web", StringComparison.OrdinalIgnoreCase));
+            if (legacy) result.References.Add(origin + " :: " + relative + "（旧フレームワーク・依存）");
+            foreach (var child in document.Descendants().Where(e => e.Name.LocalName == "ProjectReference"))
+                ResolveProject(root, path, child.Attribute("Include")?.Value, result, visited);
+        }
+        catch (Exception ex)
+        {
+            result.Unresolved.Add(origin + " :: " + reference + " :: " + ex.Message);
+        }
     }
 
     private static bool IsModernProject(string file)
@@ -107,8 +193,8 @@ public static class LegacyScan
         {
             var root = XDocument.Load(file).Root;
             var sdk = root?.Attribute("Sdk")?.Value ?? string.Empty;
-            var webSdk = sdk.Split(';').Any(x => x.Trim().Split('/')[0] == "Microsoft.NET.Sdk.Web")
-                || root?.Elements().Any(e => e.Name.LocalName == "Sdk" && e.Attribute("Name")?.Value == "Microsoft.NET.Sdk.Web") == true;
+            var webSdk = sdk.Split(';').Any(x => x.Trim().Split('/')[0] is "Microsoft.NET.Sdk.Web" or "Microsoft.NET.Sdk")
+                || root?.Elements().Any(e => e.Name.LocalName == "Sdk" && e.Attribute("Name")?.Value is "Microsoft.NET.Sdk.Web" or "Microsoft.NET.Sdk") == true;
             var frameworks = root?.Descendants().Where(e => e.Name.LocalName is "TargetFramework" or "TargetFrameworks")
                 .SelectMany(e => e.Value.Split(';')).ToArray() ?? Array.Empty<string>();
             return webSdk && frameworks.Length > 0 && frameworks.All(f =>

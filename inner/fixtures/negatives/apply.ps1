@@ -227,6 +227,15 @@ internal static class LegacyBridge
         Edit-File 'MusicStore.Web\Controllers\CheckoutController.cs' $anchor ($anchor + $nl + $mutation) $Name
     }
 
+    'legacy-solution-reference' {
+        $project = '<Project><PropertyGroup><TargetFrameworkVersion>v4.8</TargetFrameworkVersion></PropertyGroup></Project>'
+        [System.IO.File]::WriteAllText((Join-Path $Out 'Old.csproj'), $project, [System.Text.UTF8Encoding]::new($false))
+        $solution = 'Microsoft Visual Studio Solution File, Format Version 12.00' + $nl +
+            'Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Old", "Old.csproj", "{472C4947-C282-4C2D-9FAB-838DF7CD6752}"' + $nl + 'EndProject' + $nl
+        [System.IO.File]::WriteAllText((Join-Path $Out 'Migration.sln'), $solution, [System.Text.UTF8Encoding]::new($false))
+        $log.Add('Solution refers to a retained .NET Framework project')
+    }
+
     default {
         throw "未知の負例です: $Name"
     }

@@ -1,0 +1,233 @@
+{
+  "protocol_version": "1.0.0+retry.R1",
+  "frozen_at": "2026-09-18T15:52:47.872931+00:00",
+  "base_commit": "53fd09bb01d4b9937f9c324c2c11f12ece992f32",
+  "randomization_seed": 2276221400835857104,
+  "randomization": "Python random.Random(seed).shuffle(all six itertools.permutations)",
+  "runs_dir": "runs/exploration-20260919-ms1",
+  "slots": [
+    {
+      "slot": 1,
+      "block": 1,
+      "position": 1,
+      "condition": "explore",
+      "attempt": 1,
+      "run_id": "MS1-001-explore-001",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 2,
+      "block": 1,
+      "position": 2,
+      "condition": "preload",
+      "attempt": 1,
+      "run_id": "MS1-001-preload-001",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 3,
+      "block": 1,
+      "position": 3,
+      "condition": "explained",
+      "attempt": 1,
+      "run_id": "MS1-001-explained-001",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 4,
+      "block": 2,
+      "position": 1,
+      "condition": "explained",
+      "attempt": 2,
+      "run_id": "MS1-001-explained-002",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 5,
+      "block": 2,
+      "position": 2,
+      "condition": "preload",
+      "attempt": 2,
+      "run_id": "MS1-001-preload-002",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 6,
+      "block": 2,
+      "position": 3,
+      "condition": "explore",
+      "attempt": 2,
+      "run_id": "MS1-001-explore-002",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 7,
+      "block": 3,
+      "position": 1,
+      "condition": "explore",
+      "attempt": 3,
+      "run_id": "MS1-001-explore-003",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 8,
+      "block": 3,
+      "position": 2,
+      "condition": "explained",
+      "attempt": 3,
+      "run_id": "MS1-001-explained-003",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 9,
+      "block": 3,
+      "position": 3,
+      "condition": "preload",
+      "attempt": 3,
+      "run_id": "MS1-001-preload-003",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 10,
+      "block": 4,
+      "position": 1,
+      "condition": "explained",
+      "attempt": 4,
+      "run_id": "MS1-001-explained-004",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 11,
+      "block": 4,
+      "position": 2,
+      "condition": "explore",
+      "attempt": 4,
+      "run_id": "MS1-001-explore-004",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 12,
+      "block": 4,
+      "position": 3,
+      "condition": "preload",
+      "attempt": 4,
+      "run_id": "MS1-001-preload-004",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 13,
+      "block": 5,
+      "position": 1,
+      "condition": "preload",
+      "attempt": 5,
+      "run_id": "MS1-001-preload-005",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 14,
+      "block": 5,
+      "position": 2,
+      "condition": "explained",
+      "attempt": 5,
+      "run_id": "MS1-001-explained-005",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 15,
+      "block": 5,
+      "position": 3,
+      "condition": "explore",
+      "attempt": 5,
+      "run_id": "MS1-001-explore-005",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 16,
+      "block": 6,
+      "position": 1,
+      "condition": "preload",
+      "attempt": 6,
+      "run_id": "MS1-001-preload-006",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 17,
+      "block": 6,
+      "position": 2,
+      "condition": "explore",
+      "attempt": 6,
+      "run_id": "MS1-001-explore-006",
+      "cohort": "primary18"
+    },
+    {
+      "slot": 18,
+      "block": 6,
+      "position": 3,
+      "condition": "explained",
+      "attempt": 6,
+      "run_id": "MS1-001-explained-006",
+      "cohort": "primary18"
+    }
+  ],
+  "maximum_supplements": 6,
+  "condition_fingerprints": {
+    "task": "3d086b9ae34c0765e8c8328eb5dba099f82f70eaef714073d600bda492b18bd0",
+    "runtime": "d053f76a94912ce386609ebefe931b1206483b2f21e1c4fe40c3cac2455bcdc8",
+    "runtime_lock": "eae42e470f617b56f3ad6bf6977e553995424c6268f1d69cf7528cfe08dafba7",
+    "interventions": {
+      "explore": "d43abd937d889242b35f33d2bf5180696b521b972834916be0431fc05b584035",
+      "preload": "b9f47e5e77db5bd9385088fc08494e172187b861c1d2afb70ccce73906098f74",
+      "explained": "2436074ecd02a8b2ea1453c61a7edb3e73bdd7e67ac63ef364e153658d5f4dec"
+    }
+  },
+  "images": {
+    "worker": "sha256:d42e1e9d36311b17f9265e6abd1a81c017977159cfd4e0081afc7c5ff2825a6c",
+    "evaluator": "sha256:a0bd46f3cebfc2502fe930cb50827379180b7c3f4f297d5a9e2f7201f38d5c3d",
+    "gateway": "sha256:6c4deb4899c3fbb5226aeeb6721bd80bae442596d687dc5649aeabed0f721b2b"
+  },
+  "evaluator_sha256": "a7fd499922cd3f3d4ebb07da4798672a5cdb8fc9e5af064b448e4f78021f3672",
+  "research_code_hashes": {
+    "research/analyze.py": "8b200f0399fb2e6ce45ef037087f5d7e08d41c99abe9174fea38ec5790b76b77",
+    "research/acquire.py": "291f033978bdae3ca856886dd9792f4d0da1081b9bd90f7086c17eec5174e511",
+    "research/freeze.py": "d5d3688a27ffc4b7b5448459f785276ed23fa21ee6a989e00310c9701eb199b8",
+    "research/resume.py": "c021dd803ce0c6dc8747143f30d2763a1cce7b0f7b75771473b8be51f341c248",
+    "research/network_recovery.py": "253c3a53376029761f3fb6b5dd5c01d4897423c8abb9b991073c5c8234b52017",
+    "research/ledger.py": "f0ce9cb39ff6f5b3cf2789a5a2b0725ad89edef2c2e423f9f85aab71632e306c"
+  },
+  "protocol_sha256": "3abc6113f9181b8b5c9424521f2a2bb958ff73d76c0a19248a88bb6b2034b8f3",
+  "pilot": {
+    "root": "runs/acceptance-64ad09cd85ca",
+    "analysis": "artifacts/exploration/20260919/pilot-v1",
+    "audit_sha256": "bfe0c35b392bac5714ca48d3363a495ff6d8a4e6766634468cfe023455cd6410",
+    "analysis_sha256": "3a3b86c597ced4e922c278abfb3573f7621b56ef0ce8abda0e1eb1957fbfb90a",
+    "source_hashes_sha256": "77df12d7ccbd57a0275030524935aaccc2442fe824bbc2c22c135ca0a2cea077"
+  },
+  "hypotheses": [
+    "H1 initial delivery versus reacquisition",
+    "H2 large tool-output retention",
+    "H3 action grouping and repetition"
+  ],
+  "primary_metric": "sum of provider input_tokens + output_tokens over every model call",
+  "data_policy": "historical, primary and supplement cohorts remain separate; originals immutable; missing is null",
+  "human_review": "after exploration, before confirmation; per-arm complete passing Run nearest median total tokens",
+  "resumed_at_freeze": "2026-09-18T16:56:15.368172+00:00",
+  "resume_amendment": {
+    "segment": "resume-v1",
+    "authorization": "User instruction 2026-09-19: retry; diagnose and attempt repair if Docker network resources are exhausted again.",
+    "original_plan_sha256": "7e4df4a319557b161368fe4fb1d68f5456229d2e6f5619e5ce37bbb58e0d318a",
+    "prior_journal_sha256": "ca940c5f7f1f7fd195f7f846c5b8e554ce7243bdde29d378361bc457c5cb835c",
+    "prior_result_sha256": "13ba9d1d22cd2faf62f5b182dd4cfaa2d2c936c2bcb01a8e38421ddd8cc55173",
+    "prior_dispatches": [
+      "MS1-001-explore-001",
+      "MS1-001-preload-001",
+      "MS1-001-explained-001"
+    ],
+    "initial_pool_failures": [
+      "MS1-001-explained-001"
+    ],
+    "allow_premodel_pool_recovery": true,
+    "amendment_doc": "docs/ms1-exploration-20260919-retry-amendment.md",
+    "amendment_doc_sha256": "262f4213298f23d3117b9c761f109e157c464ed014068cc36ed0867066109858",
+    "initial_recovery_log_sha256": "1e621bf87002746249afc5a1cb2e8c985c2f3b9180149541d3feae2cfc6b8a93"
+  }
+}

@@ -1009,6 +1009,12 @@ public static class Checks
             return Fault(state, "R-029", "C-030", input, scenario);
         }
 
+        if (scenario.LegacyUnresolved.Count > 0)
+        {
+            return Make(state, "R-029", "C-030", input, Judgement.Error,
+                "旧実装依存を判定できません: " + string.Join(", ", scenario.LegacyUnresolved),
+                string.Join(Environment.NewLine, scenario.LegacyUnresolved));
+        }
         var ok = scenario.LegacyReferences.Count == 0;
         var mentions = scenario.LegacyMentions.Count == 0
             ? "コメント・説明文での旧名称の言及はありません。"

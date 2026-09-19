@@ -230,7 +230,9 @@ def stop_owned(root):
         name = state[role]
         item = inspect_container(name)
         if item:
-            if (item['Config'].get('Labels') or {}).get('sample2.run') != state['run_id']:
+            labels = item['Config'].get('Labels') or {}
+            if (labels.get('sample2.run') != state['run_id'] or
+                    state.get('run_instance_id') and labels.get('sample2.instance') != state['run_instance_id']):
                 raise RuntimeError('Container ownership mismatch')
             docker('stop', '--time', '10', name, timeout=40, check=False)
             item = inspect_container(name)
@@ -241,6 +243,85 @@ def stop_owned(root):
             listed = docker('ps', '-a', '--format', '{{.Names}}', timeout=30, check=False)
             confirmations.append(listed.returncode == 0 and name not in listed.stdout.splitlines())
     return all(confirmations)
+
+
+def cleanup_network(root, *, evidence_dir=None):
+    """Remove one stopped Run's private network, retaining containers and originals.
+
+    An external evidence directory supports maintenance of archived Runs without
+    rewriting their manifests. Failure is a receipt, never proof of absence.
+    """
+    root = Path(root)
+    state = util.read_json(root / 'runtime.json')
+    manifest = util.read_json(root / 'manifest.json')
+    started = time.monotonic()
+    receipt = {'run_id': manifest['run_id'], 'run_instance_id': manifest.get('run_instance_id'),
+               'network': state.get('network'), 'network_id': state.get('network_id'),
+               'started_at': run.now(), 'confirmed': False, 'status': 'failed'}
+    target = Path(evidence_dir) if evidence_dir else root / 'evidence/network-cleanup'
+    target.mkdir(parents=True, exist_ok=True)
+    attempt = uuid.uuid4().hex
+    try:
+        if (state.get('run_id') != manifest['run_id'] or not state.get('stop_confirmed')
+                or not manifest.get('stop_confirmed') or
+                state.get('run_instance_id') and state['run_instance_id'] != manifest.get('run_instance_id')):
+            raise RuntimeError('Run identity or stop confirmation missing')
+        name = state['network']
+        import re
+        if not re.fullmatch(r's2-net-[0-9a-f]{16}', name):
+            raise RuntimeError('Unexpected private network name')
+        # A successful listing is necessary even when inspect reports an error.
+        networks = docker('network', 'ls', '--format', '{{json .}}', timeout=30)
+        present = [json.loads(line) for line in networks.stdout.splitlines() if line.strip()]
+        found = any(n['Name'] == name for n in present)
+        ids = docker('ps', '-aq', timeout=30).stdout.split()
+        containers = []
+        if ids:
+            fmt = '{"id":{{json .Id}},"name":{{json .Name}},"state":{{json .State}},"labels":{{json .Config.Labels}},"networks":{{json .NetworkSettings.Networks}}}'
+            containers = [json.loads(line) for line in docker('inspect', *ids, '--format', fmt).stdout.splitlines() if line.strip()]
+        expected = {state['worker'], state['gateway']}
+        for item in containers:
+            owned = item['name'].lstrip('/') in expected
+            if name in (item.get('networks') or {}) and not owned:
+                raise RuntimeError('Foreign container refers to network')
+            if owned:
+                labels = item.get('labels') or {}
+                if (labels.get('sample2.run') != manifest['run_id'] or
+                        state.get('run_instance_id') and labels.get('sample2.instance') != state['run_instance_id']):
+                    raise RuntimeError('Container ownership mismatch')
+                if any(item['state'].get(k) for k in ('Running', 'Restarting', 'Paused')):
+                    raise RuntimeError('Container still active')
+        if found:
+            network = json.loads(docker('network', 'inspect', name, timeout=30).stdout)[0]
+            labels = network.get('Labels') or {}
+            if (network['Name'] != name or labels.get('sample2.run') != manifest['run_id'] or
+                    state.get('run_instance_id') and labels.get('sample2.instance') != state['run_instance_id'] or
+                    state.get('network_id') and network['Id'] != state['network_id']):
+                raise RuntimeError('Network ownership mismatch')
+            if not network.get('Internal') or network.get('Driver') != 'bridge' or network.get('Containers'):
+                raise RuntimeError('Network is not an unused internal bridge')
+            receipt['network_id'] = network['Id']
+            util.write_new_json(target / (attempt + '-intent.json'), {**receipt, 'network_snapshot': network,
+                'containers': [c for c in containers if c['name'].lstrip('/') in expected]})
+            docker('network', 'rm', network['Id'], timeout=30)
+        after = docker('network', 'ls', '--no-trunc', '--format', '{{json .}}', timeout=30)
+        if any(n['Name'] == name or receipt.get('network_id') == n['ID']
+               for n in (json.loads(line) for line in after.stdout.splitlines() if line.strip())):
+            raise RuntimeError('Network removal not confirmed')
+        receipt.update(confirmed=True, status='removed' if found else 'absent', containers_retained=True)
+    except Exception as exc:
+        receipt['error'] = {'type': type(exc).__name__, 'message': str(exc)}
+    receipt.update(ended_at=run.now(), duration_seconds=round(time.monotonic() - started, 3))
+    util.write_new_json(target / (attempt + '-result.json'), receipt)
+    return receipt
+
+
+def record_cleanup(root):
+    receipt = cleanup_network(root)
+    manifest = util.read_json(Path(root) / 'manifest.json')
+    manifest['network_cleanup'] = receipt
+    run.save_manifest(Path(root).parent, Path(root).name, manifest)
+    return receipt
 
 
 def start(repo, runs_dir, run_id):
@@ -262,7 +343,7 @@ def _start(repo, runs_dir, run_id):
         image_id(digest)
     unique = uuid.uuid4().hex[:16]
     private = 's2-net-' + unique
-    state = {'run_id': run_id, 'worker': 's2-worker-' + unique,
+    state = {'run_id': run_id, 'run_instance_id': manifest['run_instance_id'], 'worker': 's2-worker-' + unique,
              'gateway': 's2-gateway-' + unique, 'network': private, 'started_at': run.now()}
     util.write_new_json(root / 'runtime.json', state)
     for name in ('workspace', 'state', 'usage/raw', 'evidence'):
@@ -270,6 +351,7 @@ def _start(repo, runs_dir, run_id):
     config = root / 'state' / 'opencode.json'
     util.write_new_json(config, opencode_config(condition))
     gateway_args = ['create', '-i', '--name', state['gateway'], '--label', 'sample2.run=' + run_id,
+                    '--label', 'sample2.instance=' + manifest['run_instance_id'],
                     '--network', private, '--network-alias', 'gateway', *sandbox_args(),
                     *mount(root / 'usage/raw', '/records'), lock['images']['gateway'],
                     '--run-id', run_id, '--model', condition['runtime']['model_id'],
@@ -284,7 +366,9 @@ def _start(repo, runs_dir, run_id):
     gateway_process = None
     worker_process = None
     try:
-        docker('network', 'create', '--internal', '--label', 'sample2.run=' + run_id, private)
+        state['network_id'] = docker('network', 'create', '--internal', '--label', 'sample2.run=' + run_id,
+            '--label', 'sample2.instance=' + manifest['run_instance_id'], private).stdout.strip()
+        util.write_json_atomic(root / 'runtime.json', state)
         docker(*gateway_args)
         # Only gateway has an outbound network; it does not proxy arbitrary URLs.
         docker('network', 'connect', 'bridge', state['gateway'])
@@ -311,6 +395,7 @@ def _start(repo, runs_dir, run_id):
                 reason = 'operator_stop'
                 raise RuntimeError('Stopped before model dispatch')
             args = ['create', '--name', state['worker'], '--label', 'sample2.run=' + run_id,
+                    '--label', 'sample2.instance=' + manifest['run_instance_id'],
                     '--network', private, *sandbox_args(), *mount(root / 'inputs', '/input', True),
                     *mount(root / 'workspace', '/workspace'), *mount(root / 'state', '/state'),
                     '-e', 'OPENCODE_CONFIG=/state/opencode.json', lock['images']['worker'],
@@ -374,6 +459,9 @@ def _start(repo, runs_dir, run_id):
                         model_called=(True if observed_response else
                                       None if (root / 'usage/raw/started.jsonl').exists() else False))
         run.save_manifest(runs_dir, run_id, manifest)
+        # The measured interval ends above. Cleanup cannot change its outcome,
+        # duration or usage, and runs even when subsequent normalization fails.
+        manifest['network_cleanup'] = record_cleanup(root)
     from . import live_usage
     live_usage.collect(root)
     return manifest
@@ -382,10 +470,24 @@ def _start(repo, runs_dir, run_id):
 def request_stop(root):
     root = Path(root)
     manifest = util.read_json(root / 'manifest.json')
-    if manifest.get('ended_at') and manifest.get('stop_confirmed'):
+    if manifest.get('schema_version') != 2 and manifest.get('ended_at') and manifest.get('stop_confirmed') and not (root / 'runtime.json').exists():
         return {'run_id': root.name, 'stop_confirmed': True, 'already_stopped': True}
     if not (root / 'runtime.json').exists():
         raise ValueError('Run has no allocated runtime to stop')
+    if manifest.get('ended_at') and manifest.get('stop_confirmed'):
+        try:
+            with ownership.lease(root):
+                receipt = record_cleanup(root)
+        except BlockingIOError:
+            deadline = time.monotonic() + 55
+            while time.monotonic() < deadline:
+                manifest = util.read_json(root / 'manifest.json')
+                if manifest.get('network_cleanup'):
+                    break
+                time.sleep(1)
+            receipt = manifest.get('network_cleanup', {'confirmed': False, 'status': 'pending'})
+        return {'run_id': root.name, 'stop_confirmed': True, 'already_stopped': True,
+                'network_cleanup': receipt}
     util.write_json_atomic(root / 'stop-request.json', {'requested_at': run.now()})
     try:
         with ownership.lease(root):
@@ -399,15 +501,18 @@ def request_stop(root):
                             stop_method='container_exit',
                             end_reason='operator_stop' if stopped else 'stop_unconfirmed')
             run.save_manifest(root.parent, root.name, manifest)
+            record_cleanup(root)
     except BlockingIOError:
         deadline = time.monotonic() + 55
         while time.monotonic() < deadline:
             manifest = util.read_json(root / 'manifest.json')
-            if manifest.get('ended_at'):
+            if manifest.get('ended_at') and manifest.get('network_cleanup'):
                 break
             time.sleep(1)
         stopped = manifest.get('stop_confirmed', False)
-    result = {'run_id': root.name, 'stop_requested': True, 'stop_confirmed': stopped}
+    manifest = util.read_json(root / 'manifest.json')
+    result = {'run_id': root.name, 'stop_requested': True, 'stop_confirmed': stopped,
+              'network_cleanup': manifest.get('network_cleanup', {'confirmed': False, 'status': 'pending'})}
     util.write_json_atomic(root / 'stop-result.json', result)
     return result
 

@@ -1,0 +1,44 @@
+{
+  "review_stage": "post_freeze_manual_review_of_existing6",
+  "analysis_rules_changed": false,
+  "scope": "Semantic annotations supplement frozen heuristic flags. They do not replace any original row or claim human application acceptance.",
+  "cases": [
+    {
+      "run_id": "MS1-001-explained-001",
+      "tool_call_ids": ["call_00_Zy3tLYv14C8zncILP3xt7348", "call_01_mHjKVsDIxpeTl2AIVyLC9677"],
+      "finding": "The two SampleData.cs sources are not byte-identical: both contain 431 lines and 66,929 bytes, but 143 line positions differ. Album insertion order differs, including the first album. Read outputs expose lines 1-360 of each, then persist for 40 later calls.",
+      "implication": "Large retained inputs support H2's observation. Filename similarity does not justify deduplication or a claim of wasted rereading; order determines relevant IDs.",
+      "source_hashes": {
+        "MvcMusicStore-Assets/Code/Models/SampleData.cs": "fe10a61174d8eb22d0fa5b119a4cea2c79ba2bd16b302891384f695193298a38",
+        "MvcMusicStore-Completed/MvcMusicStore/Models/SampleData.cs": "cab15100c9230e325ae513c7a9d8b09dc90f21cd7b489a54b0fa93cc2e7512ed"
+      }
+    },
+    {
+      "run_id": "MS1-001-explained-001",
+      "tool_call_ids": ["call_00_zqnhgW3dfmGL1YZ8lcXw4395", "call_00_xqTEGQesCrUfJE5xQq0m5093", "call_00_OwqwNeKZq96WgLtNKJOC1471", "call_00_B9u2ycneWHg8rucD4rcB1320"],
+      "finding": "Agent-authored test.py twice tries JSON decoding on an empty response. A diagnostic shows HTTP 405. The helper default method='GET' overrides the expected POST when data is supplied. Changing the helper to select POST for data yields TOTAL 41 FAILED 0.",
+      "implication": "Repeated validation and a test-helper repair are observable. They do not establish an application defect. A product context edit also occurred during diagnosis, so do not attribute every intervening call to the helper alone."
+    },
+    {
+      "run_id": "MS1-001-explained-001",
+      "tool_call_ids": ["call_00_B9u2ycneWHg8rucD4rcB1320", "call_00_GR03OJKud37rRkFjliC68974"],
+      "finding": "The frozen test_failure_text flag matches FAILED in TOTAL 41 FAILED 0. These outputs report zero failures.",
+      "implication": "Use the column as a literal screening flag, not a count of failed tests. Preserve the original flag and this counterexample."
+    },
+    {
+      "run_id": "MS1-001-preload-002",
+      "tool_call_ids": ["call_00_hBq74Dd3V5S8YDFLwzCF4039"],
+      "finding": "The requests import probe reports ModuleNotFoundError while sqlite3 is available.",
+      "implication": "This traceback is an environment probe, not a failed product behavior requirement."
+    }
+  ],
+  "unknown_action_annotations": [
+    {"run_id":"MS1-001-explained-001","tool_call_id":"call_00_ET_e0BoKIoVkTTNugojdcAd7405","interpretation":"validation: run debug.py"},
+    {"run_id":"MS1-001-explained-002","tool_call_id":"call_00_SIOG6BnBZGN5Rqn0nDEA9979","interpretation":"validation/environment: process and server log inspection"},
+    {"run_id":"MS1-001-explained-002","tool_call_id":"call_00_ET_udUMCtQ1aKUZwKJWQU3J7684","interpretation":"validation: run e2e.py"},
+    {"run_id":"MS1-001-explore-001","tool_call_id":"call_00_ET_k4MNmkQ1K9XH0xIuo59L5977","interpretation":"validation: run test.sh"},
+    {"run_id":"MS1-001-explore-002","tool_call_id":"call_00_653UWrh0kI5q46NR1tZ88418","interpretation":"source data validation: duplicate/missing artists and album counts"},
+    {"run_id":"MS1-001-preload-001","tool_call_id":"call_00_4pl1tsnwild1u7sTUaSt4295","interpretation":"environment: requests and Python version probe"},
+    {"run_id":"MS1-001-preload-002","tool_call_id":"call_00_ET_bfSS2OrEP45xxd9JgwFT1125","interpretation":"source data processing: run parse_seed.py"}
+  ]
+}

@@ -547,6 +547,20 @@ runs/<run_id>/
 6. 実行上限の値（条件の `budget` に実測にもとづく値を入れる）
 7. `local-agent-monitor` の現行版との接続。**本仕様では接続していない。** 再開発を前提にしない
 
+## Browser evaluation recovery (2026-09-20)
+
+For evaluation 1.2.0, `score`/`rescore` preserve composed quality before attempting browser resource cleanup. `scoring_state=scored` means the quality result was adopted; `operation_status=cleanup_failed` independently makes the CLI exit nonzero. Aggregation exposes both `browser_cleanup` and quality. When browser coverage is incomplete, a bound `confirmed_product_failure` remains in the failure tally; an incomplete numeric quality remains null. Saved-corpus correction stops on pending cleanup rather than silently continuing the batch.
+
+Cleanup manifests are written before resource creation. Recovery reuses the existing controller lease and Docker commands, checks exact names, recorded IDs when available and a per-evaluation ownership label, deletes by freshly inspected IDs, then confirms absence by successful listing. It refuses foreign ownership, unexpected endpoints and daemon uncertainty. The browser server, its network and the composition container share this bounded manifest. A cleanup failure retains the original evaluation directory (a residual Windows bind mount may prevent a rename).
+
+Retry only the owned resources from that evaluation directory:
+
+```powershell
+python -m outer.harness.cli cleanup-browser --directory <record.directory resolved under the Run>
+```
+
+This appends cleanup attempts; it does not invoke a model, launch an evaluator/application/browser, change the artifact or repeat observations. The original cleanup failure and quality remain recorded. Aggregation reads the latest cleanup attempt, so it can show recovered operational status without rescore. Details and actual failure-injection evidence are in the [follow-up report](ms1-browser-cart-20260920-closeout.md).
+
 ## 11. 限界
 
 1. **1 課題・逐次実行の最小経路である。** 並列実行・複数課題・クラウド配備は含まない。

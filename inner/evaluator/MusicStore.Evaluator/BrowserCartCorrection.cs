@@ -30,23 +30,45 @@ public static class BrowserCartCorrection
                 .SequenceEqual(baseline.Requirements.Select(r => (r.Id, r.Judgement)).Order()))
             throw new InvalidDataException("Baseline check results disagree with its evaluation.");
 
-        var browser = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash, specHash,
-            options.ReviewRunInstanceId, catalog);
+        BrowserCartReview browser = null;
+        var faults = new List<string>();
+        try { browser = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash, specHash,
+            options.ReviewRunInstanceId, catalog); }
+        catch (Exception ex) { faults.Add("Browser evidence: " + ex.Message); }
+        if (browser != null) faults.AddRange(browser.Faults);
         foreach (var result in results.Where(r => r.CheckId is "C-015" or "C-016"))
         {
-            var observed = browser.For(result.CheckId);
+            var observed = browser?.For(result.CheckId);
             // The browser can veto an HTTP pass, but cannot erase a prior HTTP failure.
-            if (result.Judgement == Judgement.Pass && !observed.Pass) result.Judgement = Judgement.Fail;
-            result.Input += "; independent browser UI click from a verified starting cart";
-            result.Observation += "\n" + observed.Detail;
+            if (result.Judgement == Judgement.Pass)
+                result.Judgement = observed?.Complete != true ? Judgement.Blocked : observed.Pass ? Judgement.Pass : Judgement.Fail;
+            result.Input += "; independent browser assessment (action recorded separately)";
+            result.Observation += "\n" + (observed?.Detail ?? "Browser observation unavailable; HTTP failures retained.");
             result.Evidence += "\nbrowser-cart/receipt.json (relative to this evaluation directory)";
         }
+        foreach (var failure in browser?.ProductFailures ?? new())
+        {
+            var result = results.Single(r => r.CheckId == failure.Key);
+            if (result.Judgement == Judgement.Pass) result.Judgement = Judgement.Fail;
+            result.Observation += "\n" + failure.Value;
+            result.Evidence += "\nbrowser-cart/receipt.json";
+        }
         var output = Program.BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
-        output.BrowserCartCoverage = "agent_observed_C-015_C-016";
-        output.BrowserCartEvidenceSha256 = browser.ReceiptSha256;
-        output.ReviewRunInstanceId = browser.RunInstanceId;
-        output.ResearchStatus = output.ErrorCount == 0 && output.BlockedCount == 0 ? "complete" : "incomplete";
-        output.ObservationScope = "C-015/C-016: new browser clicks AND saved HTTP checks; all other checks inherited unchanged";
+        output.BrowserCartCoverage = browser?.Coverage ?? "evaluator_fault";
+        output.BrowserCartCases = browser?.Cases ?? new() { ["C-015"] = "not_run", ["C-016"] = "not_run" };
+        output.BrowserCartEvidenceSha256 = browser?.ReceiptSha256;
+        output.ReviewRunInstanceId = options.ReviewRunInstanceId;
+        output.EvaluatorFaults.AddRange(faults);
+        output.ResearchStatus = browser?.Complete == true && output.ErrorCount == 0 && output.BlockedCount == 0 ? "complete" : "incomplete";
+        if (output.ResearchStatus != "complete")
+        {
+            output.Quality = null;
+            // A technical gap cannot erase an already verified product failure.
+            output.Verdict = output.CriticalFailed.Count > 0 ? "fail_critical" : output.FailedCount > 0 ? "fail"
+                : faults.Count > 0 ? "error" : "blocked";
+        }
+        output.ObservationScope = "C-015/C-016 browser actions or unavailable observations plus saved HTTP checks; "
+            + "C-013 may be vetoed by verified two-add quantity evidence; other checks inherited";
         output.BaselineEvaluationSha256 = Program.Sha256File(baselineFile);
         output.BaselineResultsSha256 = Program.Sha256File(resultsFile);
         Program.WriteResults(options, ledger, results, output);
@@ -59,6 +81,6 @@ public static class BrowserCartCorrection
         };
         File.WriteAllText(Path.Combine(options.OutDir, "evaluator-manifest.json"), JsonSerializer.Serialize(manifest, Json.Write));
         Console.WriteLine($"Browser composition: {output.Verdict}, quality {output.Quality}; research {output.ResearchStatus}");
-        return output.Verdict == "error" ? 2 : 0;
+        return output.ResearchStatus != "complete" ? 2 : 0;
     }
 }

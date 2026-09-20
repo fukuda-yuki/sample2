@@ -32,9 +32,9 @@ def summarize(data, plan=None):
         scoring = row.get('scoring') or {}
         if scoring.get('evaluation_version') == '1.2.0' and (
                 scoring.get('research_status') != 'complete'
-                or scoring.get('browser_cart_coverage') != 'agent_observed_C-015_C-016'):
+                or scoring.get('browser_cart_coverage') not in ('agent_observed_C-015_C-016', 'agent_assessed_C-015_C-016')):
             row['quality'] = None
-            row['verdict'] = None
+            row['verdict'] = (row.get('confirmed_product_failure') or {}).get('verdict')
     groups=defaultdict(list)
     for r in data['runs']:
         groups[(r['cohort'],r['condition'])].append(r)
@@ -42,6 +42,8 @@ def summarize(data, plan=None):
     for (cohort,arm),runs in sorted(groups.items()):
         stat={'cohort':cohort,'condition':arm,'attempts':len(runs),
               'quality_pass':sum(r['verdict']=='pass' for r in runs),
+              'quality_fail':sum(r['verdict'] in ('fail','fail_critical') for r in runs),
+              'evaluation_incomplete':sum((r.get('scoring') or {}).get('research_status') != 'complete' for r in runs),
               'quality_missing':sum(r['quality'] is None for r in runs),
               'usage_complete':sum(r['usage_complete'] for r in runs),
               'execution_states':dict(Counter(r['execution']['state'] for r in runs))}

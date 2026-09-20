@@ -170,12 +170,24 @@ public static class Program
             }
         }
 
+        foreach (var failure in browserReview?.ProductFailures ?? new())
+        {
+            var result = results.Single(r => r.CheckId == failure.Key);
+            if (result.Judgement == Judgement.Pass) result.Judgement = Judgement.Fail;
+            result.Observation += "\n" + failure.Value;
+        }
         var output = BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
-        output.BrowserCartCoverage = browserReview == null ? "not_run_http_only" : "agent_observed_C-015_C-016";
+        output.BrowserCartCoverage = browserReview?.Coverage ?? "not_run_http_only";
+        output.BrowserCartCases = browserReview?.Cases ?? new();
         output.BrowserCartEvidenceSha256 = browserReview?.ReceiptSha256;
         output.ReviewRunInstanceId = browserReview?.RunInstanceId;
-        output.ResearchStatus = browserReview != null && output.ErrorCount == 0 && output.BlockedCount == 0
+        output.ResearchStatus = browserReview?.Complete == true && output.ErrorCount == 0 && output.BlockedCount == 0
             ? "complete" : "incomplete";
+        if (browserReview != null)
+        {
+            output.EvaluatorFaults.AddRange(browserReview.Faults);
+            if (!browserReview.Complete) output.Quality = null;
+        }
         WriteResults(options, ledger, results, output);
 
         var manifest = new EvaluatorManifest
@@ -205,7 +217,7 @@ public static class Program
             Console.WriteLine("[evaluator] critical failed: " + string.Join(", ", output.CriticalFailed));
         }
 
-        return output.Verdict == "error" ? 2 : 0;
+        return output.Verdict == "error" || browserReview != null && !browserReview.Complete ? 2 : 0;
     }
 
     /// <summary>

@@ -303,6 +303,12 @@
 | 見逃し（評価側の誤り） | 固定した成果物が変更されていても再採点を受け入れていた | `1.0.0` | 修正済み（`1.0.0` のうちに対応） | 同 §4.4 |
 | 見逃し（実行基盤の誤り） | 同じ採点連番を再指定すると、既存の作業領域・DB・ログを書き換えてから重複を拒否していた | `1.0.0` | **`1.1.0` で修正済み**。副作用の前に拒否し、既存資材を保全する | [`outer/verify/README.md`](../outer/verify/README.md) §4 V-4 |
 
+## Browser deletion classification (2026-09-20)
+
+Browser action evidence and product quality are separate. A verified populated cart with an absent or disabled removal control is a product failure, recorded as `observe-unavailable` with DOM, PNG and reason; it is never labeled `click-remove`. An unknown selector/custom interaction is `not-run-unsupported`, not an inferred failure. A two-add quantity violation is retained against C-013/R-012; deletion itself is `not_run_precondition`. Other previously verified HTTP failures remain failures even if browser work is incomplete. Complete numeric quality and any pass still require complete verified coverage.
+
+Receipt schema 2 records these actions and partial cases; schema 1 observations remain readable. Browser startup, missing/modified evidence and identity faults remain evaluator faults. `researchStatus`, `browserCartCases`, `evaluatorFaults` and quality outcomes are stored independently. Cleanup is an operational outcome, not another quality check. The [follow-up acceptance evidence](ms1-browser-cart-20260920-closeout.md) defines the bounded regression and preserved-corpus audit.
+
 ## 8. 見直し条件
 
 次のいずれかに該当する場合は、本仕様を採用せず [#3](https://github.com/fukuda-yuki/sample2/issues/3) へ課題見直しを返す。

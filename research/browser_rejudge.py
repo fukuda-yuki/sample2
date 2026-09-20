@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 import shutil
 
-from outer.harness import browser_cart, evaluate, profiles, util
+from outer.harness import browser_cart, browser_cleanup, evaluate, profiles, util
 from research.correction_inventory import write_new
 from research.validate import read, digest, safe_path
 
@@ -110,10 +110,16 @@ def run_batch(root, inventory_path, prior_root, summary_path, bundle, out, only=
                 code = browser_cart.complete_evaluation(root, condition, run/'frozen', baseline, published, assets, dest/'result', instance, 1001)
             after = {p: digest(root/p) for p in before}
             preservation = {'pass': before == after and frozen_before == util.tree_hashes(run/'frozen'),
-                            'files_after': after, 'fixed_files': len(frozen_before), 'exit_code': code}
+                            'files_after': after, 'fixed_files': len(frozen_before), 'exit_code': code,
+                            'evaluation_sha256': digest(dest/'result/evaluation.json')}
             write_new(dest/'preservation-after.json', preservation)
             if not preservation['pass']: raise ValueError('Preservation check failed')
+            if code == 3:
+                raise RuntimeError('Browser cleanup failed; quality retained. Retry cleanup-browser for ' + str(dest/'result'))
         result_dir = dest/'result'
+        if ((result_dir/'browser-resources.json').exists()
+                and not browser_cleanup.latest(result_dir)['confirmed']):
+            raise RuntimeError('Owned browser resources still need cleanup: ' + str(result_dir))
         output, base = read(result_dir/'evaluation.json'), read(baseline/'evaluation.json')
         if saved['corrected_quality'] != base['quality'] or saved['corrected_verdict'] != base['verdict']:
             raise ValueError('Prior quality summary disagrees with chosen baseline')
@@ -123,8 +129,12 @@ def run_batch(root, inventory_path, prior_root, summary_path, bundle, out, only=
         changed = [r['id'] for r in output.get('requirements', []) if base_requirements.get(r['id']) != r['judgement']]
         if complete and not set(changed).issubset({'R-014','R-015'}): raise ValueError('Unrelated requirement changed')
         checks = {r['checkId']: r['judgement'] for r in util.read_lines(result_dir/'results.jsonl') if r['checkId'] in ('C-015','C-016')}
+        preservation = read(dest/'preservation-after.json') if (dest/'preservation-after.json').exists() else {}
+        known_failure = browser_cart.stored_failure(result_dir, instance, util.artifact_hash(run/'frozen'),
+            digest(run/'evaluation-assets/requirements.json'), preservation.get('evaluation_sha256'), baseline_directory=baseline)
         row.update(browser_state='complete' if complete else 'evaluation_incomplete', quality=output['quality'] if complete else None,
-                   verdict=output['verdict'] if complete else None, changed_requirements=changed, checks=checks,
+                   verdict=output['verdict'] if complete else (known_failure or {}).get('verdict'),
+                   confirmed_product_failure=known_failure, changed_requirements=changed, checks=checks,
                    evidence=str(result_dir.relative_to(root)).replace('\\','/'),
                    baseline=str(baseline.relative_to(root)).replace('\\','/'), baseline_evaluation_id=base['evaluationId'],
                    browser_evaluation_id=output['evaluationId'], evaluator_sha256=run_lock['evaluator_files']['MusicStore.Evaluator.dll']['sha256'],
@@ -166,7 +176,8 @@ def main():
     p.add_argument('--only-instance', action='append')
     p.add_argument('--observations', type=Path, help='Reuse bound real captures for an evaluator-only correction; no new clicks')
     a = p.parse_args()
-    run_batch(a.root, a.inventory, a.prior_corrections, a.prior_quality, a.bundle, a.out, a.only_instance, a.observations)
+    result = run_batch(a.root, a.inventory, a.prior_corrections, a.prior_quality, a.bundle, a.out, a.only_instance, a.observations)
+    return 1 if result['incomplete'] else 0
 
 
-if __name__ == '__main__': main()
+if __name__ == '__main__': raise SystemExit(main())

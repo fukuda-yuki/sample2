@@ -134,6 +134,8 @@ public sealed class EvaluationOutput
 
     public string BrowserCartCoverage { get; set; } = "not_run_http_only";
 
+    public Dictionary<string, string> BrowserCartCases { get; set; } = new();
+
     public string BrowserCartEvidenceSha256 { get; set; }
 
     public string ReviewRunInstanceId { get; set; }

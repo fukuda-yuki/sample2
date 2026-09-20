@@ -14,12 +14,12 @@ from pathlib import Path
 
 from . import run as run_mod
 from . import util
-from . import browser_cart
+from . import browser_cart, browser_cleanup
 from .security import child_environment
 
 DEFAULT_EVALUATOR_DLL = 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll'
 SCORING_TIMEOUT_SECONDS = 1800
-SCORING_STATES = ('not_attempted', 'scored', 'evaluator_fault', 'rejected_mismatch',
+SCORING_STATES = ('not_attempted', 'scored', 'evaluator_fault', 'evaluation_incomplete', 'rejected_mismatch',
                   'duplicate_sequence')
 
 
@@ -256,9 +256,9 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     # 使用済み連番は上で拒否しているので、既存の作業領域を消すことはない。
     # 消さずに残すのは、中断された試行の資材を保全するためである。
     work_dir.mkdir(parents=True)
-    temporary = evaluations / ('.tmp-{}-{}'.format(sequence, uuid.uuid4().hex))
-    temporary.mkdir(parents=True)
     browser_required = browser_cart.required(str(version))
+    temporary = evaluations / (('{}-{}-{}'.format('attempt' if browser_required else '.tmp', sequence, uuid.uuid4().hex)))
+    temporary.mkdir(parents=True)
     http_out = temporary / 'http-only' if browser_required else temporary
     http_out.mkdir(exist_ok=True)
     command[command.index('--out') + 1] = str(http_out)
@@ -311,19 +311,28 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
         _append_index(run_dir, record)
         return record
     output = util.read_json(produced)
-    if exit_code != 0 or (browser_required and not browser_cart.coverage_complete(output)):
-        state, mismatches = 'evaluator_fault', []
+    mismatches = check_mismatches(output, condition, version, frozen, independent_hash, spec, spec_sha256)
+    if mismatches:
+        state = 'rejected_mismatch'
+    elif browser_required and not browser_cart.coverage_complete(output):
+        state = 'evaluator_fault' if output.get('evaluatorFaults') or (temporary/'browser-fault.json').exists() else 'evaluation_incomplete'
     else:
-        mismatches = check_mismatches(output, condition, version, frozen, independent_hash,
-                                      spec, spec_sha256)
-        state = 'rejected_mismatch' if mismatches else 'scored'
+        state = 'scored' if exit_code == 0 or browser_required and exit_code == 3 else 'evaluator_fault'
     record = _base_record(run_id, sequence, version, exit_code, independent_hash,
                           spec_sha256, state, output, mismatches, command,
                           evaluator_sha256=evaluator_sha256,
                           evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
                           timeout_seconds=timeout, work_dir=str(work_dir),
                           artifact_sha256_frozen=frozen_hash)
-    if state == 'scored':
+    record['evaluation_sha256'] = util.sha256_file(produced)
+    record['operation_status'] = ('cleanup_failed' if browser_required
+        and not browser_cleanup.latest(temporary)['confirmed'] else 'complete' if state == 'scored' else 'evaluation_incomplete')
+    if record['operation_status'] == 'cleanup_failed':
+        # A remaining Docker bind mount can prevent renaming this directory on
+        # Windows. Its durable name is already known to the cleanup manifest.
+        # Keep the quality and index here so cleanup-only recovery is possible.
+        target = temporary
+    elif state == 'scored':
         evaluation_id = output.get('evaluationId')
         if not evaluation_id:
             raise RuntimeError('評価結果に evaluationId がありません')
@@ -491,6 +500,7 @@ def _append_index(run_dir, record):
                         'evaluator_sha256', 'evaluator_sha256_pinned', 'verdict',
                         'quality', 'spec_sha256', 'artifact_sha256_outer', 'mismatches',
                         'browser_cart_coverage', 'browser_cart_evidence_sha256', 'research_status',
+                        'evaluation_sha256', 'operation_status',
                         'work_dir', 'recorded_at', 'directory') if key in record})
 
 

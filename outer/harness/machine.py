@@ -78,7 +78,8 @@ def acceptance(repo, runs_dir, task, runtime_id):
         telemetry = util.read_json(root / rid / 'telemetry-link.json')
         healthy = (row['execution']['state'] == 'completed' and row['scoring']['state'] == 'scored'
                    and usage.get('usage_complete') and usage.get('input_reached')
-                   and telemetry.get('verified') and (row.get('network_cleanup') or {}).get('confirmed'))
+                   and telemetry.get('verified') and (row.get('network_cleanup') or {}).get('confirmed')
+                   and row.get('operation_status') != 'cleanup_failed')
         results.append({'run_id': rid, 'healthy': bool(healthy), 'row': row})
         util.write_json_atomic(root / 'acceptance-progress.json', {'runs': results, 'complete': False})
         if not healthy:
@@ -95,6 +96,8 @@ def acceptance(repo, runs_dir, task, runtime_id):
         return sorted((r['id'], r['judgement'], sorted(r.get('failedChecks', []))) for r in data['requirements'])
     restored_ok = restored_ok and judgments(root / first['run_id'], original) == judgments(restored, again)
     restored_row = aggregate.row_for(restored.parent, restored.name)
+    if restored_row.get('operation_status') == 'cleanup_failed':
+        raise RuntimeError('Restored evaluation cleanup failed; quality retained at ' + str(restored))
     restored_ok = restored_ok and all(first[k] == restored_row[k] for k in ('quality', 'verdict', 'usage', 'artifact'))
     if not restored_ok:
         raise RuntimeError('Restored scoring differs')

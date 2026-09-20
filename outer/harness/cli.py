@@ -90,6 +90,8 @@ def build_parser():
     verify.add_argument('--package', required=True)
     verify.add_argument('--sha256')
 
+    cleanup = sub.add_parser('cleanup-browser', help='所有する残存資源だけを回収する。モデル・評価・ブラウザーを再実行しない')
+    cleanup.add_argument('--directory', type=Path, required=True)
     sub.add_parser('build-evaluator', help='内側の評価器をビルドする（採点ではない）')
     view = sub.add_parser('profiles', help='課題・介入・実行環境の一覧または合成設定を表示する')
     view.add_argument('--task')
@@ -182,6 +184,9 @@ def main(argv=None):
     elif args.command == 'verify-package':
         result = preserve.verify(args.archive, args.package, args.sha256)
         result = {'package_id': args.package, 'file_count': len(result['files'])}
+    elif args.command == 'cleanup-browser':
+        from .browser_cleanup import cleanup
+        result = cleanup(args.directory.resolve())
     elif args.command == 'build-evaluator':
         code = evaluate.publish_evaluator(repo)
         result = {'exit_code': code}
@@ -204,6 +209,10 @@ def main(argv=None):
         from .machine import acceptance
         result = acceptance(repo, runs_dir, args.task, args.runtime)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    if args.command == 'cleanup-browser' and not result.get('confirmed'):
+        return 1
+    if args.command in ('score', 'rescore', 'run') and result.get('operation_status') == 'cleanup_failed':
+        return 1
     if args.command in ('start', 'stop', 'run') and result.get('network_cleanup') is not None:
         if not result['network_cleanup'].get('confirmed'):
             return 1

@@ -116,6 +116,45 @@ static class BrowserCartReviewTests
             && Checks.Registry["C-016"](state).Judgement == Judgement.Fail);
         check("browser CLI requires instance pairing", CliOptions.Parse(new[] { "--artifact", ".", "--out", ".", "--browser-cart-evidence", "receipt.json" }) == null);
         CheckComposition(check);
+        CheckUnperformed(check);
+    }
+
+    static void CheckUnperformed(Action<string, bool> check)
+    {
+        foreach (var reason in new[] { "control_absent", "control_disabled" })
+        {
+            using var f = new Fixture();
+            f.Receipt.SchemaVersion = 2;
+            f.Receipt.Removals[0].Action = "observe-unavailable";
+            f.Receipt.Removals[0].Reason = reason;
+            var review = f.Load();
+            check(reason + " is assessed product failure without a click", review.Complete
+                && !review.For("C-015").Pass && review.For("C-015").Status == "unavailable");
+        }
+        using var unsupported = new Fixture();
+        unsupported.Receipt.SchemaVersion = 2;
+        unsupported.Receipt.Removals[0].Action = "not-run-unsupported";
+        unsupported.Receipt.Removals[0].Reason = "selector_ambiguous_or_unsupported";
+        check("unknown selector is incomplete, not an established product failure", !unsupported.Load().Complete
+            && !unsupported.Load().For("C-015").Complete && unsupported.Load().ProductFailures.Count == 0);
+        using var quantity = new Fixture();
+        quantity.Receipt.SchemaVersion = 2;
+        var r = quantity.Receipt.Removals[0];
+        r.Action = "not-run-precondition"; r.Reason = "quantity_after_two_adds"; r.AddCount = 2;
+        r.Before = quantity.Capture("quantity.json", Cart(3, "26.97"), false);
+        r.SetupBefore = quantity.Capture("empty.json", Cart(0, "0.00"), false);
+        r.SetupScreenshot = quantity.File("empty.png", "synthetic empty screenshot");
+        var partial = quantity.Load();
+        check("two-add product failure survives unperformed removal", !partial.Complete
+            && partial.ProductFailures.ContainsKey("C-013") && partial.For("C-015").Status == "not_run_precondition");
+        r.AddCount = 1;
+        var rejected = false;
+        try { quantity.Load(); } catch (InvalidDataException) { rejected = true; }
+        check("quantity claim without two additions is rejected", rejected);
+        using var launch = new Fixture();
+        launch.Receipt.SchemaVersion = 2; launch.Receipt.Removals.Clear(); launch.Receipt.Faults.Add("launch failed");
+        check("launch failure carries no product judgement", !launch.Load().Complete
+            && launch.Load().ProductFailures.Count == 0 && launch.Load().Faults.Count == 1);
     }
 
     static void CheckComposition(Action<string, bool> check)
@@ -163,6 +202,19 @@ static class BrowserCartReviewTests
         var missing = Run("missing", Path.Combine(f.Root, "absent.json"));
         check("missing browser evidence is evaluator fault, never HTTP fallback", missing.Code == 2
             && missing.Value.Verdict == "error" && missing.Value.Quality == null && missing.Value.ResearchStatus == "incomplete");
+        before.Verdict = "fail"; before.Quality = 66.67;
+        before.Requirements.Single(r => r.Id == "R-029").Judgement = "fail";
+        var failedLines = resultLines.ToArray();
+        failedLines[2] = JsonSerializer.Serialize(new CheckResult { RequirementId = "R-029", CheckId = "C-030", Judgement = "fail" });
+        System.IO.File.WriteAllLines(resultsPath, failedLines); SaveBaseline();
+        var failedMissing = Run("failed-missing", Path.Combine(f.Root, "absent.json"));
+        check("HTTP failure remains fail alongside missing browser evidence", failedMissing.Code == 2
+            && failedMissing.Value.Verdict == "fail" && failedMissing.Value.Quality == null
+            && failedMissing.Value.ResearchStatus == "incomplete" && failedMissing.Value.EvaluatorFaults.Count > 0
+            && failedMissing.Value.Requirements.Single(r => r.Id == "R-029").Judgement == "fail");
+        before.Verdict = "pass"; before.Quality = 100;
+        before.Requirements.Single(r => r.Id == "R-029").Judgement = "pass";
+        System.IO.File.WriteAllLines(resultsPath, resultLines); SaveBaseline();
         before.ArtifactSha256 = "other"; SaveBaseline();
         check("composition rejects other target baseline", Run("other").Code == 2);
         before.ArtifactSha256 = ah; before.Quality = 0; SaveBaseline();

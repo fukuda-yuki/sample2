@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "catalog-compact",
+  "method": "catalog-return",
+  "contract_version": "1.0.0",
+  "append_source_packet": false
+}

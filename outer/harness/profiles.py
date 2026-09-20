@@ -7,7 +7,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-from . import run, util
+from . import run, util, catalog_input
 
 
 def identifier(value):
@@ -33,8 +33,13 @@ def resolve(repo, task_id, intervention_id, runtime_id='deepseek'):
     runtime = read(repo, 'runtimes', runtime_id)
     if task['task_id'] != task_id or intervention['id'] != intervention_id or runtime['id'] != runtime_id:
         raise ValueError('Profile identity mismatch')
-    if intervention['method'] not in ('explore', 'preload', 'explained'):
+    if intervention['method'] not in ('explore', 'preload', 'explained', catalog_input.METHOD):
         raise ValueError('Unsupported intervention method')
+    if intervention['method'] == catalog_input.METHOD:
+        if (type(intervention.get('append_source_packet')) is not bool
+                or runtime.get('input_mount') != '/inputs'
+                or runtime.get('prompt_transport') != 'stdin'):
+            raise ValueError('Catalog conditions require the versioned catalog runtime')
     if (runtime['model_id'] != 'deepseek-v4.1-flash'
             or runtime['endpoint'] != 'https://opencode.ai/zen/go/v1/chat/completions'
             or runtime['concurrency'] != 1 or runtime['subagents'] is not False
@@ -54,7 +59,11 @@ def resolve(repo, task_id, intervention_id, runtime_id='deepseek'):
     return condition
 
 
-def prepare_prompt(condition, source):
+def runtime_root(repo, task_id, runtime):
+    return Path(repo) / 'artifacts/runtime' / identifier(runtime.get('artifact_namespace', task_id))
+
+
+def prepare_prompt(condition, source, catalog=None):
     """Public contract is identical in all arms. No scorer/fixture is read here."""
     request = condition['migration_request']
     common = ('Implement the following modernization in /workspace. The original source is '
@@ -65,6 +74,19 @@ def prepare_prompt(condition, source):
               'Environment: .NET SDK 8; target net8.0. EF Core SQLite 8.0.31 and '
               'Microsoft.Data.Sqlite 8.0.31 are available offline. No Internet access. '
               'Use /tmp for scratch databases.\n\n' + request)
+    if condition['intervention']['method'] == catalog_input.METHOD:
+        common = common.replace('/input/legacy-source', '/inputs/legacy-source')
+        derived = Path(catalog)
+        confirmation = (derived / 'common.json').read_bytes().decode('utf-8')
+        common += '\n\nCatalog preparation:\n' + confirmation
+        blocks = [{'source': '/inputs/catalog-derived/common.json', 'text': confirmation}]
+        prompt = common
+        if condition['intervention']['append_source_packet']:
+            raw = (derived / 'raw-first.txt').read_bytes().decode('utf-8')
+            blocks.append({'source': '/inputs/catalog-derived/raw-first.txt', 'text': raw})
+            prompt += raw
+        return prompt, {'method': catalog_input.METHOD, 'common_sha256': util.sha256_bytes(common.encode()),
+            'blocks': [{**b, 'sha256': util.sha256_bytes(b['text'].encode())} for b in blocks]}
     blocks = []
     method = condition['intervention']['method']
     if method == 'preload':
@@ -87,8 +109,8 @@ def prepare_prompt(condition, source):
 def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'):
     repo = Path(repo).resolve()
     condition = resolve(repo, task_id, intervention, runtime_id)
-    runtime_root = repo / 'artifacts' / 'runtime' / task_id
-    lock = util.read_json(runtime_root / 'lock.json')
+    prepared_root = runtime_root(repo, task_id, condition['runtime'])
+    lock = util.read_json(prepared_root / 'lock.json')
     if not lock.get('evaluator_build', {}).get('clean_worktree'):
         raise ValueError('Prepare an evaluator from a clean committed checkout before spending model usage')
     if lock['opencode_version'] != condition['runtime']['opencode_version']:
@@ -97,13 +119,21 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
     source_lock = util.read_json(source.parent / (source.name + '.json'))
     if util.tree_hashes(source) != source_lock['files']:
         raise ValueError('Prepared source changed')
-    prompt, context = prepare_prompt(condition, source)
+    inputs = {'legacy-source': source}
+    if condition['intervention']['method'] == catalog_input.METHOD:
+        inputs.update(catalog_input.prepare(repo, source))
+        condition['input_policy']['allowlist'] += ['catalog-derived', 'catalog-tools']
+    prompt, context = prepare_prompt(condition, source, inputs.get('catalog-derived'))
+    if 'catalog-derived' in inputs:
+        receipt = inputs['catalog-derived'].parent / 'preparation.json'
+        context['preparation'] = {'path': str(receipt), 'sha256': util.sha256_file(receipt),
+                                  **util.read_json(receipt)}
     frozen_profiles = {'task': read(repo, 'tasks', task_id),
                        'intervention': read(repo, 'interventions', intervention),
                        'runtime': read(repo, 'runtimes', runtime_id)}
     condition['runtime_lock'] = lock
     condition['agent']['tool_versions'] = lock['versions']
-    bundle = runtime_root / 'evaluator'
+    bundle = prepared_root / 'evaluator'
     if util.tree_hashes(bundle) != lock['evaluator_files']:
         raise ValueError('Prepared evaluator changed')
     condition['evaluation'].update(
@@ -112,7 +142,7 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
         evaluator_sha256=lock['evaluator_sha256'],
         evaluator_build=lock['evaluator_build'])
     manifest = run.create_run(repo, runs_dir, task_id, intervention, attempt,
-                              {'legacy-source': source}, resolved_condition=condition)
+                              inputs, resolved_condition=condition)
     root = Path(runs_dir) / manifest['run_id']
     for name, value in frozen_profiles.items():
         util.write_new_json(root / 'profiles' / (name + '.json'), value)

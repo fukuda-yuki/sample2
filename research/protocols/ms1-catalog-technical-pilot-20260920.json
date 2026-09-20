@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "cohort": "catalog-technical-pilot-20260920",
+  "frozen_at": "2026-09-20T04:44:03.941570+00:00",
+  "base_commit": "58b263cd986fdf6aada1f52f7c7cb69e9820da6e",
+  "task": "MS1-001",
+  "runtime": "deepseek-catalog-v1",
+  "runs_dir": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\runs\\catalog-technical-pilot-20260920",
+  "slots": [
+    {
+      "slot": 1,
+      "block": 1,
+      "position": 1,
+      "condition": "catalog-compact",
+      "attempt": 1,
+      "run_id": "MS1-001-catalog-compact-001"
+    },
+    {
+      "slot": 2,
+      "block": 1,
+      "position": 2,
+      "condition": "catalog-expanded",
+      "attempt": 1,
+      "run_id": "MS1-001-catalog-expanded-001"
+    },
+    {
+      "slot": 3,
+      "block": 2,
+      "position": 1,
+      "condition": "catalog-expanded",
+      "attempt": 2,
+      "run_id": "MS1-001-catalog-expanded-002"
+    },
+    {
+      "slot": 4,
+      "block": 2,
+      "position": 2,
+      "condition": "catalog-compact",
+      "attempt": 2,
+      "run_id": "MS1-001-catalog-compact-002"
+    }
+  ],
+  "maximum_runs": 4,
+  "maximum_supplements": 0,
+  "randomization_seed": 3720733146551948321,
+  "randomization": "random.Random(seed).shuffle([expanded-compact, compact-expanded])",
+  "budget": {
+    "run_seconds": 1800,
+    "provider_seconds": 600,
+    "concurrency": 1
+  },
+  "model": "deepseek-v4.1-flash",
+  "agent": "OpenCode 1.17.11",
+  "fallback": false,
+  "condition_fingerprints": {
+    "task": "3d086b9ae34c0765e8c8328eb5dba099f82f70eaef714073d600bda492b18bd0",
+    "runtime": "99242486a1c2abf44b7d7f7e64f1e21ca8f7909b5b46fe937d6478cf098dcc55",
+    "runtime_lock": "0fbdb8e1293056d3bd735976312905a90b2777218d9e1368000207d8299915dc",
+    "interventions": {
+      "catalog-expanded": "06bf2ea921e9e67a894bca0216d8c708d791e43501021128363672c255038394",
+      "catalog-compact": "fe674b62c0d47f09245fef8bdac27958c5898af01e03478ec688b9389a8f7847"
+    }
+  },
+  "images": {
+    "worker": "sha256:cd0231d5717baf4e334997aa84427cf00184dbf85d558e83c1b23793b4d5d31e",
+    "evaluator": "sha256:1756f71dd8e279cb6d69d5e6bec470e7f9a8ad9e9eda57dcff705051c5ab5a74",
+    "gateway": "sha256:f5c9c50bbcf205133f7eeab0c4d79476cf14efd15656257667200dd0984f02f9"
+  },
+  "evaluator_sha256": "594d79ddd2929eaabf0978f8f22bc8bcfcbcf4f06974b98f194b16961c063128",
+  "probe": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\artifacts\\catalog-pilot\\20260920\\connection-01",
+  "probe_result_sha256": "65f556859ba202faccd67b0f5f6c2cd54002de8940dded6fd214ac8a3394dd7f",
+  "code_hashes": {
+    "research/catalog_pilot.py": "918a968732e37ed95c8e848769df0b1ebfe83f2da94f2f4d7fc85f7638abb36a",
+    "research/catalog_connection_probe.py": "99cd230dcdac31c65d619e92a47cc04b9bcfd8a06cd190d37e3ae81828bd306e",
+    "research/catalog_return_contract.py": "3450868c36509f533b5a7a07f692d3e774f7c3bc12e9449eb5306217eeb63214",
+    "docs/ms1-catalog-return-two-condition-spec.md": "f0cce0790268bd52129beab711834d98ae9efd5eaa310a5915fb06b66a53f723"
+  },
+  "primary_measure": "provider input_tokens + output_tokens across all attempts; incomplete totals null with known sums separate",
+  "quality": "public 29 requirements with ordinary browser evaluation through PR 12; retain known failure and incomplete coverage separately",
+  "stop_rules": [
+    "authentication/quota failure",
+    "model/policy mismatch",
+    "initial input mismatch",
+    "source/file integrity mismatch",
+    "unconfirmed resource cleanup",
+    "technical environment failure; diagnose before any further model dispatch"
+  ],
+  "product_failure_policy": "retain and continue; never replace or regenerate a failed slot",
+  "evaluation_recovery": "reuse the same frozen artifact only; retain original evaluation",
+  "inference_limit": "connection and behavior observation only; no efficacy or noninferiority conclusion",
+  "next_stage": "separately freeze repetitions, primary comparison, quality rule and stopping rules after technical pilot review",
+  "excluded": [
+    "historical 24 artifact reevaluation",
+    "historical ZIP recreation",
+    "bulk historical token audit",
+    "exploration reruns"
+  ]
+}

@@ -100,6 +100,7 @@ def build_parser():
     prep = sub.add_parser('prepare', help='ソースと隔離実行イメージを用意する。モデルは呼ばない')
     prep.add_argument('--rebuild', action='store_true')
     prep.add_argument('--task', default='MS1-001')
+    prep.add_argument('--runtime', default='deepseek')
     status = sub.add_parser('status', help='Runの状態と観測済み呼び出し数')
     status.add_argument('--run', required=True)
     one = sub.add_parser('run', help='実モデルで実行し、停止・回収・採点・保全する')
@@ -194,7 +195,7 @@ def main(argv=None):
         result = (profiles.resolve(repo, args.task, args.intervention, args.runtime)
                   if args.task else profiles.inventory(repo))
     elif args.command == 'prepare':
-        result = runtime.prepare(repo, task_id=args.task, rebuild=args.rebuild)
+        result = runtime.prepare(repo, task_id=args.task, rebuild=args.rebuild, runtime_id=args.runtime)
     elif args.command == 'status':
         root = run_mod.run_dir_for(runs_dir, args.run)
         result = aggregate.row_for(runs_dir, args.run)

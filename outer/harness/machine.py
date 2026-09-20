@@ -13,7 +13,8 @@ def fingerprint(value):
 def expected_conditions(repo, task, runtime_id, interventions):
     return {'task': fingerprint(profiles.read(repo, 'tasks', task)),
             'runtime': fingerprint(profiles.read(repo, 'runtimes', runtime_id)),
-            'runtime_lock': fingerprint(util.read_json(Path(repo)/'artifacts/runtime'/task/'lock.json')),
+            'runtime_lock': fingerprint(util.read_json(profiles.runtime_root(
+                repo, task, profiles.read(repo, 'runtimes', runtime_id)) / 'lock.json')),
             'interventions': {i:fingerprint(profiles.read(repo, 'interventions', i)) for i in interventions}}
 
 

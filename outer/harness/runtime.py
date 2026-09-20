@@ -11,7 +11,7 @@ import tarfile
 import time
 import uuid
 
-from . import profiles, run, util, ownership
+from . import profiles, run, util, ownership, catalog_input
 from .security import child_environment
 
 
@@ -65,14 +65,15 @@ def source(repo, task):
     return dest
 
 
-def prepare(repo, *, task_id='MS1-001', rebuild=False):
+def prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
     repo = Path(repo).resolve()
     profiles.identifier(task_id)
-    attempt = repo / 'artifacts/runtime' / task_id / 'preparation' / uuid.uuid4().hex
+    preset = profiles.read(repo, 'runtimes', runtime_id)
+    attempt = profiles.runtime_root(repo, task_id, preset) / 'preparation' / uuid.uuid4().hex
     attempt.mkdir(parents=True)
     util.write_new_json(attempt / 'request.json', {'task':task_id, 'rebuild':rebuild, 'started_at':run.now()})
     try:
-        result = _prepare(repo, task_id=task_id, rebuild=rebuild)
+        result = _prepare(repo, task_id=task_id, rebuild=rebuild, runtime_id=runtime_id)
         util.write_new_json(attempt / 'result.json', result)
         return result
     except Exception as exc:
@@ -81,19 +82,19 @@ def prepare(repo, *, task_id='MS1-001', rebuild=False):
         raise RuntimeError('Preparation failed; retained record: ' + str(attempt / 'failure.json')) from exc
 
 
-def _prepare(repo, *, task_id='MS1-001', rebuild=False):
+def _prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
     repo = Path(repo).resolve()
     docker('info', '--format', '{{.OSType}}', timeout=30)
     task = profiles.read(repo, 'tasks', task_id)
     source(repo, task)
-    root = repo / 'artifacts' / 'runtime' / task_id
+    profile = profiles.read(repo, 'runtimes', runtime_id)
+    root = profiles.runtime_root(repo, task_id, profile)
     root.mkdir(parents=True, exist_ok=True)
     if (root / 'lock.json').exists() and not rebuild:
         lock = util.read_json(root / 'lock.json')
         for digest in lock['images'].values():
             image_id(digest)
         return lock
-    profile = profiles.read(repo, 'runtimes', 'deepseek')
     build_id = uuid.uuid4().hex
     build_root = root / 'builds' / build_id
     build_root.mkdir(parents=True)
@@ -134,7 +135,7 @@ def _prepare(repo, *, task_id='MS1-001', rebuild=False):
             'evaluator_sha256': util.sha256_file(bundle / task['evaluation']['assembly']),
             'evaluator_build': {'source_path': 'inner/evaluator/' + task['evaluation']['project'],
                                 'command': 'docker build --target evaluator', 'sdk_version': sdk,
-                                'sha256_origin': 'artifacts/runtime/' + task_id + '/builds/' + build_id,
+                                'sha256_origin': build_root.relative_to(repo).as_posix(),
                                 'clean_worktree': not bool(command(['git', 'status', '--porcelain'], cwd=repo).stdout),
                                 'source_commit': command(['git', 'rev-parse', 'HEAD'], cwd=repo).stdout.strip()},
             'created_at': run.now()}
@@ -192,8 +193,10 @@ try:
 except OSError: result['input_readonly'] = True
 print(json.dumps(result))
 """
+    input_mount = condition['runtime'].get('input_mount', '/input')
+    code = code.replace('/input/', input_mount + '/')
     output = docker('run', '--rm', '--network', state['network'], *sandbox_args(),
-                    *mount(root / 'inputs', '/input', True),
+                    *mount(root / 'inputs', input_mount, True),
                     condition['runtime_lock']['images']['worker'], 'python3', '-c', code, timeout=45)
     evidence = json.loads(output.stdout)
     evidence['verified'] = all(evidence.values())
@@ -350,13 +353,17 @@ def _start(repo, runs_dir, run_id):
         (root / name).mkdir(parents=True, exist_ok=True)
     config = root / 'state' / 'opencode.json'
     util.write_new_json(config, opencode_config(condition))
+    catalog = condition['intervention']['method'] == catalog_input.METHOD
     gateway_args = ['create', '-i', '--name', state['gateway'], '--label', 'sample2.run=' + run_id,
                     '--label', 'sample2.instance=' + manifest['run_instance_id'],
                     '--network', private, '--network-alias', 'gateway', *sandbox_args(),
-                    *mount(root / 'usage/raw', '/records'), lock['images']['gateway'],
+                    *mount(root / 'usage/raw', '/records'),
+                    *(mount(root / 'inputs', '/contract', True) if catalog else []), lock['images']['gateway'],
                     '--run-id', run_id, '--model', condition['runtime']['model_id'],
                     '--session-id', manifest.get('run_instance_id', run_id),
                     '--upstream-timeout', str(condition['runtime'].get('provider_timeout_seconds', 120))]
+    if catalog:
+        gateway_args += ['--expected-prompt', '/contract/prompt.txt']
     manifest.update(started_at=run.now(), runner={'id': 'opencode', 'version': lock['opencode_version']},
                     synthetic=False, model_called=False)
     run.save_manifest(runs_dir, run_id, manifest)
@@ -396,13 +403,18 @@ def _start(repo, runs_dir, run_id):
                 raise RuntimeError('Stopped before model dispatch')
             args = ['create', '--name', state['worker'], '--label', 'sample2.run=' + run_id,
                     '--label', 'sample2.instance=' + manifest['run_instance_id'],
-                    '--network', private, *sandbox_args(), *mount(root / 'inputs', '/input', True),
+                    '--network', private, *sandbox_args(),
+                    *mount(root / 'inputs', condition['runtime'].get('input_mount', '/input'), True),
                     *mount(root / 'workspace', '/workspace'), *mount(root / 'state', '/state'),
                     '-e', 'OPENCODE_CONFIG=/state/opencode.json', lock['images']['worker'],
                     'opencode', 'run', 'Carry out the attached modernization task.',
                     '--pure', '--format', 'json', '--title', run_id,
                     '--model', 'sample2/' + condition['runtime']['model_id'],
                     '--file', '/input/prompt.txt']
+            if catalog:
+                at = args.index(lock['images']['worker'])
+                args = args[:at+1] + ['python3', '-c', catalog_input.WORKER_PREFLIGHT,
+                                     'sample2/' + condition['runtime']['model_id']]
             docker(*args)
             with (root / 'evidence/agent.jsonl').open('xb') as log:
                 worker_process = subprocess.Popen(['docker', 'start', '-a', state['worker']],

@@ -53,12 +53,14 @@ class Gateway(ThreadingHTTPServer):
     daemon_threads = False
 
     def __init__(self, address, root, run_id, model, secret, *, upstream_host='opencode.ai',
-                 upstream_port=443, tls=True, session_id=None, upstream_timeout=120):
+                 upstream_port=443, tls=True, session_id=None, upstream_timeout=120, expected_prompt=None):
         super().__init__(address, Handler)
         self.root, self.run_id, self.model, self.secret = Path(root), run_id, model, secret
         self.session_id = session_id or run_id
         self.upstream_host, self.upstream_port, self.tls = upstream_host, upstream_port, tls
         self.upstream_timeout = upstream_timeout
+        self.expected_prompt = Path(expected_prompt).read_bytes().decode('utf-8') if expected_prompt else None
+        self.input_checked = False
         self.lock = threading.Lock()
         self.failed = threading.Event()
         self.stopping = threading.Event()
@@ -138,6 +140,15 @@ class Handler(BaseHTTPRequestHandler):
             # include_usage changes telemetry only; capture the exact transmitted body.
             body.setdefault('stream_options', {})['include_usage'] = True
             raw = json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode()
+            with g.lock:
+                if g.expected_prompt is not None and not g.input_checked:
+                    receipt = check_initial_input(body, g.expected_prompt)
+                    receipt['request_sha256'] = hashlib.sha256(raw).hexdigest()
+                    with (g.root / 'first-request-contract.json').open('x', encoding='utf-8') as f:
+                        json.dump(receipt, f, indent=2)
+                    if not receipt['verified']:
+                        raise ValueError('Initial input mismatch')
+                    g.input_checked = True
         except (ValueError, TypeError, OSError, AttributeError):
             g.failed.set()
             g.record('control.jsonl', {'run_id': g.run_id, 'at': now(), 'reason': 'request_rejected'})
@@ -258,6 +269,27 @@ class Handler(BaseHTTPRequestHandler):
                                           'status': event['status'], 'at': now()})
 
 
+def check_initial_input(body, expected):
+    """Check semantic text after normal agent serialization, before upstream dispatch."""
+    messages = body.get('messages', [])
+    texts = []
+    for i, message in enumerate(messages):
+        content = message.get('content', '')
+        if isinstance(content, list):
+            content = ''.join(part.get('text', '') for part in content if isinstance(part, dict))
+        if isinstance(content, str):
+            texts.append((i, message.get('role'), content))
+    locations = [{'message': i, 'role': role, 'occurrences': text.count(expected)}
+                 for i, role, text in texts if expected in text]
+    header_count = sum(text.count('CATALOG_SOURCE ') for _, _, text in texts)
+    expected_headers = expected.count('CATALOG_SOURCE ')
+    return {'verified': len(locations) == 1 and locations[0]['role'] == 'user'
+            and locations[0]['occurrences'] == 1 and header_count == expected_headers,
+            'prompt_sha256': hashlib.sha256(expected.encode()).hexdigest(),
+            'prompt_utf8_bytes': len(expected.encode()), 'locations': locations,
+            'source_packet_count': header_count, 'expected_source_packet_count': expected_headers}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--run-id', required=True)
@@ -265,13 +297,15 @@ def main():
     p.add_argument('--session-id')
     p.add_argument('--upstream-timeout', type=int, default=120)
     p.add_argument('--directory', default='/records')
+    p.add_argument('--expected-prompt')
     args = p.parse_args()
     import sys
     secret = sys.stdin.readline().strip()
     if not secret:
         raise SystemExit('Gateway credential is missing')
     server = Gateway(('0.0.0.0', 8080), args.directory, args.run_id, args.model, secret,
-                     session_id=args.session_id, upstream_timeout=args.upstream_timeout)
+                     session_id=args.session_id, upstream_timeout=args.upstream_timeout,
+                     expected_prompt=args.expected_prompt)
     server.serve_with_signals()
 
 

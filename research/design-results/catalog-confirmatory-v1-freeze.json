@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "kind": "offline_design_freeze_not_launch_authorization",
+  "frozen_at_utc": "2026-09-20T12:20:42Z",
+  "implementation_baseline": "b5083f0a296a8afb4d9161825f5bf9ceedab457e",
+  "accepted_pr_head": "3c2f61926e8427eca3efcbdb4784f5373b5f9cf9",
+  "plan_sha256": "107a1d29eab4db98700c3327cbbcc343aa80c067d6f75d3fd174166734a9cbd5",
+  "files": {
+    "docs/ms1-catalog-confirmatory-plan.md": "734f528a45fd55c457f741bcd2d74360ecd054492523be4c8e638cb4e7ecc3b6",
+    "docs/ms1-catalog-confirmatory-misc-proposal.md": "b4b41e9bb730435ebca1fdc9103b7e081353f071491221ba962968d4a6a1f22d",
+    "docs/ms1-catalog-confirmatory-validation.md": "8e0511655c027a7d06ad61c44e6561a038e43df4a238592108e147c51b46e6ec",
+    "docs/ms1-catalog-return-two-condition-spec.md": "07c676205c050924305b7870055b12f6c295ee89edfd9593ed1eeaf7016d9150",
+    "research/README.md": "8788decd3f42d1aceca606a315668ab02ad45e94a658757ba1c8c6368f0122fc",
+    "research/protocols/ms1-catalog-confirmatory-v1.json": "107a1d29eab4db98700c3327cbbcc343aa80c067d6f75d3fd174166734a9cbd5",
+    "research/catalog_confirmatory.py": "23c8ebafb3b90ab493e0bf664e78f4a9a3da520c4522dd8edd3ddd1879827a2b",
+    "research/catalog_design.py": "5c9636650f451d0e29e01c00264ad7cc4d3276fca88824c233b4dd86c1cc8408",
+    "research/analyze.py": "682259bdbf6db6196cba4278d7e1d5bd66c53aeb371a9e95935fb99d5c03c871",
+    "research/tests/test_catalog_confirmatory.py": "656800d7bc4916cc04a009584c79e34c6c4bcafc62289dc8dbacd38c9193a9f9",
+    "research/requirements-confirmatory.txt": "03ea95f011c181063c57ba0536cca1d2314fc49a89e7a9dcc35df13640813e42",
+    "research/design-results/catalog-confirmatory-v1.json": "baf4659977f485dde023bed3cde3a2e7025bf2888ae40492647609b2562f15c8",
+    "research/design-results/catalog-pilot-smoke-summary.json": "0f58e9c12822bd67ea00c72fb7ffe73ea57a2d527b1174b531b474df61a0e64b"
+  },
+  "validation": {
+    "research_tests": {
+      "passed": 73,
+      "failed": 0,
+      "new_tests": 29,
+      "existing_tests": 44,
+      "log": "artifacts/catalog-confirmatory-design/research-tests-locked.log",
+      "log_sha256": "446f5ab93229c96a36366417077e67bcf923eb393619202c1a350e9a3abe4472"
+    },
+    "design_recomputation": "byte_identical_with_stored_results",
+    "replication_result_sha256": "baf4659977f485dde023bed3cde3a2e7025bf2888ae40492647609b2562f15c8",
+    "pilot_smoke_output": "artifacts/catalog-confirmatory-design/pilot-smoke-locked.json",
+    "pilot_smoke_sha256": "205a4e09a3c531d344ae356b7762dedb53e502c864f1b070d3ec4c06a104938d",
+    "pilot_source_unchanged_sha256": "eaf39aabc295c5fe45c8ef8591b33e63b3d09d7c41efe8c45e8ab117e5ddbb4c",
+    "all_frozen_implementation_file_hashes": "match",
+    "ordinary_analysis_cli": "passed_saved_four_run_input_no_dispatch"
+  },
+  "source_review": {
+    "misc_commit": "797dde53f29dd3512d91699dc69b5cd8a8d607c9",
+    "quality_margin": "no_positive_numeric_margin_found_in_reviewed_protocol_questions_plan_and_local_contract",
+    "canonical_amendment": "local_proposal_only"
+  },
+  "new_experimental_model_runs": 0,
+  "model_supplements": 0,
+  "live_evaluations": 0,
+  "historical_24_reevaluations": 0,
+  "historical_zip_recreations": 0,
+  "new_raw_218_call_audit": "not_run",
+  "docker_browser_live_checks": "not_run",
+  "human_review": "not_run",
+  "resource_capacity": "unverified",
+  "acquisition_authorized": false
+}

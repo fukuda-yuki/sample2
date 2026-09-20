@@ -1,6 +1,10 @@
 # MS1 exploratory analysis
 
 This directory contains research code, not an alternative agent/evaluator.
+The current next-stage deliverable is the [catalog confirmation design](../docs/ms1-catalog-confirmatory-plan.md):
+an offline plan, saved allocation, sample-size calculations and tested analysis.
+It authorizes no model acquisition. Its dedicated dependencies are in
+`requirements-confirmatory.txt`; the existing analysis environment is separate.
 Start with the [uniform browser correction](../docs/ms1-browser-cart-20260919-report.md),
 [correction and original-first audit](../docs/ms1-correction-20260919-report.md),
 [historical Japanese findings](../docs/ms1-exploration-20260919-report.md),
@@ -20,6 +24,12 @@ eighteen model executions plus the preserved pre-model failure. The final
 analysis contains 955 new calls; the historical six retain exactly 322 calls.
 
 ## Programs
+
+- `catalog_design`: reproduce parametric sample-size, precision and resource
+  scenarios without models, Docker or evaluation.
+- `catalog_confirmatory`: analyze plan-bound saved catalog observations at Run
+  and pair level; retain missingness and product failure. `--purpose pilot_smoke`
+  labels the old four Runs as input/output validation only.
 
 - `analyze`: read saved provider requests/SSE and native trace; emit call,
   action, source-range and Run tables plus hash/audit receipts. No model or
@@ -70,12 +80,14 @@ contain task code and tool commands; do not publish them indiscriminately.
 
 ## Environment and offline checks
 
-Core extraction, ledger and validation use the standard library. Figures and
+Core extraction, ledger and validation use the standard library. The full
+test suite additionally needs the confirmation design's NumPy/SciPy environment;
+prepare it using the linked confirmation plan. Figures and
 notebooks use a separate Python 3.14 virtual environment, with the recorded
 packages in `requirements-analysis.txt`. It does not change the worker image.
 
 ```powershell
-python -m unittest discover -s research/tests -v
+artifacts/catalog-confirmatory-design/analysis-env/Scripts/python.exe -m unittest discover -s research/tests -v
 python -m venv artifacts/exploration/analysis-env
 .\artifacts\exploration\analysis-env\Scripts\python.exe -m pip install -r research/requirements-analysis.txt
 ```

@@ -101,6 +101,11 @@ A compact failure using fewer tokens is not an efficiency improvement. Success-o
 
 ## Separation from a confirmatory experiment
 
+The technical pilot is now accepted and closed. The subsequent
+[fixed confirmation design](ms1-catalog-confirmatory-plan.md) supplies the
+proposed repetitions, strict relative quality rule and offline analysis. It
+does not authorize acquisition or reopen technical/evaluator acceptance.
+
 The byte contract above is fixed and reproduced offline. The user separately authorized a technical pilot of two Runs per condition, using both pair orders and no replacements; its plan and results are linked above. That pilot checks connection and observation, not efficacy or noninferiority. Before a confirmatory acquisition, separately fix sample size, pairing/order, budget, a justified quality noninferiority margin (or a stricter rule), uncertainty/analysis method and technical-stop/supplement policy. Validate identical common files and request serialization for both conditions, then pin the collector/evaluator/runtime builds. No repeated peeking or selective successful-Run replacement is allowed. These launch decisions require a separate experiment instruction; they do not reopen deletion-evaluator acceptance or add human operation/all-artifact passing as gates.
 
 Offline reproduction (no model):

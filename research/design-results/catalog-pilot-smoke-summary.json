@@ -1,0 +1,26 @@
+{
+  "purpose": "pilot_io_smoke_not_confirmatory_results",
+  "source_files": {
+    "plan_sha256": "04c8cec02766cd73d504ea05fa0626b57ce03d0878f714818f544ecca414fc22",
+    "observations_sha256": "eaf39aabc295c5fe45c8ef8591b33e63b3d09d7c41efe8c45e8ab117e5ddbb4c"
+  },
+  "source_scope": "Existing saved observations-final.json only; not a new 218-call raw request/SSE audit.",
+  "assigned_runs": 4,
+  "pairs": 2,
+  "observed_calls": 218,
+  "total_provider_tokens": 12723904,
+  "input_tokens": 12555186,
+  "output_tokens": 168718,
+  "mean_compact": 3415822.0,
+  "mean_expanded": 2946130.0,
+  "mean_difference": 469692.0,
+  "mean_ratio": 1.1594267734281922,
+  "passes": {
+    "catalog-compact": 1,
+    "catalog-expanded": 2
+  },
+  "decision": "not_a_confirmatory_result",
+  "experimental_model_calls": 0,
+  "evaluations": 0,
+  "human_review": "not_run"
+}

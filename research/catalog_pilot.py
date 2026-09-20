@@ -11,13 +11,15 @@ import sys
 from outer.harness import aggregate, machine, preserve, profiles, run, runtime, util
 from outer.harness.security import child_environment
 from research.catalog_connection_probe import ARMS, RUNTIME, common_body
+from research import catalog_environment
 
 REPO = Path(__file__).resolve().parents[1]
 PINNED = ('research/catalog_pilot.py','research/catalog_connection_probe.py','research/catalog_return_contract.py',
+          'research/catalog_environment.py',
           'docs/ms1-catalog-return-two-condition-spec.md')
 
 
-def freeze(probe, target, batch):
+def freeze(probe, target, batch, browser_environment):
     probe, target = Path(probe).resolve(), Path(target).resolve()
     result = util.read_json(probe/'connection-result.json')
     if not result['verified'] or result['model_called']:
@@ -27,6 +29,7 @@ def freeze(probe, target, batch):
     lock = util.read_json(lock_path)
     if result['runtime_lock_sha256'] != util.sha256_file(lock_path) or runtime.controller_files(REPO) != lock['controller_files']:
         raise ValueError('Runtime changed after connection probe')
+    browser = catalog_environment.capture(browser_environment, REPO)
     seed = secrets.randbits(64)
     pairs = [list(ARMS), list(reversed(ARMS))]
     random.Random(seed).shuffle(pairs)
@@ -45,6 +48,7 @@ def freeze(probe, target, batch):
         'model':'deepseek-v4.1-flash','agent':'OpenCode 1.17.11','fallback':False,
         'condition_fingerprints':machine.expected_conditions(REPO,'MS1-001',RUNTIME,ARMS),
         'images':lock['images'],'evaluator_sha256':lock['evaluator_sha256'],
+        'browser_environment':browser,
         'probe':str(probe),'probe_result_sha256':util.sha256_file(probe/'connection-result.json'),
         'code_hashes':{p:util.sha256_file(REPO/p) for p in PINNED},
         'primary_measure':'provider input_tokens + output_tokens across all attempts; incomplete totals null with known sums separate',
@@ -71,6 +75,7 @@ def check_frozen(plan):
         raise ValueError('Frozen controller changed')
     if util.sha256_file(Path(plan['probe'])/'connection-result.json') != plan['probe_result_sha256']:
         raise ValueError('Connection evidence changed')
+    catalog_environment.validate(plan['browser_environment'], REPO)
 
 
 def assess(root, plan, row):
@@ -114,7 +119,8 @@ def execute(target):
         util.append_line(batch/'journal.jsonl',{'kind':'dispatch','at':run.now(),'case':case,'command':args})
         print('DISPATCH '+case['run_id'],flush=True)
         with (batch/'cli-logs'/(case['run_id']+'.log')).open('xb') as log:
-            process=subprocess.run(args,cwd=REPO,env=child_environment(),stdout=log,stderr=subprocess.STDOUT)
+            process=subprocess.run(args,cwd=REPO,env=child_environment(plan['browser_environment']['environment']),
+                                   stdout=log,stderr=subprocess.STDOUT)
         row=aggregate.row_for(batch,case['run_id'])
         stops=assess(root,plan,row)
         reference=util.read_json(root/'archive-reference.json')
@@ -137,7 +143,8 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__)
     sub=p.add_subparsers(dest='command',required=True)
     f=sub.add_parser('freeze'); f.add_argument('--probe',required=True); f.add_argument('--out',required=True); f.add_argument('--batch',required=True)
+    f.add_argument('--browser-environment',required=True,help='Saved successful probe of the existing Node/Playwright/browser environment')
     e=sub.add_parser('execute'); e.add_argument('--plan',required=True)
     args=p.parse_args()
-    if args.command=='freeze': freeze(args.probe,args.out,args.batch)
+    if args.command=='freeze': freeze(args.probe,args.out,args.batch,args.browser_environment)
     else: execute(args.plan)

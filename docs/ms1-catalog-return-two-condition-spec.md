@@ -1,6 +1,6 @@
 # Catalog return range: two-condition input contract
 
-Status: specification and offline byte examples only. No model execution is authorized or started by this change. The task, hypothesis and number of conditions remain unchanged. This is a new two-condition comparison, not a comparison with historical `explore`, `preload` or `explained` Runs.
+This file fixes the adopted input byte contract. Production installation and the separately authorized four-Run technical pilot are documented in the [pilot report](ms1-catalog-technical-pilot-20260920-report.md). The task, hypothesis and number of conditions remain unchanged. This is a new two-condition comparison, not a comparison with historical `explore`, `preload` or `explained` Runs.
 
 ## Question and sole difference
 
@@ -27,7 +27,7 @@ SHA-256 cab15100c9230e325ae513c7a9d8b09dc90f21cd7b489a54b0fa93cc2e7512ed
 
 The Assets tree remains available, identically in both conditions, as part of the same legacy-source snapshot. Its different `SampleData.cs` is not substituted or merged into this catalog.
 
-The executable specification is [catalog_return_contract.py](../research/catalog_return_contract.py). This is an offline input-contract example, not an installed intervention. It refuses a different source hash and incomplete extraction. It parses the literal Genre, Artist and Album initializers; resolves names exactly; assigns IDs from one-based initializer position; and retains array insertion order, titles, artwork URLs and decimal price strings. It does not summarize with an LLM, sort records, drop records, or read evaluator fixtures. JSON object keys are sorted for deterministic serialization; array order is unchanged. Output is UTF-8 without BOM, two-space indentation and LF, with one terminal LF. Prices are decimal strings such as `"8.99"`.
+The executable specification is [catalog_return_contract.py](../research/catalog_return_contract.py). Both installed profiles call this offline extractor. It refuses a different source hash and incomplete extraction. It parses the literal Genre, Artist and Album initializers; resolves names exactly; assigns IDs from one-based initializer position; and retains array insertion order, titles, artwork URLs and decimal price strings. It does not summarize with an LLM, sort records, drop records, or read evaluator fixtures. JSON object keys are sorted for deterministic serialization; array order is unchanged. Output is UTF-8 without BOM, two-space indentation and LF, with one terminal LF. Prices are decimal strings such as `"8.99"`.
 
 Both conditions mount the same bytes at:
 
@@ -99,9 +99,9 @@ Report both passes/assigned trials and passes/artifacts, with artifact-free tech
 
 A compact failure using fewer tokens is not an efficiency improvement. Success-only token summaries are secondary and cannot support the primary conclusion. Report quality and all-trial token distributions together; a quality decrease precludes a positive efficiency claim. If uncertainty cannot rule out a material quality decrease, call the result inconclusive rather than assume equivalence. Do not select a winner or change the task/hypothesis from the historical small cells.
 
-## Work still required before a new experiment
+## Separation from a confirmatory experiment
 
-The byte contract above is fixed and reproduced offline. Production mounting and initial-message injection are not installed in `outer/profiles`, and no runtime preset is activated. Before any new acquisition, separately fix sample size, pairing/order, budget, a justified quality noninferiority margin (or a stricter rule), uncertainty/analysis method and technical-stop/supplement policy. Validate identical common files and request serialization for both conditions, then pin the revised collector/evaluator/runtime builds. No repeated peeking or selective successful-Run replacement is allowed. These launch decisions require a separate experiment instruction; they do not reopen deletion-evaluator acceptance or add human operation/all-artifact passing as gates.
+The byte contract above is fixed and reproduced offline. The user separately authorized a technical pilot of two Runs per condition, using both pair orders and no replacements; its plan and results are linked above. That pilot checks connection and observation, not efficacy or noninferiority. Before a confirmatory acquisition, separately fix sample size, pairing/order, budget, a justified quality noninferiority margin (or a stricter rule), uncertainty/analysis method and technical-stop/supplement policy. Validate identical common files and request serialization for both conditions, then pin the collector/evaluator/runtime builds. No repeated peeking or selective successful-Run replacement is allowed. These launch decisions require a separate experiment instruction; they do not reopen deletion-evaluator acceptance or add human operation/all-artifact passing as gates.
 
 Offline reproduction (no model):
 

@@ -6,6 +6,9 @@ the [adopted two-condition contract](ms1-catalog-return-two-condition-spec.md)
 and the explicitly authorized technical pilot. It does not reopen evaluator
 acceptance or change the historical 24 artifacts and their results.
 
+The [completed pilot report](ms1-catalog-technical-pilot-20260920-report.md)
+records all four Runs and the first evaluation's environment recovery.
+
 ## Installed connection
 
 `catalog-expanded` and `catalog-compact` use the same `catalog-return` method.
@@ -44,6 +47,13 @@ After this gate passes, `research.catalog_pilot freeze` saves a four-slot
 schedule containing one expanded/compact pair and one compact/expanded pair.
 The order of the two pairs is randomized once and recorded before dispatch.
 The plan fixes source/code/profile/build identities and the probe reference.
+The launcher also requires `--browser-environment <verified-probe.json>` when
+freezing a future plan. It pins the existing Node, Playwright, Chromium and
+collector bytes and explicitly forwards only the two browser dependency paths
+to the ordinary CLI. This fail-before-dispatch check was added after the four
+Runs, in response to the retained first evaluation fault. It does not rewrite
+the completed pilot's original plan; that pilot's environment amendment and
+exact acquisition source are retained separately.
 `research.catalog_pilot execute` runs the ordinary harness CLI serially with
 fresh session, state and workspace for every slot. A durable dispatch journal
 precedes each Run. Existing or uncertain dispatches cannot be silently replayed.

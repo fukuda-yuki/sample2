@@ -74,5 +74,17 @@ class SavedBrowserIdentityTests(unittest.TestCase):
         self.assertIsNone(row['quality'])
         self.assertIsNone(row['verdict'])
 
+    def test_pending_cleanup_stops_resumed_batch_without_observing_again(self):
+        self.resume()
+        result = self.root/'out/instance/result'
+        util.write_new_json(result/'browser-resources.json', {'owner': 'test owner'})
+        util.write_new_json(result/'browser-cleanup.json', {'confirmed': False, 'status': 'cleanup_failed'})
+        with patch.object(browser_rejudge, 'target', return_value=(self.run, {}, self.baseline, None)), \
+                patch.object(browser_cart, 'complete_evaluation') as observe:
+            with self.assertRaisesRegex(RuntimeError, 'still need cleanup'):
+                browser_rejudge.run_batch(self.root, self.root/'inventory.json', self.root/'prior',
+                    self.root/'quality.json', self.root/'bundle', self.root/'out')
+        observe.assert_not_called()
+
 
 if __name__ == '__main__': unittest.main()

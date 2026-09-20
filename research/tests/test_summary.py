@@ -14,6 +14,18 @@ def run(arm, attempt, total, verdict='pass', cohort='primary18', block=1):
 
 
 class SummaryContracts(unittest.TestCase):
+    def test_known_failure_and_missing_coverage_are_separate_without_losing_tokens(self):
+        row = run('explore', 1, 12, verdict='fail')
+        row['scoring'] = {'evaluation_version': '1.2.0', 'research_status': 'incomplete',
+                          'browser_cart_coverage': 'partial'}
+        row['confirmed_product_failure'] = {'verdict': 'fail', 'requirements': ['R-012']}
+        result = summarize({'runs': [row], 'calls': [], 'actions': []})['groups'][0]
+        self.assertEqual(1, result['quality_fail'])
+        self.assertEqual(1, result['evaluation_incomplete'])
+        self.assertEqual(0, result['quality_pass'])
+        self.assertEqual(12, result['total_tokens']['mean'])
+        self.assertEqual(0, result['success_only_total']['n'])
+
     def test_saved_http_only_pass_is_not_research_quality(self):
         row = run('explore', 1, 123)
         row['scoring'] = {'evaluation_version': '1.2.0', 'browser_cart_coverage': 'not_run_http_only'}

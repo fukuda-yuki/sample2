@@ -75,5 +75,46 @@ class BrowserCoverageTests(unittest.TestCase):
         util.write_json_atomic(self.root/'evaluation.json', self.output)
         self.assertFalse(self.covered())
 
+    def failure_fixture(self, http_fail=False):
+        baseline = self.root/'http-only'; baseline.mkdir()
+        util.write_new_json(baseline/'evaluation.json', {
+            'artifactSha256': 'artifact', 'specSha256': 'spec', 'criticalFailed': [],
+            'requirements': [{'id': 'R-010', 'judgement': 'fail' if http_fail else 'pass'}]})
+        (baseline/'results.jsonl').write_text('bound HTTP test results')
+        self.output.update(researchStatus='incomplete', browserCartCoverage='partial', verdict='fail', quality=None,
+            requirements=[{'id': 'R-010' if http_fail else 'R-014', 'judgement': 'fail'}],
+            baselineEvaluationSha256=util.sha256_file(baseline/'evaluation.json'),
+            baselineResultsSha256=util.sha256_file(baseline/'results.jsonl'))
+        util.write_json_atomic(self.root/'evaluation.json', self.output)
+        self.evaluation_hash = util.sha256_file(self.root/'evaluation.json')
+
+    def failure(self):
+        return browser_cart.stored_failure(self.root, 'instance', 'artifact', 'spec', self.evaluation_hash)
+
+    def test_http_failure_survives_missing_browser_evidence(self):
+        self.failure_fixture(http_fail=True)
+        (self.review/'C-016-afterScreenshot').unlink()
+        failure = self.failure()
+        self.assertEqual('fail', failure['verdict'])
+        self.assertEqual(['R-010'], failure['requirements'])
+        self.assertEqual('http-only', failure['source'])
+
+    def test_partial_browser_failure_requires_its_evidence(self):
+        self.failure_fixture()
+        self.assertEqual('fail', self.failure()['verdict'])
+        (self.review/'C-016-afterScreenshot').unlink()
+        self.assertIsNone(self.failure())
+
+    def test_modified_evaluation_cannot_invent_partial_failure(self):
+        self.failure_fixture()
+        self.output['requirements'][0]['id'] = 'R-001'
+        util.write_json_atomic(self.root/'evaluation.json', self.output)
+        self.assertIsNone(self.failure())
+
+    def test_partial_http_failure_requires_bound_baseline(self):
+        self.failure_fixture(http_fail=True)
+        (self.root/'http-only/results.jsonl').write_text('changed')
+        self.assertIsNone(self.failure())
+
 
 if __name__ == '__main__': unittest.main()

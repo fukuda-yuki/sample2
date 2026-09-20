@@ -562,9 +562,9 @@ public static class Checks
             && scenario.LinesAfterRemoveFromTwo.Count == 1
             && scenario.LinesAfterRemoveFromTwo[0].Count == 1
             && scenario.TotalAfterRemoveFromTwo == expected
-            && (browser?.Pass ?? true);
+            && (browser == null || !browser.Complete || browser.Pass);
 
-        return Verdict(
+        var result = Verdict(
             state,
             "R-014",
             "C-015",
@@ -573,6 +573,8 @@ public static class Checks
             $"応答 {Scenarios.JsonSummary(scenario.RemoveFromTwo.Body)}（ItemCount={Describe(itemCount)}）、{Scenarios.DescribeCart(scenario.LinesAfterRemoveFromTwo)}、合計 {Scenarios.DescribeMoney(scenario.TotalAfterRemoveFromTwo)} / 期待 {Html.Money2(expected)}。"
                 + (browser?.Detail ?? "HTTP再読込のみ。ブラウザーの削除操作と表示更新は未観測。"),
             state.Transcript("cart"));
+        if (result.Judgement == Judgement.Pass && browser?.Complete == false) result.Judgement = Judgement.Blocked;
+        return result;
     }
 
     private static CheckResult C016(RunState state)
@@ -595,9 +597,9 @@ public static class Checks
         var ok = itemCount == 0
             && scenario.LinesAfterRemoveFromOne.Count == 0
             && scenario.TotalAfterRemoveFromOne == 0m
-            && (browser?.Pass ?? true);
+            && (browser == null || !browser.Complete || browser.Pass);
 
-        return Verdict(
+        var result = Verdict(
             state,
             "R-015",
             "C-016",
@@ -606,6 +608,8 @@ public static class Checks
             $"応答 {Scenarios.JsonSummary(scenario.RemoveFromOne.Body)}（ItemCount={Describe(itemCount)}）、{Scenarios.DescribeCart(scenario.LinesAfterRemoveFromOne)}、合計 {Scenarios.DescribeMoney(scenario.TotalAfterRemoveFromOne)} / 期待 0.00。"
                 + (browser?.Detail ?? "HTTP再読込のみ。ブラウザーの削除操作と表示更新は未観測。"),
             state.Transcript("cart"));
+        if (result.Judgement == Judgement.Pass && browser?.Complete == false) result.Judgement = Judgement.Blocked;
+        return result;
     }
 
     private static CheckResult C017(RunState state)

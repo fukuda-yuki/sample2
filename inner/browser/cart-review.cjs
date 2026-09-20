@@ -12,7 +12,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const write = (name, value) => fs.writeFileSync(path.join(out, name), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 const ref = name => ({ path: name, sha256: sha(fs.readFileSync(path.join(out, name))) });
 const conditions = {
-  collectorVersion: '1.0.1', collectorSha256: sha(fs.readFileSync(__filename)),
+  collectorVersion: '1.1.0', collectorSha256: sha(fs.readFileSync(__filename)),
   playwrightVersion: require('playwright/package.json').version, nodeVersion: process.version,
   browser: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
   locale: 'en-US', timezoneId: 'UTC', actionTimeoutMs: 5000, navigationTimeoutMs: 15000,
@@ -34,13 +34,18 @@ async function observe(page) {
       rows: rows.map(e => ({ id: e.id, count: e.querySelector('[id="item-count-' + e.id.slice(4) + '"]')?.textContent.trim(),
         album: [...e.querySelectorAll('a[href]')].map(a => new URL(a.href).pathname).find(p => /^\/Store\/Details\/\d+\/?$/i.test(p)) })),
       totals: totals.map(e => e.textContent.trim()),
+      // Keep potential alternate controls as evidence. A selector miss alone is
+      // not proof of an absent feature (custom widgets remain unsupported).
+      possibleControls: [...document.querySelectorAll('button,input,select,textarea,form,[role],[onclick],[tabindex],[contenteditable],svg,canvas,iframe,a[href]')]
+        .filter(e => !(e.matches('a[href]') && /^\/(Store(\/(Index|Browse|Details\/\d+))?|ShoppingCart|Checkout\/AddressAndPayment)?\/?$/i.test(new URL(e.href).pathname)))
+        .map(e => e.outerHTML),
     };
   });
 }
 function matches(state, quantity) {
   return state.totals.length === 1 && state.totals[0] === (input.price * quantity).toFixed(2)
     && (quantity === 0 ? state.rows.length === 0 : state.rows.length === 1
-      && state.rows[0].count === String(quantity) && state.rows[0].album.replace(/\/$/, '') === '/Store/Details/' + input.albumId);
+      && state.rows[0].count === String(quantity) && state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId);
 }
 async function capture(page, tabId, name) {
   const state = await observe(page);
@@ -51,8 +56,8 @@ async function capture(page, tabId, name) {
 
 (async () => {
   let browser;
-  const receipt = { schemaVersion: 1, actor: 'agent', runInstanceId: input.runInstanceId,
-    artifactSha256: input.artifactSha256, specSha256: input.specSha256, conditions, removals: [] };
+  const receipt = { schemaVersion: 2, actor: 'agent', runInstanceId: input.runInstanceId,
+    artifactSha256: input.artifactSha256, specSha256: input.specSha256, conditions, removals: [], faults: [] };
   try {
     const executablePath = process.env.SAMPLE2_BROWSER_EXECUTABLE || chromium.executablePath();
     conditions.executablePath = executablePath;
@@ -91,22 +96,66 @@ async function capture(page, tabId, name) {
       await context.tracing.start({ screenshots: true, snapshots: true });
       try {
         await page.goto(input.baseUrl + '/ShoppingCart', { waitUntil: 'load' });
-        if (!matches(await observe(page), 0)) throw new Error(checkId + ': empty-session precondition not established');
+        const empty = await capture(page, tabId, checkId + '-empty');
+        async function unperformed(before, action, reason) {
+          const after = await capture(page, tabId, checkId + '-after');
+          await Promise.all(resourceReads);
+          if (externalScriptFaults.length) throw new Error(checkId + ': external script observation incomplete: ' + JSON.stringify(externalScriptFaults));
+          record('removal-not-performed', { action, reason });
+          receipt.removals.push({ checkId, action, reason, before: before.dom, after: after.dom,
+            beforeScreenshot: before.screenshot, afterScreenshot: after.screenshot,
+            setupBefore: empty.dom, setupScreenshot: empty.screenshot, addCount: count });
+        }
+        if (!matches(empty.state, 0)) {
+          await unperformed(empty, 'not-run-precondition', 'empty_session_not_established');
+          continue;
+        }
         // Public AddToCart route is used only for preparation, before observation/click.
         for (let n = 0; n < count; n++)
           await page.goto(input.baseUrl + '/ShoppingCart/AddToCart/' + input.albumId, { waitUntil: 'load' });
         const before = await capture(page, tabId, checkId + '-before');
         await Promise.all(resourceReads);
         if (externalScriptFaults.length) throw new Error(checkId + ': external script observation incomplete: ' + JSON.stringify(externalScriptFaults));
-        if (!matches(before.state, count)) throw new Error(checkId + ': populated precondition not established');
+        if (!matches(before.state, count)) {
+          const knownQuantity = before.state.rows.length === 1 && /^\d+$/.test(before.state.rows[0].count)
+            && before.state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId;
+          await unperformed(before, 'not-run-precondition', count === 2 && knownQuantity
+            && before.state.rows[0].count !== '2' ? 'quantity_after_two_adds' : 'populated_state_not_established');
+          continue;
+        }
         const row = page.locator('tr[id="' + before.state.rows[0].id + '"]');
         // Public CSS identifier, semantic link/button name or form action; no implementation/Run-specific branch.
         const control = row.locator('.RemoveLink:visible, a[href*="RemoveFromCart"]:visible, form[action*="RemoveFromCart"] button:visible, form[action*="RemoveFromCart"] input[type="submit"]:visible')
           .or(row.getByRole('link', { name: /remove|delete|削除/i })).or(row.getByRole('button', { name: /remove|delete|削除/i }));
-        if (await control.count() !== 1) throw new Error(checkId + ': removal control is missing or ambiguous');
+        const controls = await control.count();
+        if (controls !== 1) {
+          const absent = controls === 0 && before.state.possibleControls.length === 0
+            && await row.evaluate(e => e.children.length === 4 && e.children[3].textContent.trim() === '')
+            && await row.locator('*').evaluateAll(es => es.every(e =>
+              ['TD','A','B','SPAN','STRONG','EM'].includes(e.tagName)
+              && ![...e.attributes].some(a => /^(on|data-|role|tabindex|aria-)/.test(a.name))));
+          await unperformed(before, absent ? 'observe-unavailable' : 'not-run-unsupported',
+            absent ? 'control_absent' : 'selector_ambiguous_or_unsupported');
+          continue;
+        }
+        if (!await control.isEnabled()) {
+          const markup = await control.evaluate(e => e.outerHTML);
+          const alternate = before.state.possibleControls.some(html => html !== markup);
+          await unperformed(before, alternate ? 'not-run-unsupported' : 'observe-unavailable',
+            alternate ? 'disabled_control_with_possible_alternative' : 'control_disabled');
+          continue;
+        }
         const clickedAt = new Date().toISOString(), start = performance.now();
-        record('ui-click-remove', { selector: before.state.rows[0].id });
-        await control.click({ timeout: conditions.actionTimeoutMs, noWaitAfter: true });
+        try {
+          await control.click({ timeout: conditions.actionTimeoutMs, noWaitAfter: true });
+        } catch (e) {
+          // A timeout is not proof of a product defect. Save the observation;
+          // never attribute an unsuccessful attempt as a completed click.
+          record('ui-click-attempt-failed', { message: String(e) });
+          await unperformed(before, 'not-run-unsupported', 'interaction_not_completed');
+          continue;
+        }
+        record('ui-click-remove', { selector: before.state.rows[0].id, clickedAt });
         let stableSince = null, completion = 'update_deadline';
         while (performance.now() - start < conditions.updateTimeoutMs) {
           try {
@@ -133,10 +182,15 @@ async function capture(page, tabId, name) {
         await context.close();
       }
     }
-    write('receipt.json', receipt);
-    write('collector-result.json', { status: 'observed', conditions, checks: receipt.removals.map(r => r.checkId) });
   } catch (e) {
-    write('collector-result.json', { status: 'evaluator_fault', conditions, message: String(e.stack || e), completedChecks: receipt.removals.map(r => r.checkId) });
+    receipt.faults.push(String(e.stack || e));
     process.exitCode = 2;
-  } finally { if (browser) await browser.close(); }
+  } finally {
+    try { if (browser) await browser.close(); }
+    catch (e) { receipt.faults.push(String(e)); process.exitCode = 2; }
+    write('receipt.json', receipt);
+    write('collector-result.json', { status: receipt.faults.length ? 'evaluator_fault'
+      : receipt.removals.some(r => r.action.startsWith('not-run-')) ? 'partial' : 'observed',
+      conditions, faults: receipt.faults, checks: receipt.removals.map(r => ({ checkId: r.checkId, action: r.action, reason: r.reason })) });
+  }
 })();

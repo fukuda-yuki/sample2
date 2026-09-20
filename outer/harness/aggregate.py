@@ -9,7 +9,7 @@ from pathlib import Path
 from . import evaluate
 from . import run as run_mod
 from . import util
-from . import browser_cart
+from . import browser_cart, browser_cleanup
 
 
 def build(runs_dir):
@@ -54,6 +54,16 @@ def row_for(runs_dir, run_id):
 
     browser_required = browser_cart.required((scoring or {}).get('evaluation_version'))
     browser_verified = False
+    confirmed_failure = None
+    cleanup = None
+    if browser_required and scoring and scoring.get('directory'):
+        directory = run_dir / scoring['directory']
+        cleanup = browser_cleanup.latest(directory)
+        if scoring_state != 'rejected_mismatch':
+            confirmed_failure = browser_cart.stored_failure(directory, manifest.get('run_instance_id'),
+                snapshot.get('artifact_sha256'), scoring.get('spec_sha256'), scoring.get('evaluation_sha256'))
+        if not cleanup['confirmed']:
+            issues.append({'kind': 'cleanup_failed', 'detail': cleanup})
     if browser_required and scored:
         browser_verified = browser_cart.stored_coverage_complete(run_dir / scoring.get('directory', ''),
             manifest.get('run_instance_id'), snapshot.get('artifact_sha256'), scoring.get('spec_sha256'))
@@ -76,8 +86,8 @@ def row_for(runs_dir, run_id):
         issues.append({'kind': 'mismatch', 'detail': scoring.get('mismatches')})
     elif scoring_state == 'not_attempted':
         issues.append({'kind': 'not_scored', 'detail': '採点していない'})
-    if scored and scoring.get('verdict') in ('fail', 'fail_critical'):
-        issues.append({'kind': 'quality', 'detail': scoring['verdict']})
+    if confirmed_failure or scored and scoring.get('verdict') in ('fail', 'fail_critical'):
+        issues.append({'kind': 'quality', 'detail': confirmed_failure or scoring['verdict']})
     if scored and scoring.get('verdict') == 'blocked':
         issues.append({'kind': 'quality_blocked', 'detail': 'blocked を含む（分母から落とさない）'})
     if usage.get('state') != 'complete':
@@ -107,13 +117,16 @@ def row_for(runs_dir, run_id):
                     'sequence': (scoring or {}).get('sequence'),
                     'evaluation_version': (scoring or {}).get('evaluation_version'),
                     'evaluator_sha256': (scoring or {}).get('evaluator_sha256'),
-                    'browser_cart_coverage': browser_cart.OBSERVED if browser_verified else
-                        (scoring or {}).get('browser_cart_coverage', 'not_run_http_only'),
+                    'browser_cart_coverage': (scoring or {}).get('browser_cart_coverage', 'not_run_http_only'),
                     'research_status': 'complete' if browser_verified else 'incomplete',
                     'browser_execution': browser_cart.execution_identity(run_dir / scoring['directory']) if browser_verified else None,
                     'evaluator_sha256_pinned': (scoring or {}).get('evaluator_sha256_pinned')},
         'quality': scoring.get('quality') if scored else None,
-        'verdict': scoring.get('verdict') if scored else None,
+        'verdict': scoring.get('verdict') if scored else (confirmed_failure or {}).get('verdict'),
+        'confirmed_product_failure': confirmed_failure,
+        'browser_cleanup': cleanup,
+        'operation_status': 'cleanup_failed' if cleanup and not cleanup['confirmed'] else
+            'complete' if scored else 'evaluation_incomplete',
         'reported_http_or_prior_quality': (scoring or {}).get('quality'),
         'reported_http_or_prior_verdict': (scoring or {}).get('verdict'),
         'usage': {'state': usage.get('state'),

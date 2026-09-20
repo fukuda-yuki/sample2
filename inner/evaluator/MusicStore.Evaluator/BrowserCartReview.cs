@@ -11,7 +11,7 @@ namespace MusicStore.Evaluator;
 /// </summary>
 public sealed class BrowserCartReview
 {
-    public sealed record Result(bool Pass, string Detail);
+    public sealed record Result(bool Pass, string Detail, bool Complete = true, string Status = "observed");
     public sealed class FileReference
     {
         public string Path { get; set; }
@@ -21,6 +21,10 @@ public sealed class BrowserCartReview
     {
         public string CheckId { get; set; }
         public string Action { get; set; }
+        public string Reason { get; set; }
+        public int AddCount { get; set; }
+        public FileReference SetupBefore { get; set; }
+        public FileReference SetupScreenshot { get; set; }
         public FileReference Before { get; set; }
         public FileReference After { get; set; }
         public FileReference BeforeScreenshot { get; set; }
@@ -34,9 +38,16 @@ public sealed class BrowserCartReview
         public string ArtifactSha256 { get; set; }
         public string SpecSha256 { get; set; }
         public List<Removal> Removals { get; set; }
+        public List<string> Faults { get; set; } = new();
     }
 
     private readonly Dictionary<string, Result> results = new();
+    public Dictionary<string, string> ProductFailures { get; } = new();
+    public List<string> Faults { get; } = new();
+    public bool Complete => results.Values.All(r => r.Complete) && Faults.Count == 0;
+    public Dictionary<string, string> Cases => results.ToDictionary(r => r.Key, r => r.Value.Status);
+    public string Coverage => !Complete ? "partial" : results.Values.All(r => r.Status == "observed")
+        ? "agent_observed_C-015_C-016" : "agent_assessed_C-015_C-016";
     public string ReceiptSha256 { get; private set; }
     public string RunInstanceId { get; private set; }
     public Result For(string checkId) => results[checkId];
@@ -46,11 +57,13 @@ public sealed class BrowserCartReview
     {
         var receipt = JsonSerializer.Deserialize<Receipt>(File.ReadAllText(path),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        if (receipt?.SchemaVersion != 1 || receipt.Actor != "agent"
+        if (receipt == null || receipt.SchemaVersion is not (1 or 2) || receipt.Actor != "agent"
             || string.IsNullOrWhiteSpace(runInstanceId) || receipt.RunInstanceId != runInstanceId
             || receipt.ArtifactSha256 != artifactHash || receipt.SpecSha256 != specHash
-            || receipt.Removals == null || receipt.Removals.Count != 2
-            || !receipt.Removals.Select(r => r.CheckId).Order().SequenceEqual(new[] { "C-015", "C-016" }))
+            || receipt.Removals == null || receipt.Removals.Count > 2
+            || receipt.Removals.Any(r => r.CheckId is not ("C-015" or "C-016"))
+            || receipt.Removals.Select(r => r.CheckId).Distinct().Count() != receipt.Removals.Count
+            || receipt.SchemaVersion == 1 && receipt.Removals.Count != 2)
             throw new InvalidDataException("Browser review identity or check set mismatch.");
 
         var review = new BrowserCartReview
@@ -58,11 +71,16 @@ public sealed class BrowserCartReview
             ReceiptSha256 = Program.Sha256File(path),
             RunInstanceId = runInstanceId,
         };
+        review.Faults.AddRange(receipt.Faults ?? new());
+        foreach (var id in new[] { "C-015", "C-016" })
+            review.results[id] = new Result(false, "Browser case not performed.", false, "not_run");
         var root = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path));
         foreach (var removal in receipt.Removals)
         {
-            if (removal.Action != "click-remove")
-                throw new InvalidDataException("Browser removal must be an observed UI click.");
+            if (removal.Action != "click-remove" && (receipt.SchemaVersion != 2
+                || removal.Action is not ("observe-unavailable" or "not-run-precondition" or "not-run-unsupported")
+                || string.IsNullOrWhiteSpace(removal.Reason)))
+                throw new InvalidDataException("Unrecognized browser action or missing reason.");
             using var before = JsonDocument.Parse(ReadVerified(root, removal.Before));
             using var after = JsonDocument.Parse(ReadVerified(root, removal.After));
             ReadVerified(root, removal.BeforeScreenshot);
@@ -82,9 +100,48 @@ public sealed class BrowserCartReview
             var lines = Html.CartLines(beforeHtml);
             var countBefore = removal.CheckId == "C-015" ? 2 : 1;
             var album = lines.Count == 1 ? catalog.ById(lines[0].AlbumId) : null;
+            if (removal.Action == "not-run-precondition")
+            {
+                using var setup = JsonDocument.Parse(ReadVerified(root, removal.SetupBefore));
+                ReadVerified(root, removal.SetupScreenshot);
+                var s = setup.RootElement;
+                if (s.GetProperty("tabId").GetString() != b.GetProperty("tabId").GetString()
+                    || s.GetProperty("page").GetProperty("url").GetString() != beforeUrl.ToString()
+                    || s.GetProperty("at").GetDateTimeOffset() > b.GetProperty("at").GetDateTimeOffset())
+                    throw new InvalidDataException("Browser setup identity mismatch.");
+                var empty = ObservedHtml(s);
+                if (removal.Reason == "quantity_after_two_adds")
+                {
+                    if (removal.CheckId != "C-015" || removal.AddCount != 2 || !WellFormedCart(empty)
+                        || Html.CartLines(empty).Count != 0 || Html.Money(empty) != 0
+                        || !WellFormedCart(beforeHtml) || album?.AlbumId != 1 || lines[0].Count == 2)
+                        throw new InvalidDataException("Quantity violation is not established by setup evidence.");
+                    review.ProductFailures["C-013"] = "Browser: two public additions from an empty cart yielded "
+                        + Scenarios.DescribeCart(lines) + "; removal itself was not performed.";
+                }
+                review.results[removal.CheckId] = new Result(false,
+                    "Removal not performed: " + removal.Reason + "; evidence=" + removal.Before.Path, false, "not_run_precondition");
+                continue;
+            }
             if (album == null || lines[0].Count != countBefore
                 || !WellFormedCart(beforeHtml) || Html.Money(beforeHtml) != countBefore * album.Price)
                 throw new InvalidDataException("Browser removal lacks its populated precondition.");
+
+            if (removal.Action == "not-run-unsupported")
+            {
+                review.results[removal.CheckId] = new Result(false,
+                    "Removal not confirmed: " + removal.Reason + "; evidence=" + removal.Before.Path, false, "unsupported");
+                continue;
+            }
+            if (removal.Action == "observe-unavailable")
+            {
+                if (removal.Reason is not ("control_absent" or "control_disabled"))
+                    throw new InvalidDataException("Unrecognized product actionability observation.");
+                review.results[removal.CheckId] = new Result(false,
+                    "Removal unavailable: " + removal.Reason + "; no click performed; DOM=" + removal.Before.Path
+                    + "; screenshot=" + removal.BeforeScreenshot.Path, true, "unavailable");
+                continue;
+            }
 
             var remaining = Html.CartLines(afterHtml);
             var countAfter = countBefore - 1;

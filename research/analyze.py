@@ -447,6 +447,8 @@ def analyze_run(root, cohort, slot=None):
               'replacement_for': (slot or {}).get('replacement_for'),
               'started_at': manifest.get('started_at'), 'execution': row['execution'],
               'quality': row['quality'], 'verdict': row['verdict'], 'scoring': row['scoring'],
+              'confirmed_product_failure': row.get('confirmed_product_failure'),
+              'browser_cleanup': row.get('browser_cleanup'), 'operation_status': row.get('operation_status'),
               'usage_complete': complete, **totals, 'total_tokens': total,
               'observed_input_tokens': observed_total(c.get('input_tokens') for c in calls),
               'observed_output_tokens': observed_total(c.get('output_tokens') for c in calls),

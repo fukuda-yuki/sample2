@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "kind": "offline_allocation_and_sql_readback_validation",
+  "date": "2026-09-21",
+  "tests": [
+    {
+      "attempt": "initial",
+      "cases": 7,
+      "passed": 4,
+      "errors": 3,
+      "evidence": "Current task command output; no standalone first-attempt log retained.",
+      "cause": "Windows temporary fixture cleanup: SQLite connection context managers did not close handles. Test fixture corrected with explicit closing."
+    },
+    {
+      "attempt": "fixture_fixed",
+      "cases": 9,
+      "passed": 9,
+      "failed": 0,
+      "log": "artifacts/catalog-allocation-20260921/tests-final.log",
+      "log_sha256": "9577bb9a6c039d8d548b1cc61944515b02491a0ae62692eeecb8065cf42d6366"
+    },
+    {
+      "attempt": "final_with_sql",
+      "cases": 10,
+      "passed": 10,
+      "failed": 0,
+      "log": "artifacts/catalog-allocation-20260921/tests-with-sql.log",
+      "log_sha256": "07ec101f0eea7276e60e32786d957a5fb3223a6133828576976ae9b5833b51a4"
+    }
+  ],
+  "actual_saved_sqlite_sql_readback": {
+    "databases": 4,
+    "request_rows": 218,
+    "run_identity_matches": true,
+    "input_output_cache_read_totals_match_saved_normalization": true,
+    "all_inspected_original_file_hashes_unchanged": true,
+    "per_run_source_evidence": "research/design-results/catalog-allocation-review-20260921.json"
+  },
+  "reviewed_file_hashes": {
+    "research/catalog_allocation_review.py": "cfea7280b28587e899a51fa709cebccdeaf58a24a638f2c46c9325073cdd2da5",
+    "research/tests/test_catalog_allocation_review.py": "49c79982bed0175c8071dce2367841ca0b0870687c6e3f3bda70182807c78851",
+    "research/sql/catalog_otel_requests.sql": "76cf16847b079c245fe373bc3626ba1214146882fce43ff59ab879a23bd51c84",
+    "research/design-results/catalog-allocation-review-20260921.json": "6e430b3b94e3f7c60e0b923cf601bb1117fc7caa8a397efa651877a8f9564b09"
+  },
+  "pr15_preservation": {
+    "freeze_reference": "research/design-results/catalog-comparison-v2-freeze.json",
+    "frozen_files_except_readme_checked": 13,
+    "unchanged": true,
+    "readme_change": "Navigation and new offline helper/SQL description only"
+  },
+  "not_run": [
+    "Previously reported 91-test suite",
+    "Original provider-call re-audit",
+    "New model Runs",
+    "Evaluator or historical rejudging",
+    "New simulation",
+    "Archive creation",
+    "Public raw-data upload and download/restore",
+    "Human review"
+  ],
+  "launch_authorized": false
+}

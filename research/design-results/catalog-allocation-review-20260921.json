@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "kind": "allocation_and_sharing_review_not_acquisition",
+  "checked_at_utc": "2026-09-21T14:38:25.020817+00:00",
+  "model_called": false,
+  "evaluator_called": false,
+  "archives_created": false,
+  "telemetry_imported": false,
+  "uploaded": false,
+  "source_hashes": {
+    "research/protocols/ms1-catalog-technical-pilot-20260920.json": "04c8cec02766cd73d504ea05fa0626b57ce03d0878f714818f544ecca414fc22",
+    "research/design-results/catalog-comparison-v2.json": "556784d31070825194a38581d967238c9a9a91239f0912910ee3ce11536b4a0d"
+  },
+  "pilot_root": "runs/catalog-technical-pilot-20260920",
+  "runs": [
+    {
+      "run_id": "MS1-001-catalog-compact-001",
+      "source_hashes": {
+        "manifest.json": "edd25ed01a76c5c4ba8210fe7e46b489248ec30d6905515f47c66cae9574b435",
+        "usage/normalized.json": "ac743d1761dce0868cbcc59d733f2d2e984c9a84b30290d957fb6b0883d8d99f",
+        "telemetry/gateway.otlp.json": "66fd92a09f1326da852abc80386d4071ac216ac304b7964b823f880452d5230b",
+        "telemetry/monitor.db": "6a32018bd9e34d7901f4493ba1184a162efba7db0b713da462df420d98e5223e",
+        "telemetry-link.json": "27b614d094bc71324386d0e05cac132612fdce94548c89aba16cd97824abf8b2"
+      },
+      "source_unchanged": true,
+      "sqlite_integrity": "ok",
+      "exact_otlp_readback": true,
+      "raw_records": 1,
+      "request_spans": 38,
+      "database_bytes": 716800,
+      "span_events_present": false,
+      "span_attribute_keys": [
+        "gen_ai.conversation.id",
+        "gen_ai.operation.name",
+        "gen_ai.request.model",
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "sample2.cache_read_tokens",
+        "sample2.reasoning_tokens",
+        "sample2.request.id",
+        "sample2.request.status"
+      ],
+      "usage_complete": true,
+      "input_tokens": 2113778,
+      "output_tokens": 39677,
+      "cache_read_tokens": 2003328,
+      "cache_write_tokens": null,
+      "runtime_seconds": 525.071,
+      "quota_dollars_reference": {
+        "off_peak": 0.046383684,
+        "peak": 0.092767368
+      }
+    },
+    {
+      "run_id": "MS1-001-catalog-expanded-001",
+      "source_hashes": {
+        "manifest.json": "38f5659b69a41ac81dff5b0a00eae940884cb387cf638fb740e74ef3f9ed86b1",
+        "usage/normalized.json": "1612ea17e5f0b4e57dda5acb94ce26e0389f9c6df5216314ec74c668e2692102",
+        "telemetry/gateway.otlp.json": "3db79ba9506c07a13b943da91598d528fb6206f8c38b8c0babe6f960e4f6ac81",
+        "telemetry/monitor.db": "4f059d3608a68dbe195debccc6efca322b4e4cd8c4db1e584657a5b9bf347869",
+        "telemetry-link.json": "de02a86f8fbb094fa397068d9da1214fa8ea75802a93112f74492b52348d3773"
+      },
+      "source_unchanged": true,
+      "sqlite_integrity": "ok",
+      "exact_otlp_readback": true,
+      "raw_records": 1,
+      "request_spans": 43,
+      "database_bytes": 724992,
+      "span_events_present": false,
+      "span_attribute_keys": [
+        "gen_ai.conversation.id",
+        "gen_ai.operation.name",
+        "gen_ai.request.model",
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "sample2.cache_read_tokens",
+        "sample2.reasoning_tokens",
+        "sample2.request.id",
+        "sample2.request.status"
+      ],
+      "usage_complete": true,
+      "input_tokens": 2739200,
+      "output_tokens": 43709,
+      "cache_read_tokens": 2690304,
+      "cache_write_tokens": null,
+      "runtime_seconds": 305.956,
+      "quota_dollars_reference": {
+        "off_peak": 0.041630712,
+        "peak": 0.083261424
+      }
+    },
+    {
+      "run_id": "MS1-001-catalog-expanded-002",
+      "source_hashes": {
+        "manifest.json": "f11a98b5c812bd360d28b419a2ffbd849f9637792e9bb8829d9a519ebfad8ce7",
+        "usage/normalized.json": "8c1997b7e313dc169bb80028d21dff78cb6fb4dad05fa2b9e8089d2171df0809",
+        "telemetry/gateway.otlp.json": "21b1a22e7927f8931526e5c53585fccf0598a6770007693bebbddc3dcd5192c2",
+        "telemetry/monitor.db": "c48cbab2b7b71d42566a9180a937acfab6c2391dd5ba04c2f14fb6d2eb58c7e3",
+        "telemetry-link.json": "e4fe7959b4e30650607f6eb5576b40836713b86d614f3a2812812fa5a9e11bad"
+      },
+      "source_unchanged": true,
+      "sqlite_integrity": "ok",
+      "exact_otlp_readback": true,
+      "raw_records": 1,
+      "request_spans": 50,
+      "database_bytes": 741376,
+      "span_events_present": false,
+      "span_attribute_keys": [
+        "gen_ai.conversation.id",
+        "gen_ai.operation.name",
+        "gen_ai.request.model",
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "sample2.cache_read_tokens",
+        "sample2.reasoning_tokens",
+        "sample2.request.id",
+        "sample2.request.status"
+      ],
+      "usage_complete": true,
+      "input_tokens": 3066698,
+      "output_tokens": 42653,
+      "cache_read_tokens": 3018880,
+      "cache_write_tokens": null,
+      "runtime_seconds": 665.185,
+      "quota_dollars_reference": {
+        "off_peak": 0.04182114,
+        "peak": 0.08364228
+      }
+    },
+    {
+      "run_id": "MS1-001-catalog-compact-002",
+      "source_hashes": {
+        "manifest.json": "b6638593bed6a1b2f672a7634cbe7a76a5fe0e62b17637eaa73003cf27830b01",
+        "usage/normalized.json": "dd3c7cf81f43e5698e2d0487552228d0a4f65b01f669fbc992d2c17f52de98d5",
+        "telemetry/gateway.otlp.json": "a47bb8578f4376b74847bf1e4b4818321e298fecc1715d4ab7f3411f577e6da5",
+        "telemetry/monitor.db": "033120f5f5d1357a585911975ca3b2a72664c527a809fea4dbc758d277a5d467",
+        "telemetry-link.json": "d15ace3cdc2458e3208c4167250ac5d9a48eddcb41d6fb1ed68ec1b04885a1e6"
+      },
+      "source_unchanged": true,
+      "sqlite_integrity": "ok",
+      "exact_otlp_readback": true,
+      "raw_records": 1,
+      "request_spans": 87,
+      "database_bytes": 819200,
+      "span_events_present": false,
+      "span_attribute_keys": [
+        "gen_ai.conversation.id",
+        "gen_ai.operation.name",
+        "gen_ai.request.model",
+        "gen_ai.usage.input_tokens",
+        "gen_ai.usage.output_tokens",
+        "sample2.cache_read_tokens",
+        "sample2.reasoning_tokens",
+        "sample2.request.id",
+        "sample2.request.status"
+      ],
+      "usage_complete": true,
+      "input_tokens": 4635510,
+      "output_tokens": 42679,
+      "cache_read_tokens": 4191360,
+      "cache_write_tokens": null,
+      "runtime_seconds": 1484.92,
+      "quota_dollars_reference": {
+        "off_peak": 0.10480398,
+        "peak": 0.20960796
+      }
+    }
+  ],
+  "totals": {
+    "input_tokens": 12555186,
+    "output_tokens": 168718,
+    "cache_read_tokens": 11903872
+  },
+  "cache_read_fraction_of_input": 0.9481239067266706,
+  "quota_dollars_four_run_reference": {
+    "off_peak": 0.234639516,
+    "peak": 0.469279032
+  },
+  "pricing": {
+    "source": "https://opencode.ai/docs/ja/go/#利用制限",
+    "rate_snapshot_date": "2026-09-21",
+    "off_peak_per_million": {
+      "input": "0.15",
+      "output": "0.60",
+      "cache_read": "0.003"
+    },
+    "peak_multiplier": 2,
+    "interpretation": "Saved normalized cache mix with the reviewed rates; not actual billed cost, future capacity, a spending cap or a confidence interval. Missing optional cache-write usage remains unknown. Primary scientific tokens remain unweighted input plus output."
+  },
+  "verification_scope": "SQLite integrity, exact saved gateway OTLP payload, identities/counts, and token reconciliation against saved normalization. No reparse of original provider requests/SSE; no evaluation or quality rejudgment.",
+  "telemetry_scope": "Gateway request spans in SQLite; prompt/response bodies, tool actions, products and evaluation evidence remain separate originals. No native OpenCode OTLP or span event coverage claimed.",
+  "current_disk_free_bytes": 307486744576,
+  "candidates": [
+    {
+      "pairs": 40,
+      "runs": 80,
+      "pilot_cache_mix_quota_dollars_reference": {
+        "off_peak": 4.69279032,
+        "peak": 9.38558064
+      },
+      "pilot_runtime_hours_reference": 16.561844444444443,
+      "pilot_adopted_scoring_hours_reference": 0.6514682333333334,
+      "runtime_budget_hours": 40.0,
+      "retained_gib_reference": 34.55950275063515,
+      "sqlite_mib_reference": 57.265625,
+      "token_reduction_support_probability_scenario": 0.2113,
+      "quality_interval_mean_half_width_pp_scenario": 27.181641580635805,
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 80,
+      "runs": 160,
+      "pilot_cache_mix_quota_dollars_reference": {
+        "off_peak": 9.38558064,
+        "peak": 18.77116128
+      },
+      "pilot_runtime_hours_reference": 33.123688888888886,
+      "pilot_adopted_scoring_hours_reference": 1.3029364666666667,
+      "runtime_budget_hours": 80.0,
+      "retained_gib_reference": 69.1190055012703,
+      "sqlite_mib_reference": 114.53125,
+      "token_reduction_support_probability_scenario": 0.3846,
+      "quality_interval_mean_half_width_pp_scenario": 19.171544201148414,
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 160,
+      "runs": 320,
+      "pilot_cache_mix_quota_dollars_reference": {
+        "off_peak": 18.77116128,
+        "peak": 37.54232256
+      },
+      "pilot_runtime_hours_reference": 66.24737777777777,
+      "pilot_adopted_scoring_hours_reference": 2.6058729333333335,
+      "runtime_budget_hours": 160.0,
+      "retained_gib_reference": 138.2380110025406,
+      "sqlite_mib_reference": 229.0625,
+      "token_reduction_support_probability_scenario": 0.6477,
+      "quality_interval_mean_half_width_pp_scenario": 13.460996528387541,
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 320,
+      "runs": 640,
+      "pilot_cache_mix_quota_dollars_reference": {
+        "off_peak": 37.54232256,
+        "peak": 75.08464512
+      },
+      "pilot_runtime_hours_reference": 132.49475555555554,
+      "pilot_adopted_scoring_hours_reference": 5.211745866666667,
+      "runtime_budget_hours": 320.0,
+      "retained_gib_reference": 276.4760220050812,
+      "sqlite_mib_reference": 458.125,
+      "token_reduction_support_probability_scenario": 0.9066,
+      "quality_interval_mean_half_width_pp_scenario": 9.441148720374242,
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 640,
+      "runs": 1280,
+      "pilot_cache_mix_quota_dollars_reference": {
+        "off_peak": 75.08464512,
+        "peak": 150.16929024
+      },
+      "pilot_runtime_hours_reference": 264.9895111111111,
+      "pilot_adopted_scoring_hours_reference": 10.423491733333334,
+      "runtime_budget_hours": 640.0,
+      "retained_gib_reference": 552.9520440101624,
+      "sqlite_mib_reference": 916.25,
+      "token_reduction_support_probability_scenario": 0.99455,
+      "quality_interval_mean_half_width_pp_scenario": 6.633030679188279,
+      "capacity_confirmed": false
+    }
+  ]
+}

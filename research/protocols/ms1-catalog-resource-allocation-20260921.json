@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "kind": "resource_allocation_and_working_recommendation_not_launch",
+  "recorded_date": "2026-09-21",
+  "authority": "User resource-allocation response in this task. Experiment start remains held.",
+  "pc_availability": {
+    "hours_per_day": 24,
+    "days_per_year": 365,
+    "study_calendar_delegated": true
+  },
+  "opencode_go": {
+    "research_fraction": 1.0,
+    "may_exhaust_existing_allowance": true,
+    "additional_subscription": "User is willing to consider if needed; not procured or counted as available capacity.",
+    "purchases_this_work": 0,
+    "account_settings_changed": false
+  },
+  "storage": {
+    "user_minimum_free_bytes": 0,
+    "user_retention_cap_bytes": null,
+    "physical_write_capacity_still_required": true,
+    "originals_deleted_this_work": false
+  },
+  "working_recommendation": {
+    "pairs": 320,
+    "total_runs": 640,
+    "status": "proposed_not_adopted",
+    "rationale": "Smallest existing candidate exceeding 80% token reference sensitivity and below 10 pp mean quality interval half-width. Planning judgments, not guaranteed precision or a quality-loss margin.",
+    "initial_operating_window_days_from_separate_start_approval": 42,
+    "operational_review_after_days": 14,
+    "completion_date_guaranteed": false,
+    "scheduling": "Serial adjacent pairs, prefer off-peak. Quota waits are independent of outcomes. No replacements, added pairs or model fallback."
+  },
+  "active_execution_plan": {
+    "path": "research/protocols/ms1-catalog-comparison-v2.json",
+    "sha256": "e4d6d4b918d2b4ce85d8285ebe0d412ee2a5d429f43bb7d0e590f5e65e95df3d",
+    "pairs": null,
+    "slots": [],
+    "launch_authorized": false
+  },
+  "sharing": {
+    "requested_repository": "https://github.com/fukuda-yuki/sample2",
+    "observed_visibility": "PUBLIC",
+    "detailed_sqlite_and_all_analysis_inputs_requested": true,
+    "proposed_distribution": "Git source, SQL and hash/URL manifests; same-repository Release assets for sealed SQLite and accompanying evidence.",
+    "publication_pipeline_implemented": false,
+    "new_raw_data_uploaded": false
+  },
+  "evidence": {
+    "path": "research/design-results/catalog-allocation-review-20260921.json",
+    "sha256": "6e430b3b94e3f7c60e0b923cf601bb1117fc7caa8a397efa651877a8f9564b09"
+  },
+  "remaining_before_execution_freeze": [
+    "Verify actual provider-window capacity and pair admission rules",
+    "Prepare and verify public evidence upload/download/restore path and local staging capacity",
+    "Save fixed allocation, exact plan hash, pins and real pre-dispatch evidence"
+  ],
+  "model_runs_this_work": 0,
+  "evaluator_runs_this_work": 0,
+  "historical_rejudgments": 0,
+  "zip_recreations": 0
+}

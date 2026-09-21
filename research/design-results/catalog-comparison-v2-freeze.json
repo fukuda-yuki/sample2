@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "kind": "offline_revision_freeze_not_launch_authorization",
+  "frozen_at_utc": "2026-09-21T04:56:43.021539+00:00",
+  "baseline_commit": "ac361e2b393c678365761725d99411f138244436",
+  "files": {
+    "research/README.md": "da684d54864fc2afda6ca7cb1de87ecca7b6682f65a9f0e6d75141a98a8bc037",
+    "research/catalog_confirmatory.py": "e45d1c5728d13e4b23aaa2d930757161bd235048ddeec772bacf513a7cb562da",
+    "research/catalog_design.py": "48e8bde52885fe860dc4123df7fd65fe144c314d6821574a95387cef7095abef",
+    "research/catalog_resources.py": "4d2853004d902a368b9c674b3fe634f381c63d20e2538e0f239cd5cfc8471449",
+    "research/tests/test_catalog_confirmatory.py": "19b706faa649adbbf90b6ff2e04da26b9d28a218cc234b1746d485caa486bead",
+    "research/tests/test_catalog_resources.py": "3b46ab658029a84fb4d3e9f3adb2811f73a1525898d2fe2f059ef335784b635b",
+    "research/protocols/ms1-catalog-comparison-v2.json": "e4d6d4b918d2b4ce85d8285ebe0d412ee2a5d429f43bb7d0e590f5e65e95df3d",
+    "research/design-results/catalog-resource-snapshot-20260921.json": "17800a8a005e73cd436a205e1e78584be4ef936588ab4b1fb0c96bb99418fbca",
+    "research/design-results/catalog-comparison-v2.json": "556784d31070825194a38581d967238c9a9a91239f0912910ee3ce11536b4a0d",
+    "research/design-results/catalog-comparison-v2-validation.json": "b306c1a7f4b1008567d4284f7337ab8f71bf1c4f7949d48b2b88c7de42bff8f5",
+    "docs/ms1-catalog-comparison-v2-misc-proposal.md": "e06002b72af4fbe8aa0374baedd606b4d7c879cb79e50e6f403499ab00f0d95b",
+    "docs/ms1-catalog-comparison-v2-plan.md": "2ca3ba968f55e7d609aa15f800943c8bc9603618f2677f961b678e2319aff5ef",
+    "docs/ms1-catalog-comparison-v2-resources.md": "3f79211de222887c902cb8bbe8a799ef3ca1a239e98200536199a2ce3196967e",
+    "docs/ms1-catalog-comparison-v2-validation.md": "83db9275b8ec34922c94d317b5f9fe70a6f0b76a328b6cff036c7aa221a32cc3"
+  },
+  "analysis_code_hashes": {
+    "research/catalog_confirmatory.py": "e45d1c5728d13e4b23aaa2d930757161bd235048ddeec772bacf513a7cb562da",
+    "research/catalog_observations.py": "5def0175934cdbbe89db04edede2c67ff07b20bfaa89eb04fe8647b0ff0ff5e1",
+    "research/analyze.py": "682259bdbf6db6196cba4278d7e1d5bd66c53aeb371a9e95935fb99d5c03c871",
+    "research/requirements-confirmatory.txt": "03ea95f011c181063c57ba0536cca1d2314fc49a89e7a9dcc35df13640813e42"
+  },
+  "plan_file_sha256": "e4d6d4b918d2b4ce85d8285ebe0d412ee2a5d429f43bb7d0e590f5e65e95df3d",
+  "v1_history_unchanged": true,
+  "selected_pairs": null,
+  "acquisition_authorized": false,
+  "model_runs_this_revision": 0,
+  "evaluator_runs_this_revision": 0,
+  "historical_24_reevaluations": 0,
+  "zip_recreations": 0,
+  "publication": "local_only",
+  "human_review": "not_run"
+}

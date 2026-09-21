@@ -1,0 +1,208 @@
+{
+  "schema_version": 2,
+  "protocol_id": "MS1-CATALOG-COMPARISON-V2",
+  "cohort": "catalog-comparison-v2",
+  "status": "resource_bounded_design_allocation_deferred_no_acquisition",
+  "design_date": "2026-09-21",
+  "base_commit": "ac361e2b393c678365761725d99411f138244436",
+  "accepted_pr_head": "dfcf35de006f34590c8182fac09cef100b87e07a",
+  "technical_pilot_status": "accepted_complete_do_not_repeat",
+  "task": "MS1-001",
+  "runtime": "deepseek-catalog-v1",
+  "model": "deepseek-v4.1-flash",
+  "agent": "OpenCode 1.17.11",
+  "question": "Effect of omitting the initial source excerpt on all-29-requirement compliance and all-Run provider input plus output tokens, with identical source, derived data and retrieval capabilities.",
+  "pairs": null,
+  "runs_per_condition": null,
+  "maximum_runs": null,
+  "maximum_supplements": 0,
+  "attempt_start": 1001,
+  "randomization_seed": 2026092001,
+  "randomization": "Independent random.Random(seed).getrandbits(1) per adjacent pair; 0 compact-first, 1 expanded-first. Saved once; no rebalancing.",
+  "runs_dir": "runs/catalog-comparison-v2",
+  "probe": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\artifacts\\catalog-pilot\\20260920\\connection-01",
+  "budget": {
+    "run_seconds": 1800,
+    "provider_seconds": 600,
+    "concurrency": 1,
+    "token_spending_cap": null,
+    "currency_budget": null,
+    "available_execution_hours": null,
+    "reserved_disk_bytes": null
+  },
+  "quality": {
+    "requirements": 29,
+    "run_pass": "Every public requirement pass with complete adopted evaluation; a known failure remains failure even with other unobserved requirements.",
+    "loss_margin": null,
+    "positive_margin_justified": false,
+    "rule": "estimate_difference_superiority_additional",
+    "absolute_population_pass_floor": null,
+    "practical_adequacy_claim_authorized": false,
+    "interval": "Bonferroni simultaneous 97.5% exact Clopper-Pearson intervals for the two discordant probabilities; difference gives at least 95% coverage.",
+    "missingness": "A verified requirement failure fixes the binary outcome at 0 even if other checks are incomplete. Unknown binary outcomes retain all-assigned worst/best bounds and interval envelopes; no complete-case replacement or superiority flag. Identity-invalid results are retained as recorded facts but treated as unknown for inference.",
+    "superiority_rule": "paired_risk_difference_lower_gt_zero",
+    "maintenance_claim": "not_established_no_justified_margin"
+  },
+  "analysis": {
+    "unit": "Run",
+    "resampling_unit": "pair",
+    "primary_tokens": "paired_arithmetic_mean_difference",
+    "confidence": 0.95,
+    "token_interval": "Student t interval of within-pair compact-minus-expanded arithmetic total-token differences",
+    "one_sided_alpha": 0.025,
+    "token_support": "upper_two_sided_95pct_bound_lt_zero",
+    "mean_ratio": "ratio of arithmetic Run means; secondary paired percentile bootstrap interval",
+    "bootstrap_seed": 2026092101,
+    "bootstrap_repetitions": 20000,
+    "missing_tokens": "No all-assigned mean or primary interval when any true Run total is unknown. Known partial sums and complete-pair summaries are secondary only. Quality inspection incompleteness does not veto valid complete token inference.",
+    "multiplicity": "Separate marginal 95% intervals, not a joint confidence region or an either-endpoint-success test. Optional conjunction of directional supports is an intersection-union claim; no independence assumption or product of powers.",
+    "all_equal_tokens": "Keep point estimate; no zero-width population interval or support. Quality inference remains independent.",
+    "optional_stopping": false,
+    "success_only": "secondary only",
+    "conclusion_rule": "Report token reduction, quality difference and additional joint conclusions separately. Research informativeness is not defined by quality superiority.",
+    "integrity": "Model/task/input provenance faults block both; evaluator/artifact/spec identity faults block quality; usage faults block tokens. Coverage, behavior audit and cleanup are separate operational records; unknown audit faults remain shared."
+  },
+  "planning": {
+    "candidate_pairs": [
+      40,
+      80,
+      160,
+      320,
+      640
+    ],
+    "token_difference_target": 600000,
+    "expanded_mean_reference": 3000000,
+    "relative_reduction_target": 0.2,
+    "target_rationale": "A prespecified planning judgment: one fifth of a rounded 3M Run scale; not pilot effect, price saving, or established user utility threshold.",
+    "quality_precision_target_half_width": 0.1,
+    "quality_precision_rationale": "Estimation resolution at pC=pE=0.8, binary correlation 0; NOT an acceptable quality-loss margin.",
+    "token_reference_cv": 1.0,
+    "token_reference_rho": 0.25,
+    "target_power": 0.8,
+    "simulation_seed": 2026092002,
+    "simulation_repetitions": 20000,
+    "resource_feasibility": "Read-only Go usage API succeeded on 2026-09-21: rolling used 0%, weekly 0%, monthly 14%. This is account window information, not a confirmed DeepSeek Run capacity. Actual available execution hours and storage reserve remain unconfirmed; no Run count adopted.",
+    "selection_rule": "Before outcomes, choose one fixed candidate only after remaining provider capacity, calendar hours, storage reserve and the useful uncertainty in the comparison table are documented. If no candidate is both feasible and informative, do not acquire. No automatic maximum-spending rule.",
+    "token_target_role": "Historical planning scenario and additional minimum-effect flag, not a mandatory research success criterion.",
+    "quality_precision_role": "Historical precision scenario, not a quality-loss boundary or adopted minimum N."
+  },
+  "fixed_conditions": {
+    "condition_fingerprints": {
+      "task": "3d086b9ae34c0765e8c8328eb5dba099f82f70eaef714073d600bda492b18bd0",
+      "runtime": "99242486a1c2abf44b7d7f7e64f1e21ca8f7909b5b46fe937d6478cf098dcc55",
+      "runtime_lock": "0fbdb8e1293056d3bd735976312905a90b2777218d9e1368000207d8299915dc",
+      "interventions": {
+        "catalog-expanded": "06bf2ea921e9e67a894bca0216d8c708d791e43501021128363672c255038394",
+        "catalog-compact": "fe674b62c0d47f09245fef8bdac27958c5898af01e03478ec688b9389a8f7847"
+      }
+    },
+    "images": {
+      "worker": "sha256:cd0231d5717baf4e334997aa84427cf00184dbf85d558e83c1b23793b4d5d31e",
+      "evaluator": "sha256:1756f71dd8e279cb6d69d5e6bec470e7f9a8ad9e9eda57dcff705051c5ab5a74",
+      "gateway": "sha256:f5c9c50bbcf205133f7eeab0c4d79476cf14efd15656257667200dd0984f02f9"
+    },
+    "evaluator_sha256": "594d79ddd2929eaabf0978f8f22bc8bcfcbcf4f06974b98f194b16961c063128",
+    "evaluation_version": "1.2.0",
+    "source_commit": "2967afb9d69488641df0d154e2ad5827a7820e71",
+    "input_contract": "docs/ms1-catalog-return-two-condition-spec.md",
+    "source_sha256": "cab15100c9230e325ae513c7a9d8b09dc90f21cd7b489a54b0fa93cc2e7512ed",
+    "initial_prompt_sha256": {
+      "catalog-compact": "af4b879a9856cb120d9473dfe564566d255c3d3ae4b6bdc94cbfc5664b838aa4",
+      "catalog-expanded": "267976ce58e3ebbb8c6097a143cfcac03ea25acf47273cdadd1571082cea9e91"
+    },
+    "source_paths_and_retrieval_identical": true,
+    "reacquisition_allowed": true,
+    "deletion_hints_added": false,
+    "fallback": false,
+    "browser_environment_reference": "artifacts/catalog-pilot/20260920/browser-environment-pin.json",
+    "browser_environment_sha256": "c7cc3266f0644074387821d6076985f5a08d17c3caf3ecd392ab64f72d2cca8e"
+  },
+  "pinned_files": {
+    "outer/profiles/tasks/MS1-001.json": "4a80a5efcf38f2f4a3b10790793903b38a6db0f5b82b6c968a902fe908f821c1",
+    "outer/profiles/runtimes/deepseek-catalog-v1.json": "8e67d3e224a0d12377a3a07032a00d2d4fe8fb5f65b9ce67dad0530f4b73defd",
+    "outer/profiles/interventions/catalog-compact.json": "c242500faa92863f9dcb862784f92cba8562ddd38f78cb8f630a8c2e8744bb0c",
+    "outer/profiles/interventions/catalog-expanded.json": "e56762a83b18373d849d3cd8566c110093a01cc6884375912dccc8d526a8fa4c",
+    "inner/spec/requirements-1.2.0.json": "fbec6c9e370aa7690460d854c167e486ca7b88eb8f5f0305805ca4fe4a98b2e4",
+    "research/catalog_return_contract.py": "3450868c36509f533b5a7a07f692d3e774f7c3bc12e9449eb5306217eeb63214",
+    "research/catalog_environment.py": "c8d6f8ba1dbe0d0ff1b4f1369ad468f023ca89dc9ffef5a3319eed7e050b67b6",
+    "research/catalog_observations.py": "5def0175934cdbbe89db04edede2c67ff07b20bfaa89eb04fe8647b0ff0ff5e1",
+    "inner/browser/cart-review.cjs": "69a6a635d9d4b1c8d68e8ac44d38f4aa9a50819d09f48840bf520e1b01306d70",
+    "research/analyze.py": "682259bdbf6db6196cba4278d7e1d5bd66c53aeb371a9e95935fb99d5c03c871"
+  },
+  "stopping": {
+    "product_failure": "retain and continue",
+    "halt_before_next_dispatch": [
+      "authentication or quota fault",
+      "model mismatch",
+      "initial input mismatch",
+      "source or fixed-file mismatch",
+      "unrecovered owned resources",
+      "evaluation or browser environment fault",
+      "uncertain dispatch"
+    ],
+    "resume": "Only never-dispatched slots in original order after documented repair and fresh equality of all pins, saved evidence integrity and owned cleanup. In-flight or uncertain slots are never replayed.",
+    "evaluation_recovery": "Same frozen artifact only, preserve every attempt, at most two recovery rescores after future authorization. A confirmed failure makes all-29 binary quality known; unfinished requirement inspection remains separate. Unresolved environment faults still stop further dispatch until safe recovery, but do not invalidate already measured independent metrics.",
+    "technical_recovery_window_hours": 72,
+    "outcome_based_stop_or_extension": false,
+    "usage_format_change": "Retain all Runs and calls. Missing usage blocks the token primary interval, not otherwise valid quality inference. Unknown dispatch is never replayed."
+  },
+  "launch": {
+    "authorized": false,
+    "model_calls_this_work": 0,
+    "receipt_required": [
+      "analysis_plan_sha256",
+      "frozen_analysis_code_hashes",
+      "pre_dispatch_verified",
+      "checked_at_utc",
+      "resource_capacity_confirmation",
+      "identity_and_browser_pin_checks",
+      "dispatch_journal_path"
+    ],
+    "notes": "No acquisition in this work. Allocation and resource confirmation must be frozen before future separate execution authorization. Receipt validates content binding, not the truth of evidence attestations; inspect journal and referenced capacity/pin records.",
+    "required_code_files": [
+      "research/catalog_confirmatory.py",
+      "research/catalog_observations.py",
+      "research/analyze.py",
+      "research/requirements-confirmatory.txt"
+    ],
+    "plan_hash_algorithm": "SHA256 of exact saved plan file bytes. All analysis entry points supply that file; the parsed value must equal the passed plan and both observations and launch receipt must carry its hash."
+  },
+  "canonical_research": {
+    "repository": "fukuda-yuki/misc",
+    "revision": "797dde53f29dd3512d91699dc69b5cd8a8d607c9",
+    "paths": [
+      "knowledge/projects/lsken-2026-04/research/protocol.md",
+      "knowledge/projects/lsken-2026-04/research/research-questions.md",
+      "knowledge/projects/lsken-2026-04/planning/research-plan.md"
+    ],
+    "state": "proposed_experiment_specific_extension_not_applied",
+    "reviewed_at": "2026-09-21"
+  },
+  "excluded_cohorts": [
+    "catalog-technical-pilot-20260920",
+    "historical acceptance six",
+    "exploration-20260919-ms1 including supplements"
+  ],
+  "forbidden_in_current_work": [
+    "model dispatch",
+    "repeat pilot",
+    "historical 24 reevaluation",
+    "ZIP recreation"
+  ],
+  "slots": [],
+  "history": {
+    "plan": "research/protocols/ms1-catalog-confirmatory-v1.json",
+    "status": "preserved_design_candidate_not_adopted",
+    "merge_commit": "ac361e2b393c678365761725d99411f138244436",
+    "merged_at_jst": "2026-09-20T22:50:21+09:00"
+  },
+  "resource_evidence": {
+    "local_inventory": "research/design-results/catalog-resource-snapshot-20260921.json",
+    "candidate_comparison": "research/design-results/catalog-comparison-v2.json",
+    "account_usage_receipt": "artifacts/catalog-comparison-v2/opencode-go-usage-20260921.json",
+    "subscription": "OpenCode Go, user confirmed 2026-09-21",
+    "credential_source": "Windows user environment OPENCODE_GO_API_KEY; value never recorded",
+    "model": "deepseek-v4.1-flash",
+    "capacity_confirmed": false
+  }
+}

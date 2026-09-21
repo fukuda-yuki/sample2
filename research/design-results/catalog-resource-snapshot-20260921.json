@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "kind": "read_only_resource_snapshot",
+  "checked_at_utc": "2026-09-21T04:38:12.956235+00:00",
+  "model_called": false,
+  "evaluator_called": false,
+  "disk": {
+    "volume": "C:\\",
+    "total_bytes": 999093653504,
+    "used_bytes": 687280017408,
+    "free_bytes": 311813636096
+  },
+  "storage": {
+    "runs": {
+      "bytes": 41478549163,
+      "known_bytes": 41478549163,
+      "files": 119641,
+      "errors": []
+    },
+    "artifacts": {
+      "bytes": 82701017233,
+      "known_bytes": 82701017233,
+      "files": 188390,
+      "errors": []
+    }
+  },
+  "pilot_cohort_storage": {
+    "bytes": 1855399176,
+    "known_bytes": 1855399176,
+    "files": 6098,
+    "errors": []
+  },
+  "pilot": [
+    {
+      "run_id": "MS1-001-catalog-compact-001",
+      "storage": {
+        "bytes": 266087818,
+        "known_bytes": 266087818,
+        "files": 809,
+        "errors": []
+      },
+      "runtime_seconds": 525.071,
+      "evaluations": [
+        {
+          "sequence": 1,
+          "adopted": false,
+          "state": "evaluator_fault",
+          "sources": {
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-001/evaluations/evaluator_fault-001-413a30a41da64566a79a077813c0ad52/evaluation.json": "e53f0935c6d3e6721f96a27e0034a0c675f73f7f919d83b19f8b0bf5a212b1c3",
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-001/evaluations/evaluator_fault-001-413a30a41da64566a79a077813c0ad52/http-only/evaluation.json": "79b24b73863a59466b832a0c6acdccea5e75dc199b5d5f3c9d1319fe401271a6"
+          },
+          "observable_scoring_span_seconds": 15.443631
+        },
+        {
+          "sequence": 2,
+          "adopted": true,
+          "state": "scored",
+          "sources": {
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-001/evaluations/MS1-001-ee3d11e09a95-1.2.0-002/evaluation.json": "d7193ea9d178381456dad37c4f363e8d1951cf975bc730ce5cedea4bbd158be5",
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-001/evaluations/MS1-001-ee3d11e09a95-1.2.0-002/http-only/evaluation.json": "749ed57c3f8d964488b64e326a387d13d7acfbaf4049eba6648b84cc6a6be9fc"
+          },
+          "observable_scoring_span_seconds": 39.92343
+        }
+      ],
+      "manifest_sha256": "edd25ed01a76c5c4ba8210fe7e46b489248ec30d6905515f47c66cae9574b435",
+      "evaluation_index_sha256": "1b61dc1b78c7de581b491e9597ab2b43e4fd26d5aebbba26d1394b07110f4610"
+    },
+    {
+      "run_id": "MS1-001-catalog-compact-002",
+      "storage": {
+        "bytes": 193118836,
+        "known_bytes": 193118836,
+        "files": 709,
+        "errors": []
+      },
+      "runtime_seconds": 1484.92,
+      "evaluations": [
+        {
+          "sequence": 1,
+          "adopted": true,
+          "state": "scored",
+          "sources": {
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-002/evaluations/MS1-001-45d7115e1507-1.2.0-001/evaluation.json": "d5cb626d67be4529f35bf1d0fe0135e69b025f660ba958b4674bc1f2a3cd3c13",
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-002/evaluations/MS1-001-45d7115e1507-1.2.0-001/http-only/evaluation.json": "b06223398b2b35634cfbd3edded0e643db8cbede350c61707986c241d01a3e9b"
+          },
+          "observable_scoring_span_seconds": 28.944661
+        }
+      ],
+      "manifest_sha256": "b6638593bed6a1b2f672a7634cbe7a76a5fe0e62b17637eaa73003cf27830b01",
+      "evaluation_index_sha256": "08c55379398cb284263af773c5bad81c15045f4e57f4063636722def53ca2d75"
+    },
+    {
+      "run_id": "MS1-001-catalog-expanded-001",
+      "storage": {
+        "bytes": 187116574,
+        "known_bytes": 187116574,
+        "files": 615,
+        "errors": []
+      },
+      "runtime_seconds": 305.956,
+      "evaluations": [
+        {
+          "sequence": 1,
+          "adopted": true,
+          "state": "scored",
+          "sources": {
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-expanded-001/evaluations/MS1-001-aefadd61f68a-1.2.0-001/evaluation.json": "1a33d3a192e9fc1d5b496e719b5fbb57115ff47a1087c18d9b9d0b9de39939f1",
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-expanded-001/evaluations/MS1-001-aefadd61f68a-1.2.0-001/http-only/evaluation.json": "e5ac77bb7e40d8977dd925b3ec1ade8ad695363c2a347f44b260cea7d2cb1bf8"
+          },
+          "observable_scoring_span_seconds": 21.99029
+        }
+      ],
+      "manifest_sha256": "38f5659b69a41ac81dff5b0a00eae940884cb387cf638fb740e74ef3f9ed86b1",
+      "evaluation_index_sha256": "eef827bff58025d2962e92c27e27eccb442f3959d3c2efe43977991155fd7651"
+    },
+    {
+      "run_id": "MS1-001-catalog-expanded-002",
+      "storage": {
+        "bytes": 189125285,
+        "known_bytes": 189125285,
+        "files": 616,
+        "errors": []
+      },
+      "runtime_seconds": 665.185,
+      "evaluations": [
+        {
+          "sequence": 1,
+          "adopted": true,
+          "state": "scored",
+          "sources": {
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-expanded-002/evaluations/MS1-001-c0509215a42a-1.2.0-001/evaluation.json": "98d59d678e3a294f9314d7c0bbf273d3f21bd5b9fd8082e7b0c8bebe49f0b2d6",
+            "runs/catalog-technical-pilot-20260920/MS1-001-catalog-expanded-002/evaluations/MS1-001-c0509215a42a-1.2.0-001/http-only/evaluation.json": "5c066ed339403deb69d98b0966878743de9c3b510f3c00952a44e604e27c4c33"
+          },
+          "observable_scoring_span_seconds": 26.405901
+        }
+      ],
+      "manifest_sha256": "f11a98b5c812bd360d28b419a2ffbd849f9637792e9bb8829d9a519ebfad8ce7",
+      "evaluation_index_sha256": "df08da7faf2f531eb480e586f77e282df432c32a8f74ab129241644d04c3becf"
+    }
+  ],
+  "storage_definition": "Logical bytes of currently retained regular files; not allocated disk blocks; cohort includes saved archives and recovery copies. No cleanup.",
+  "scoring_time_definition": "Earliest saved HTTP/composed evaluator startedAt through evaluations/index.jsonl recorded_at, per attempt. Includes observed browser/cleanup span; excludes earlier preparation and later archival. Recovery wait between attempts is excluded.",
+  "available_execution_hours": null,
+  "reserved_disk_bytes": null,
+  "account_remaining_usage": null,
+  "account_window_reset_times": null,
+  "model_run_capacity": null
+}

@@ -7,7 +7,7 @@ import numpy as np
 import scipy
 from scipy import stats
 
-from research.catalog_confirmatory import DEFAULT_PLAN, read_json, sha256, write_new
+from research.catalog_confirmatory import HISTORICAL_PLAN as DEFAULT_PLAN, read_json, sha256, write_new
 
 
 def token_power(n, reduction, cv, rho):

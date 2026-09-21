@@ -1,0 +1,82 @@
+{
+  "schema_version": 2,
+  "kind": "offline_revision_validation_not_launch_receipt",
+  "checked_at_utc": "2026-09-21T04:55:16.263877+00:00",
+  "baseline_commit": "ac361e2b393c678365761725d99411f138244436",
+  "python": "3.14.4",
+  "numpy": "2.5.3",
+  "scipy": "1.18.0",
+  "research_tests": {
+    "passed": 91,
+    "failed": 0,
+    "analyzer_and_resource_tests": 47,
+    "existing_other_research_tests": 44,
+    "log": "artifacts/catalog-comparison-v2/research-tests-reviewed.log",
+    "log_sha256": "a7fc92e9c2da4dbd09f0930d5385ca45742e42d4416ea60774f3fa98452fd8ac"
+  },
+  "regression": {
+    "kind": "synthetic_regression_reproduction_not_model_results",
+    "original_commit": "dfcf35de006f34590c8182fac09cef100b87e07a",
+    "original_git_blob_sha": "47a5e8edb5ffa63ef63270ec058af95488caf256",
+    "original_file_sha256": "23c8ebafb3b90ab493e0bf664e78f4a9a3da520c4522dd8edd3ddd1879827a2b",
+    "synthetic_pairs": 40,
+    "synthetic_target_tokens": 100,
+    "target_note": "Lowered only inside synthetic validation to make the auxiliary flag decisively true before corruption; not a change to the research planning target.",
+    "before": {
+      "embedded_forged_receipt_decision": "token_reduction_and_relative_quality_supported",
+      "wrong_model_decision": "indeterminate",
+      "wrong_model_target_supported": true
+    },
+    "after": {
+      "embedded_forged_receipt_rejected": true,
+      "rejection_reason": "Incomplete pre-dispatch launch receipt",
+      "wrong_model_decision": "indeterminate",
+      "wrong_model_target_supported": false,
+      "wrong_model_quality_supported": false
+    },
+    "model_called": false,
+    "evaluator_called": false
+  },
+  "v1_preservation": {
+    "docs/ms1-catalog-confirmatory-plan.md": {
+      "sha256": "734f528a45fd55c457f741bcd2d74360ecd054492523be4c8e638cb4e7ecc3b6",
+      "byte_identical_to_base": true
+    },
+    "docs/ms1-catalog-confirmatory-validation.md": {
+      "sha256": "8e0511655c027a7d06ad61c44e6561a038e43df4a238592108e147c51b46e6ec",
+      "byte_identical_to_base": true
+    },
+    "docs/ms1-catalog-confirmatory-misc-proposal.md": {
+      "sha256": "b4b41e9bb730435ebca1fdc9103b7e081353f071491221ba962968d4a6a1f22d",
+      "byte_identical_to_base": true
+    },
+    "research/protocols/ms1-catalog-confirmatory-v1.json": {
+      "sha256": "107a1d29eab4db98700c3327cbbcc343aa80c067d6f75d3fd174166734a9cbd5",
+      "byte_identical_to_base": true
+    },
+    "research/design-results/catalog-confirmatory-v1.json": {
+      "sha256": "baf4659977f485dde023bed3cde3a2e7025bf2888ae40492647609b2562f15c8",
+      "byte_identical_to_base": true
+    },
+    "research/design-results/catalog-confirmatory-v1-freeze.json": {
+      "sha256": "30f391b6787652bd21c53986a4f464cc0fdf7661d70523c69b9967374fc88bba",
+      "byte_identical_to_base": true
+    },
+    "research/design-results/catalog-pilot-smoke-summary.json": {
+      "sha256": "0f58e9c12822bd67ea00c72fb7ffe73ea57a2d527b1174b531b474df61a0e64b",
+      "byte_identical_to_base": true
+    }
+  },
+  "candidate_comparison_recomputed_without_simulation": true,
+  "pilot_manifests_and_evaluation_indexes_unchanged_since_inventory": true,
+  "model_runs": 0,
+  "live_evaluations": 0,
+  "historical_24_reevaluations": 0,
+  "zip_recreations": 0,
+  "new_simulation_repetitions": 0,
+  "human_review": "not_run",
+  "selected_pairs": null,
+  "resource_capacity_confirmed": false,
+  "publication": "not_performed",
+  "misc_amendment": "local_proposal_only"
+}

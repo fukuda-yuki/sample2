@@ -1,7 +1,11 @@
 import copy
+import hashlib
+import json
 import math
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -9,11 +13,32 @@ import numpy as np
 from scipy import stats
 
 from research.catalog_confirmatory import (
-    ARMS, COMPACT, DEFAULT_PLAN, REQUIREMENTS, allocation, analyze,
+    ARMS, COMPACT, DEFAULT_PLAN, HISTORICAL_PLAN, REPO, REQUIRED_CODE, REQUIREMENTS, allocation, analyze as analyze_input,
     clopper_pearson, paired_mean, paired_quality_interval, read_json, sha256,
     validate_plan, write_new,
 )
 from research.catalog_design import binary_cells, mc_summary, quality_power_exact, token_power
+
+
+def plan_digest(plan):
+    # Exact same bytes as the saved plan fixture; production verifies the file.
+    return hashlib.sha256((json.dumps(plan, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")).hexdigest()
+
+
+def analyze(plan, data, purpose="confirmatory", **kwargs):
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "plan.json"
+        write_new(path, plan)
+        return analyze_input(plan, data, purpose, plan_path=path, **kwargs)
+
+
+def receipt_for(plan):
+    return {"analysis_plan_sha256": plan_digest(plan),
+            "frozen_analysis_code_hashes": {name: sha256(REPO / name) for name in REQUIRED_CODE},
+            "pre_dispatch_verified": True, "checked_at_utc": "2026-09-21T00:00:00Z",
+            "resource_capacity_confirmation": {"verified": True, "evidence_reference": "synthetic-test-only"},
+            "identity_and_browser_pin_checks": {"verified": True, "evidence_reference": "synthetic-test-only"},
+            "dispatch_journal_path": "synthetic-test-only/journal.jsonl"}
 
 
 def fixture(n=40):
@@ -21,7 +46,9 @@ def fixture(n=40):
     plan.update(pairs=n, runs_per_condition=n, maximum_runs=2 * n,
                 slots=allocation(n, plan["randomization_seed"], plan["attempt_start"]))
     plan["analysis"]["bootstrap_repetitions"] = 100
-    observations = {"cohort": plan["cohort"], "launch_receipt": {"test": True}, "runs": []}
+    plan["planning"]["token_difference_target"] = 100
+    observations = {"cohort": plan["cohort"], "plan_sha256": plan_digest(plan),
+                    "launch_receipt": receipt_for(plan), "runs": []}
     for slot in plan["slots"]:
         total = 1000 + slot["block"] * 100
         if slot["condition"] == COMPACT:
@@ -62,7 +89,7 @@ class ConfirmatoryTests(unittest.TestCase):
         self.assertEqual(plan["runs_per_condition"], plan["pairs"])
 
     def test_schedule_is_reproducible_both_orders_and_no_duplicate_slots(self):
-        plan = read_json(DEFAULT_PLAN)
+        plan = read_json(HISTORICAL_PLAN)
         schedule = allocation(plan["pairs"], plan["randomization_seed"], plan["attempt_start"])
         self.assertEqual(schedule, plan["slots"])
         self.assertEqual(len({s["run_id"] for s in schedule}), 640)
@@ -92,7 +119,8 @@ class ConfirmatoryTests(unittest.TestCase):
         plan, data = fixture()
         result = analyze(plan, data)
         self.assertFalse(result["quality"]["relative_quality_supported"])
-        self.assertEqual(result["decision"], "token_reduction_quality_not_supported_or_unresolved")
+        self.assertEqual(result["decision"], "both_metrics_estimable")
+        self.assertTrue(result["token_inference"]["reduction_supported"])
 
     def test_low_tokens_failed_quality_is_never_joint_support(self):
         plan, data = fixture()
@@ -102,7 +130,9 @@ class ConfirmatoryTests(unittest.TestCase):
         result = analyze(plan, data)
         self.assertEqual(result["quality"]["arms"][COMPACT]["confirmed_fail"], 40)
         self.assertEqual(result["descriptive"][COMPACT]["success_only_n_secondary"], 0)
-        self.assertEqual(result["decision"], "token_reduction_quality_not_supported_or_unresolved")
+        self.assertEqual(result["decision"], "both_metrics_estimable")
+        self.assertEqual(result["quality"]["quality_condition_status"], "evidence_of_degradation")
+        self.assertFalse(result["conclusions"]["token_reduction_and_relative_quality_supported"])
         self.assertEqual(result["primary_tokens"]["n_pairs"], 40)
 
     def test_joint_support_is_relative_only_no_practical_quality_claim(self):
@@ -111,7 +141,8 @@ class ConfirmatoryTests(unittest.TestCase):
             if obs["case"]["condition"] != COMPACT:
                 fail(obs)
         result = analyze(plan, data)
-        self.assertEqual(result["decision"], "token_reduction_and_relative_quality_supported")
+        self.assertEqual(result["decision"], "both_metrics_estimable")
+        self.assertTrue(result["conclusions"]["token_reduction_and_relative_quality_supported"])
         self.assertIn("not_authorized", result["practical_efficiency_claim"])
 
     def test_low_quality_in_both_arms_never_implies_practical_adequacy(self):
@@ -119,7 +150,7 @@ class ConfirmatoryTests(unittest.TestCase):
         for obs in data["runs"]:
             fail(obs)
         result = analyze(plan, data)
-        self.assertEqual(result["decision"], "token_reduction_quality_not_supported_or_unresolved")
+        self.assertEqual(result["decision"], "both_metrics_estimable")
         self.assertIn("not_established", result["quality"]["practical_adequacy"])
 
     def test_token_increase_does_not_support_reduction(self):
@@ -129,7 +160,7 @@ class ConfirmatoryTests(unittest.TestCase):
                 total = obs["tokens"]["total_tokens"] * 4
                 obs["tokens"].update(input_tokens=total-10, total_tokens=total, known_total_tokens=total)
                 obs["calls"][0]["input_tokens"] = total-10
-        self.assertEqual(analyze(plan, data)["decision"], "token_reduction_not_supported")
+        self.assertEqual(analyze(plan, data)["token_inference"]["status"], "reduction_not_supported")
 
     def test_analysis_has_no_network_or_subprocess_activity(self):
         plan, data = fixture()
@@ -141,13 +172,13 @@ class ConfirmatoryTests(unittest.TestCase):
         plan, data = fixture()
         data["runs"][0]["row"]["scoring"]["state"] = "evaluator_fault"
         result = analyze(plan, data)
-        self.assertEqual(result["decision"], "indeterminate")
+        self.assertEqual(result["decision"], "tokens_estimable_quality_unresolved")
 
     def test_no_fixed_artifact_cannot_pass_from_requirement_rows_alone(self):
         plan, data = fixture()
         data["runs"][0]["row"]["artifact"]["state"] = "not_fixed"
         result = analyze(plan, data)
-        self.assertEqual(result["decision"], "indeterminate")
+        self.assertEqual(result["decision"], "tokens_estimable_quality_unresolved")
         self.assertIsNone(result["rows"][0]["outcome"])
 
     def test_auxiliary_partial_reads_are_not_full_source_claims(self):
@@ -168,7 +199,7 @@ class ConfirmatoryTests(unittest.TestCase):
         self.assertIsNone(result["primary_tokens"])
         self.assertEqual(result["complete_pair_tokens_secondary"]["n_pairs"], 39)
         self.assertEqual(result["assigned_runs"], 80)
-        self.assertEqual(result["decision"], "indeterminate")
+        self.assertEqual(result["decision"], "quality_estimable_tokens_unresolved")
 
     def test_missing_scheduled_run_stays_in_denominator(self):
         plan, data = fixture()
@@ -189,7 +220,10 @@ class ConfirmatoryTests(unittest.TestCase):
         self.assertEqual(arm["confirmed_fail"], 1)
         self.assertEqual(arm["coverage_incomplete"], 1)
         self.assertEqual(arm["unknown_outcome"], 0)
-        self.assertEqual(result["decision"], "indeterminate")
+        self.assertEqual(result["decision"], "both_metrics_estimable")
+        self.assertTrue(result["quality"]["inference_eligible"])
+        self.assertTrue(result["at_least_planning_target_reduction_supported"])
+        self.assertEqual(result["rows"][0]["unobserved_requirements"], ["R-029"])
 
     def test_unknown_quality_envelope_contains_all_possible_completions(self):
         plan, data = fixture(4)
@@ -253,7 +287,8 @@ class ConfirmatoryTests(unittest.TestCase):
         data["runs"][0]["browser_cleanup"]["confirmed"] = False
         result = analyze(plan, data)
         self.assertEqual(result["quality"]["arms"][COMPACT]["pass"], 40)
-        self.assertEqual(result["decision"], "indeterminate")
+        self.assertEqual(result["decision"], "both_metrics_estimable")
+        self.assertFalse(result["operational"]["cleanup_complete"])
 
     def test_success_only_selection_cannot_replace_all_run_tokens(self):
         plan, data = fixture()
@@ -295,6 +330,200 @@ class ConfirmatoryTests(unittest.TestCase):
             write_new(path, {"x": None})
             with self.assertRaises(FileExistsError):
                 write_new(path, {"x": 0})
+
+    def test_v2_has_no_adopted_sample_size_and_cannot_analyze_before_allocation(self):
+        plan = read_json(DEFAULT_PLAN)
+        validate_plan(plan)
+        self.assertIsNone(plan["pairs"])
+        self.assertEqual(plan["slots"], [])
+        with self.assertRaisesRegex(ValueError, "not yet selected"):
+            analyze(plan, {"cohort": plan["cohort"], "runs": []})
+        with self.assertRaisesRegex(ValueError, "Historical v1"):
+            analyze(read_json(HISTORICAL_PLAN), {})
+
+    def test_forged_embedded_receipt_and_missing_receipt_are_rejected(self):
+        for invalid in (None, {}, {"test": True}):
+            plan, data = fixture()
+            data["launch_receipt"] = invalid
+            with self.assertRaisesRegex(ValueError, "launch receipt"):
+                analyze(plan, data)
+
+    def test_all_required_receipt_fields_and_code_hashes_are_mandatory(self):
+        plan, data = fixture()
+        for key in data["launch_receipt"]:
+            with self.subTest(field=key):
+                broken = copy.deepcopy(data)
+                del broken["launch_receipt"][key]
+                with self.assertRaises(ValueError):
+                    analyze(plan, broken)
+        for name in REQUIRED_CODE:
+            with self.subTest(code=name):
+                broken = copy.deepcopy(data)
+                del broken["launch_receipt"]["frozen_analysis_code_hashes"][name]
+                with self.assertRaisesRegex(ValueError, "code hashes"):
+                    analyze(plan, broken)
+
+    def test_hash_type_and_evidence_validation_cannot_be_bypassed(self):
+        for edit in (lambda r: r.update(analysis_plan_sha256="0" * 64),
+                     lambda r: r.update(pre_dispatch_verified="true"),
+                     lambda r: r.update(checked_at_utc="2026-09-21"),
+                     lambda r: r.update(resource_capacity_confirmation={"test": True}),
+                     lambda r: r["frozen_analysis_code_hashes"].update({REQUIRED_CODE[0]: "0" * 64}),
+                     lambda r: r["frozen_analysis_code_hashes"].update({"../outside.py": "0" * 64})):
+            plan, data = fixture()
+            edit(data["launch_receipt"])
+            with self.assertRaises(ValueError):
+                analyze(plan, data)
+        plan, data = fixture()
+        plan["planning"]["token_difference_target"] += 1
+        with self.assertRaisesRegex(ValueError, "bound"):
+            analyze(plan, data)
+
+    def test_direct_explicit_and_embedded_paths_share_validation(self):
+        plan, data = fixture()
+        receipt = data.pop("launch_receipt")
+        self.assertTrue(analyze(plan, data, launch_receipt=receipt)["token_inference"]["eligible"])
+        with self.assertRaisesRegex(ValueError, "launch receipt"):
+            analyze(plan, data, launch_receipt={"test": True})
+        data["launch_receipt"] = {"test": True}
+        with self.assertRaisesRegex(ValueError, "Conflicting"):
+            analyze(plan, data, launch_receipt=receipt)
+
+    def test_direct_call_requires_the_exact_saved_plan_value_and_file_hash(self):
+        plan, data = fixture()
+        with self.assertRaisesRegex(ValueError, "saved plan file"):
+            analyze_input(plan, data)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "plan.json"
+            changed = copy.deepcopy(plan)
+            changed["pairs"] += 1
+            write_new(path, changed)
+            with self.assertRaisesRegex(ValueError, "saved plan file"):
+                analyze_input(plan, data, plan_path=path)
+
+    def test_cli_receipt_paths_accept_valid_and_reject_forged_before_writing(self):
+        plan, data = fixture()
+        for embedded in (True, False):
+            for valid in (True, False):
+                with self.subTest(embedded=embedded, valid=valid), tempfile.TemporaryDirectory() as folder:
+                    root = Path(folder)
+                    case = copy.deepcopy(data)
+                    receipt = case.pop("launch_receipt") if valid else {"test": True}
+                    case.pop("launch_receipt", None)
+                    if embedded:
+                        case["launch_receipt"] = receipt
+                    write_new(root / "plan.json", plan)
+                    write_new(root / "observations.json", case)
+                    write_new(root / "receipt.json", receipt)
+                    command = [sys.executable, "-m", "research.catalog_confirmatory", "--plan", str(root / "plan.json"),
+                        "--observations", str(root / "observations.json"), "--out", str(root / "out.json")]
+                    if not embedded:
+                        command += ["--launch-receipt", str(root / "receipt.json")]
+                    process = subprocess.run(command, cwd=REPO, capture_output=True, text=True)
+                    self.assertEqual(process.returncode == 0, valid, process.stderr)
+                    self.assertEqual((root / "out.json").exists(), valid)
+                    if valid:
+                        self.assertTrue(read_json(root / "out.json")["token_inference"]["eligible"])
+
+    def test_wrong_model_suppresses_all_support_flags_even_with_favorable_intervals(self):
+        plan, data = fixture()
+        for obs in data["runs"]:
+            if obs["case"]["condition"] != COMPACT:
+                fail(obs)
+        self.assertTrue(analyze(plan, data)["at_least_planning_target_reduction_supported"])
+        self.assertTrue(analyze(plan, data)["quality"]["relative_quality_supported"])
+        data["runs"][0]["calls"][0]["response_models"] = ["wrong-model"]
+        result = analyze(plan, data)
+        self.assertEqual(result["decision"], "indeterminate")
+        self.assertFalse(result["at_least_planning_target_reduction_supported"])
+        self.assertFalse(result["quality"]["relative_quality_supported"])
+        self.assertFalse(result["token_inference"]["reduction_supported"])
+        self.assertFalse(result["conclusions"]["token_reduction_and_relative_quality_supported"])
+
+    def test_pilot_smoke_never_sets_confirmation_support_flags(self):
+        plan, data = fixture()
+        data.pop("launch_receipt")
+        for obs in data["runs"]:
+            if obs["case"]["condition"] != COMPACT:
+                fail(obs)
+        result = analyze(plan, data, purpose="pilot_smoke")
+        self.assertEqual(result["decision"], "not_a_confirmatory_result")
+        self.assertFalse(result["at_least_planning_target_reduction_supported"])
+        self.assertFalse(result["quality"]["relative_quality_supported"])
+        self.assertFalse(result["token_inference"]["reduction_supported"])
+
+    def test_wrong_evaluator_partial_failure_is_untrusted_quality_but_tokens_survive(self):
+        plan, data = fixture()
+        obs = data["runs"][0]
+        fail(obs)
+        obs["requirements"].pop()
+        obs["row"]["scoring"].update(research_status="incomplete", evaluator_sha256="wrong")
+        result = analyze(plan, data)
+        self.assertEqual(result["rows"][0]["recorded_outcome"], 0)
+        self.assertIsNone(result["rows"][0]["outcome"])
+        self.assertFalse(result["quality"]["inference_eligible"])
+        self.assertTrue(result["token_inference"]["reduction_supported"])
+
+    def test_unknown_quality_does_not_veto_complete_tokens(self):
+        plan, data = fixture()
+        obs = data["runs"][0]
+        obs["requirements"].pop()
+        obs["row"]["scoring"]["research_status"] = "incomplete"
+        result = analyze(plan, data)
+        self.assertTrue(result["token_inference"]["eligible"])
+        self.assertTrue(result["at_least_planning_target_reduction_supported"])
+        self.assertFalse(result["quality"]["inference_eligible"])
+
+    def test_usage_fault_does_not_veto_quality_but_unknown_audit_fault_is_shared(self):
+        plan, data = fixture()
+        obs = data["runs"][0]
+        obs["audit_issues"] = ["normalized_total_differs"]
+        result = analyze(plan, data)
+        self.assertTrue(result["quality"]["inference_eligible"])
+        self.assertFalse(result["token_inference"]["eligible"])
+        self.assertFalse(result["at_least_planning_target_reduction_supported"])
+        obs["audit_issues"] = ["unrecognized_provenance_fault"]
+        self.assertEqual(analyze(plan, data)["decision"], "indeterminate")
+
+    def test_rejected_evaluation_identity_cannot_supply_a_known_failure(self):
+        plan, data = fixture()
+        obs = data["runs"][0]
+        fail(obs)
+        obs["row"]["scoring"]["state"] = "rejected_mismatch"
+        result = analyze(plan, data)
+        self.assertIsNone(result["rows"][0]["outcome"])
+        self.assertEqual(result["rows"][0]["recorded_outcome"], 0)
+        self.assertTrue(result["token_inference"]["eligible"])
+
+    def test_degenerate_tokens_do_not_veto_quality_inference(self):
+        plan, data = fixture()
+        for obs in data["runs"]:
+            obs["tokens"].update(input_tokens=100, output_tokens=10, total_tokens=110)
+            obs["calls"][0].update(input_tokens=100, output_tokens=10)
+        result = analyze(plan, data)
+        self.assertIsNone(result["primary_tokens"]["ci95"])
+        self.assertFalse(result["token_inference"]["eligible"])
+        self.assertTrue(result["quality"]["inference_eligible"])
+
+    def test_quality_superiority_survives_missing_tokens_without_joint_support(self):
+        plan, data = fixture()
+        for obs in data["runs"]:
+            if obs["case"]["condition"] != COMPACT:
+                fail(obs)
+        data["runs"][0]["usage_complete"] = False
+        data["runs"][0]["tokens"]["total_tokens"] = None
+        result = analyze(plan, data)
+        self.assertTrue(result["quality"]["relative_quality_supported"])
+        self.assertIsNone(result["primary_tokens"])
+        self.assertFalse(result["at_least_planning_target_reduction_supported"])
+        self.assertFalse(result["conclusions"]["token_reduction_and_relative_quality_supported"])
+
+    def test_unobserved_behavior_is_not_marked_complete_or_an_endpoint_veto(self):
+        plan, data = fixture()
+        result = analyze(plan, data)
+        self.assertFalse(result["operational"]["behavior_complete"])
+        self.assertTrue(result["token_inference"]["eligible"])
+        self.assertTrue(result["quality"]["inference_eligible"])
 
 
 if __name__ == "__main__":

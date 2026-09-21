@@ -1,0 +1,345 @@
+{
+  "schema_version": 2,
+  "kind": "resource_and_information_comparison_not_acquisition",
+  "new_simulation_repetitions": 0,
+  "model_called": false,
+  "evaluator_called": false,
+  "selected_pairs": null,
+  "recommendation": "Resource-bounded fixed paired estimation; defer allocation until model-specific feasible capacity, storage reserve and available hours are documented. Do not adopt 320 by default.",
+  "account_usage_readback": {
+    "checked_at_utc": "2026-09-21T04:42:07.898607+00:00",
+    "method": "GET",
+    "endpoint": "https://opencode.ai/zen/go/v1/usage",
+    "model_called": false,
+    "key_value_recorded": false,
+    "source": "https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/go/v1/usage.ts",
+    "http_status": 200,
+    "response_sha256": "77fc9cdf2b3345cb5ee50bb345758f10272c6450d363a56375df1ae49ee9b340",
+    "usage": {
+      "rolling": {
+        "status": "ok",
+        "percent": 0,
+        "resetsAt": "2026-09-21T09:42:07.256Z"
+      },
+      "weekly": {
+        "status": "ok",
+        "percent": 0,
+        "resetsAt": "2026-09-28T00:00:00.256Z"
+      },
+      "monthly": {
+        "status": "ok",
+        "percent": 14,
+        "resetsAt": "2026-10-09T03:46:48.256Z"
+      }
+    }
+  },
+  "quota_scenario_definition": "Scale the saved four-Run input/output totals. Low endpoint assumes all input cache hits at off-peak rates; high endpoint assumes no cache hits at peak rates. Rate snapshot: https://opencode.ai/docs/go/ on 2026-09-21. These are quota-dollar scenarios, not actual charges, observed cache costs, spending caps or an account-percent-to-Run conversion. No overage enabled.",
+  "missingness_interpretation": "Independent per-Run residual unknown ENDPOINT values, after recovery: hypothetical, not observed failure rates. An incomplete inspection with a verified failure is not an unknown all-29 outcome. No multiplication of availability and power without assumptions about their dependence.",
+  "candidates": [
+    {
+      "pairs": 40,
+      "runs": 80,
+      "provider_token_envelopes": {
+        "2000000": 160000000,
+        "3200000": 256000000,
+        "6000000": 480000000
+      },
+      "pilot_mean_scaled_tokens_reference_only": 254478080,
+      "pilot_mean_scaled_runtime_hours_reference_only": 16.561844444444443,
+      "maximum_runtime_budget_hours": 40.0,
+      "extra_evaluation_storage_hours_scenarios": {
+        "60": 1.3333333333333333,
+        "300": 6.666666666666667
+      },
+      "disk_gib_scenarios": {
+        "0.1": 8.0,
+        "0.5": 40.0,
+        "1.0": 80.0
+      },
+      "token_reduction_power_scenario": {
+        "estimate": 0.2113,
+        "mc_se": 0.0028866270108900455,
+        "replicates": 20000,
+        "mc_ci95_wilson": [
+          0.20569802743962567,
+          0.21701285417916916
+        ]
+      },
+      "token_mean_interval_half_width_reference_tokens": 1015552.9556560831,
+      "quality_mean_half_width_pp_scenario": 27.181641580635805,
+      "quality_p90_half_width_pp_scenario": 29.889341634588177,
+      "quality_superiority_power_85_vs_80_scenario": 0.004245538606668448,
+      "joint_support_probability_upper_bound_85_vs_80": 0.004245538606668448,
+      "joint_support_upper_bound_reason": "Joint support is a subset of quality superiority; no token-quality independence assumption.",
+      "missingness_scenarios": [
+        {
+          "per_run_unresolved_endpoint_probability": 0,
+          "probability_all_endpoint_values_known": 1,
+          "expected_unresolved_endpoint_values": 0
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.001,
+          "probability_all_endpoint_values_known": 0.9230793978373362,
+          "expected_unresolved_endpoint_values": 0.08
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.005,
+          "probability_all_endpoint_values_known": 0.6696478204705641,
+          "expected_unresolved_endpoint_values": 0.4
+        }
+      ],
+      "pilot_retained_cohort_scaled_gib_reference_only": 34.55950275063515,
+      "pilot_adopted_scoring_span_hours_reference_only": 0.6514682333333334,
+      "pilot_token_mix_quota_dollar_scenario_range": [
+        2.77792716,
+        79.380348
+      ],
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 80,
+      "runs": 160,
+      "provider_token_envelopes": {
+        "2000000": 320000000,
+        "3200000": 512000000,
+        "6000000": 960000000
+      },
+      "pilot_mean_scaled_tokens_reference_only": 508956160,
+      "pilot_mean_scaled_runtime_hours_reference_only": 33.123688888888886,
+      "maximum_runtime_budget_hours": 80.0,
+      "extra_evaluation_storage_hours_scenarios": {
+        "60": 2.6666666666666665,
+        "300": 13.333333333333334
+      },
+      "disk_gib_scenarios": {
+        "0.1": 16.0,
+        "0.5": 80.0,
+        "1.0": 160.0
+      },
+      "token_reduction_power_scenario": {
+        "estimate": 0.3846,
+        "mc_se": 0.0034400787781677326,
+        "replicates": 20000,
+        "mc_ci95_wilson": [
+          0.37788034145502675,
+          0.3913639804667222
+        ]
+      },
+      "token_mean_interval_half_width_reference_tokens": 723687.3320763893,
+      "quality_mean_half_width_pp_scenario": 19.171544201148414,
+      "quality_p90_half_width_pp_scenario": 20.65345464026029,
+      "quality_superiority_power_85_vs_80_scenario": 0.010438008470269343,
+      "joint_support_probability_upper_bound_85_vs_80": 0.010438008470269343,
+      "joint_support_upper_bound_reason": "Joint support is a subset of quality superiority; no token-quality independence assumption.",
+      "missingness_scenarios": [
+        {
+          "per_run_unresolved_endpoint_probability": 0,
+          "probability_all_endpoint_values_known": 1,
+          "expected_unresolved_endpoint_values": 0
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.001,
+          "probability_all_endpoint_values_known": 0.8520755747117391,
+          "expected_unresolved_endpoint_values": 0.16
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.005,
+          "probability_all_endpoint_values_known": 0.44842820346097695,
+          "expected_unresolved_endpoint_values": 0.8
+        }
+      ],
+      "pilot_retained_cohort_scaled_gib_reference_only": 69.1190055012703,
+      "pilot_adopted_scoring_span_hours_reference_only": 1.3029364666666667,
+      "pilot_token_mix_quota_dollar_scenario_range": [
+        5.55585432,
+        158.760696
+      ],
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 160,
+      "runs": 320,
+      "provider_token_envelopes": {
+        "2000000": 640000000,
+        "3200000": 1024000000,
+        "6000000": 1920000000
+      },
+      "pilot_mean_scaled_tokens_reference_only": 1017912320,
+      "pilot_mean_scaled_runtime_hours_reference_only": 66.24737777777777,
+      "maximum_runtime_budget_hours": 160.0,
+      "extra_evaluation_storage_hours_scenarios": {
+        "60": 5.333333333333333,
+        "300": 26.666666666666668
+      },
+      "disk_gib_scenarios": {
+        "0.1": 32.0,
+        "0.5": 160.0,
+        "1.0": 320.0
+      },
+      "token_reduction_power_scenario": {
+        "estimate": 0.6477,
+        "mc_se": 0.0033777559858580667,
+        "replicates": 20000,
+        "mc_ci95_wilson": [
+          0.6410519311245312,
+          0.6542913414244956
+        ]
+      },
+      "token_mean_interval_half_width_reference_tokens": 513643.1108380252,
+      "quality_mean_half_width_pp_scenario": 13.460996528387541,
+      "quality_p90_half_width_pp_scenario": 14.23377196997317,
+      "quality_superiority_power_85_vs_80_scenario": 0.02785039407189025,
+      "joint_support_probability_upper_bound_85_vs_80": 0.02785039407189025,
+      "joint_support_upper_bound_reason": "Joint support is a subset of quality superiority; no token-quality independence assumption.",
+      "missingness_scenarios": [
+        {
+          "per_run_unresolved_endpoint_probability": 0,
+          "probability_all_endpoint_values_known": 1,
+          "expected_unresolved_endpoint_values": 0
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.001,
+          "probability_all_endpoint_values_known": 0.7260327850203405,
+          "expected_unresolved_endpoint_values": 0.32
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.005,
+          "probability_all_endpoint_values_known": 0.20108785365923937,
+          "expected_unresolved_endpoint_values": 1.6
+        }
+      ],
+      "pilot_retained_cohort_scaled_gib_reference_only": 138.2380110025406,
+      "pilot_adopted_scoring_span_hours_reference_only": 2.6058729333333335,
+      "pilot_token_mix_quota_dollar_scenario_range": [
+        11.11170864,
+        317.521392
+      ],
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 320,
+      "runs": 640,
+      "provider_token_envelopes": {
+        "2000000": 1280000000,
+        "3200000": 2048000000,
+        "6000000": 3840000000
+      },
+      "pilot_mean_scaled_tokens_reference_only": 2035824640,
+      "pilot_mean_scaled_runtime_hours_reference_only": 132.49475555555554,
+      "maximum_runtime_budget_hours": 320.0,
+      "extra_evaluation_storage_hours_scenarios": {
+        "60": 10.666666666666666,
+        "300": 53.333333333333336
+      },
+      "disk_gib_scenarios": {
+        "0.1": 64.0,
+        "0.5": 320.0,
+        "1.0": 640.0
+      },
+      "token_reduction_power_scenario": {
+        "estimate": 0.9066,
+        "mc_se": 0.0020576253303261995,
+        "replicates": 20000,
+        "mc_ci95_wilson": [
+          0.9024886779583557,
+          0.9105551583208199
+        ]
+      },
+      "token_mean_interval_half_width_reference_tokens": 364325.470205369,
+      "quality_mean_half_width_pp_scenario": 9.441148720374242,
+      "quality_p90_half_width_pp_scenario": 9.824789920834762,
+      "quality_superiority_power_85_vs_80_scenario": 0.08477692139937608,
+      "joint_support_probability_upper_bound_85_vs_80": 0.08477692139937608,
+      "joint_support_upper_bound_reason": "Joint support is a subset of quality superiority; no token-quality independence assumption.",
+      "missingness_scenarios": [
+        {
+          "per_run_unresolved_endpoint_probability": 0,
+          "probability_all_endpoint_values_known": 1,
+          "expected_unresolved_endpoint_values": 0
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.001,
+          "probability_all_endpoint_values_known": 0.527123604924392,
+          "expected_unresolved_endpoint_values": 0.64
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.005,
+          "probability_all_endpoint_values_known": 0.040436324889279666,
+          "expected_unresolved_endpoint_values": 3.2
+        }
+      ],
+      "pilot_retained_cohort_scaled_gib_reference_only": 276.4760220050812,
+      "pilot_adopted_scoring_span_hours_reference_only": 5.211745866666667,
+      "pilot_token_mix_quota_dollar_scenario_range": [
+        22.22341728,
+        635.042784
+      ],
+      "capacity_confirmed": false
+    },
+    {
+      "pairs": 640,
+      "runs": 1280,
+      "provider_token_envelopes": {
+        "2000000": 2560000000,
+        "3200000": 4096000000,
+        "6000000": 7680000000
+      },
+      "pilot_mean_scaled_tokens_reference_only": 4071649280,
+      "pilot_mean_scaled_runtime_hours_reference_only": 264.9895111111111,
+      "maximum_runtime_budget_hours": 640.0,
+      "extra_evaluation_storage_hours_scenarios": {
+        "60": 21.333333333333332,
+        "300": 106.66666666666667
+      },
+      "disk_gib_scenarios": {
+        "0.1": 128.0,
+        "0.5": 640.0,
+        "1.0": 1280.0
+      },
+      "token_reduction_power_scenario": {
+        "estimate": 0.99455,
+        "mc_se": 0.0005205908902391567,
+        "replicates": 20000,
+        "mc_ci95_wilson": [
+          0.9934303763700838,
+          0.9954796807668231
+        ]
+      },
+      "token_mean_interval_half_width_reference_tokens": 258093.6111941332,
+      "quality_mean_half_width_pp_scenario": 6.633030679188279,
+      "quality_p90_half_width_pp_scenario": 6.818966544472696,
+      "quality_superiority_power_85_vs_80_scenario": 0.25754116734785953,
+      "joint_support_probability_upper_bound_85_vs_80": 0.25754116734785953,
+      "joint_support_upper_bound_reason": "Joint support is a subset of quality superiority; no token-quality independence assumption.",
+      "missingness_scenarios": [
+        {
+          "per_run_unresolved_endpoint_probability": 0,
+          "probability_all_endpoint_values_known": 1,
+          "expected_unresolved_endpoint_values": 0
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.001,
+          "probability_all_endpoint_values_known": 0.2778592948684866,
+          "expected_unresolved_endpoint_values": 1.28
+        },
+        {
+          "per_run_unresolved_endpoint_probability": 0.005,
+          "probability_all_endpoint_values_known": 0.0016350963705513782,
+          "expected_unresolved_endpoint_values": 6.4
+        }
+      ],
+      "pilot_retained_cohort_scaled_gib_reference_only": 552.9520440101624,
+      "pilot_adopted_scoring_span_hours_reference_only": 10.423491733333334,
+      "pilot_token_mix_quota_dollar_scenario_range": [
+        44.44683456,
+        1270.085568
+      ],
+      "capacity_confirmed": false
+    }
+  ],
+  "source_hashes": {
+    "research/design-results/catalog-confirmatory-v1.json": "baf4659977f485dde023bed3cde3a2e7025bf2888ae40492647609b2562f15c8",
+    "research/design-results/catalog-resource-snapshot-20260921.json": "17800a8a005e73cd436a205e1e78584be4ef936588ab4b1fb0c96bb99418fbca",
+    "artifacts/catalog-comparison-v2/opencode-go-usage-20260921.json": "c9d7dc6bb947ae37ce2a21be7663548643947a2aaa88b48d0d799ac8132db2ee"
+  }
+}

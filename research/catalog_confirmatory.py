@@ -5,6 +5,7 @@ validates that interchange, aggregates Runs, and estimates prespecified effects.
 """
 import argparse
 from collections import Counter
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -19,7 +20,14 @@ COMPACT = "catalog-compact"
 EXPANDED = "catalog-expanded"
 ARMS = (COMPACT, EXPANDED)
 REQUIREMENTS = tuple(f"R-{i:03d}" for i in range(1, 30))
-DEFAULT_PLAN = Path(__file__).parent / "protocols/ms1-catalog-confirmatory-v1.json"
+HISTORICAL_PLAN = Path(__file__).parent / "protocols/ms1-catalog-confirmatory-v1.json"
+DEFAULT_PLAN = Path(__file__).parent / "protocols/ms1-catalog-comparison-v2.json"
+REPO = Path(__file__).resolve().parents[1]
+REQUIRED_CODE = ("research/catalog_confirmatory.py", "research/catalog_observations.py",
+                 "research/analyze.py", "research/requirements-confirmatory.txt")
+REQUIRED_RECEIPT = ("analysis_plan_sha256", "frozen_analysis_code_hashes",
+                    "pre_dispatch_verified", "checked_at_utc", "resource_capacity_confirmation",
+                    "identity_and_browser_pin_checks", "dispatch_journal_path")
 
 
 def read_json(path):
@@ -52,20 +60,71 @@ def allocation(n, seed, attempt_start=1001):
     return result
 
 
-def validate_plan(plan):
+def validate_launch_receipt(plan, observations, receipt, plan_path):
+    """Single validation boundary for CLI, embedded JSON and direct calls.
+
+    This verifies shape and content binding, not the truth of a human attestation.
+    The pre-dispatch journal and resource/pin evidence remain reviewable sources.
+    """
+    required = set(REQUIRED_RECEIPT) | set(plan.get("launch", {}).get("receipt_required", []))
+    if not isinstance(receipt, dict) or any(not receipt.get(key) for key in required):
+        raise ValueError("Incomplete pre-dispatch launch receipt")
+    if plan_path is None or read_json(plan_path) != plan:
+        raise ValueError("Provide the saved plan file matching the analysis plan value")
+    digest = sha256(plan_path)
+    if (receipt.get("analysis_plan_sha256") != digest or
+            observations.get("plan_sha256") != digest or
+            receipt.get("pre_dispatch_verified") is not True):
+        raise ValueError("Launch receipt/observations are not bound to this frozen plan")
+    try:
+        checked = datetime.fromisoformat(receipt["checked_at_utc"].replace("Z", "+00:00"))
+        if checked.utcoffset() != timezone.utc.utcoffset(checked):
+            raise ValueError("Not UTC")
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("Launch receipt requires a UTC checked_at_utc") from exc
+    for key in ("resource_capacity_confirmation", "identity_and_browser_pin_checks"):
+        evidence = receipt[key]
+        if (not isinstance(evidence, dict) or evidence.get("verified") is not True or
+                not isinstance(evidence.get("evidence_reference"), str) or
+                not evidence["evidence_reference"].strip()):
+            raise ValueError(f"Launch receipt requires verified evidence: {key}")
+    if not isinstance(receipt["dispatch_journal_path"], str) or not receipt["dispatch_journal_path"].strip():
+        raise ValueError("Launch receipt requires a dispatch journal path")
+    hashes = receipt["frozen_analysis_code_hashes"]
+    required_code = set(REQUIRED_CODE) | set(plan.get("launch", {}).get("required_code_files", []))
+    if not isinstance(hashes, dict) or not required_code <= set(hashes):
+        raise ValueError("Launch receipt is missing required analysis code hashes")
+    for name, digest in hashes.items():
+        path = (REPO / name).resolve()
+        if Path(name).is_absolute() or not path.is_relative_to(REPO) or not path.is_file():
+            raise ValueError("Invalid analysis code path in launch receipt")
+        if sha256(path) != digest:
+            raise ValueError("Analysis code differs from pre-dispatch receipt")
+
+
+def validate_plan(plan, require_allocation=False):
+    version = plan.get("schema_version")
+    if version not in (1, 2):
+        raise ValueError("Unsupported plan version")
     n = plan["pairs"]
-    if type(n) is not int or n < 2 or plan["maximum_runs"] != 2 * n:
+    if version == 2 and n is None:
+        if (plan["maximum_runs"] is not None or plan["runs_per_condition"] is not None or plan["slots"]):
+            raise ValueError("Unselected resource design cannot contain allocated Runs")
+        if require_allocation:
+            raise ValueError("Resource capacity and fixed allocation are not yet selected")
+    elif type(n) is not int or n < 2 or plan["maximum_runs"] != 2 * n or plan["runs_per_condition"] != n:
         raise ValueError("Invalid fixed Run count")
-    if plan["maximum_supplements"] != 0 or plan["quality"]["loss_margin"] != 0:
-        raise ValueError("No replacements or positive quality loss margin in v1")
-    expected = allocation(n, plan["randomization_seed"], plan["attempt_start"])
-    if plan["slots"] != expected:
+    if version == 1 and require_allocation:
+        raise ValueError("Historical v1 is design history, not an adopted execution plan")
+    if plan["maximum_supplements"] != 0 or plan["quality"]["loss_margin"] != (0 if version == 1 else None):
+        raise ValueError("No replacements or invented quality loss margin")
+    if n is not None and plan["slots"] != allocation(n, plan["randomization_seed"], plan["attempt_start"]):
         raise ValueError("Schedule differs from the saved independent pair allocation")
     if plan["analysis"]["primary_tokens"] != "paired_arithmetic_mean_difference":
         raise ValueError("Unsupported primary estimand")
     if plan["analysis"]["confidence"] != 0.95:
-        raise ValueError("v1 fixes 95% two-sided intervals")
-    if plan["quality"]["rule"] != "paired_risk_difference_lower_gt_zero":
+        raise ValueError("Plan fixes 95% two-sided intervals")
+    if plan["quality"]["rule"] != ("paired_risk_difference_lower_gt_zero" if version == 1 else "estimate_difference_superiority_additional"):
         raise ValueError("Unsupported quality rule")
 
 
@@ -228,6 +287,7 @@ def normalize_observation(observation, slot):
     known = _count(token.get("known_total_tokens"), "known_total_tokens")
     return {**slot, "outcome": outcome, "confirmed_failure": failed,
             "coverage_complete": complete, "requirements": requirements,
+            "unobserved_requirements": [key for key in REQUIREMENTS if requirements.get(key) not in ("pass", "fail")],
             "total_tokens": total if token_complete else None,
             "input_tokens": inputs if token_complete else None,
             "output_tokens": outputs if token_complete else None,
@@ -238,9 +298,12 @@ def normalize_observation(observation, slot):
             "artifact_present": row.get("artifact", {}).get("state") == "fixed",
             "run_instance_id": row.get("run_instance_id"),
             "integrity_issues": observation.get("audit_issues", []),
+            "token_integrity_issues": list(observation.get("token_audit_issues", [])),
+            "quality_integrity_issues": [],
             "cleanup_confirmed": (observation.get("runtime_cleanup") or {}).get("confirmed") is True and
                                  (observation.get("browser_cleanup") or {}).get("confirmed") is True,
             "action_count": len(observation.get("actions", [])),
+            "behavior_observation_present": "actions" in observation,
             "auxiliary": auxiliary(observation),
             "human_review": observation.get("human_review", "not_run")}
 
@@ -287,30 +350,31 @@ def quality_summary(pairs):
             "ci95_or_missingness_envelope": ci,
             "outcomes_complete": complete_outcomes,
             "coverage_complete": all(r["coverage_complete"] for pair in pairs for r in pair),
-            "relative_quality_supported": complete_outcomes and ci[0] > 0,
-            "quality_condition_status": ("supported" if complete_outcomes and ci[0] > 0 else
-                                         "evidence_of_degradation" if complete_outcomes and ci[1] < 0 else "unresolved"),
             "practical_adequacy": "not_established_no_justified_population_floor",
             "method": "Bonferroni union of two 97.5% Clopper-Pearson discordant-cell intervals"}
 
 
-def classify(tokens, quality, integrity_ok):
-    if (not integrity_ok or tokens is None or tokens["ci95"] is None or
-            not quality["outcomes_complete"] or not quality["coverage_complete"]):
-        return "indeterminate"
-    if tokens["ci95"][1] >= 0:
-        return "token_reduction_not_supported"
-    if quality["relative_quality_supported"]:
-        return "token_reduction_and_relative_quality_supported"
-    return "token_reduction_quality_not_supported_or_unresolved"
+def classify(token_eligible, quality_eligible):
+    """Availability of inference, never a research success/failure gate."""
+    if token_eligible and quality_eligible:
+        return "both_metrics_estimable"
+    if token_eligible:
+        return "tokens_estimable_quality_unresolved"
+    if quality_eligible:
+        return "quality_estimable_tokens_unresolved"
+    return "indeterminate"
 
 
-def analyze(plan, observations, purpose="confirmatory"):
+def analyze(plan, observations, purpose="confirmatory", *, launch_receipt=None, plan_path=None):
     """One row per allocated Run. Missing rows stay in the fixed denominator."""
+    if purpose not in ("confirmatory", "pilot_smoke"):
+        raise ValueError("Unknown analysis purpose")
     if purpose == "confirmatory":
-        validate_plan(plan)
-        if not observations.get("launch_receipt"):
-            raise ValueError("Confirmatory data require a pre-dispatch launch receipt")
+        validate_plan(plan, require_allocation=True)
+        embedded = observations.get("launch_receipt")
+        if launch_receipt is not None and embedded is not None and launch_receipt != embedded:
+            raise ValueError("Conflicting CLI/function and embedded launch receipts")
+        validate_launch_receipt(plan, observations, launch_receipt if launch_receipt is not None else embedded, plan_path)
     if observations["cohort"] != plan["cohort"]:
         raise ValueError("Historical/pilot cohort cannot enter confirmatory analysis")
     inventory = {}
@@ -324,8 +388,20 @@ def analyze(plan, observations, purpose="confirmatory"):
     for slot in plan["slots"]:
         observation = inventory.get(slot["run_id"], {"case": slot, "run_id": slot["run_id"], "state": "not_started"})
         normalized = normalize_observation(observation, slot)
-        if purpose == "confirmatory" and observation.get("row"):
-            actual = observation["row"]
+        # Known usage/behavior audit categories do not invalidate another endpoint.
+        # Unrecognized provenance faults remain shared; never guess them harmless.
+        shared_issues, behavior_issues = [], []
+        for issue in normalized["integrity_issues"]:
+            if issue in ("incomplete_request_inventory", "normalized_total_differs") or issue.startswith("usage_raw_mismatch:"):
+                normalized["token_integrity_issues"].append(issue)
+            elif issue == "native_provider_tool_inventory_differs" or issue.startswith("duplicate_native_tool:"):
+                behavior_issues.append(issue)
+            else:
+                shared_issues.append(issue)
+        normalized["integrity_issues"] = shared_issues
+        normalized["behavior_integrity_issues"] = behavior_issues
+        if purpose == "confirmatory" and slot["run_id"] in inventory:
+            actual = observation.get("row", {})
             pins = plan["fixed_conditions"]
             initial = observation.get("initial_input", {})
             mismatches = []
@@ -340,11 +416,21 @@ def analyze(plan, observations, purpose="confirmatory"):
                 mismatches.append("unverified_input_or_common_access")
             if any(call.get("response_models") != [plan["model"]] for call in observation.get("calls", [])):
                 mismatches.append("model_mismatch")
-            if normalized["coverage_complete"] and (
-                    actual["scoring"].get("evaluator_sha256") != pins["evaluator_sha256"] or
-                    actual["scoring"].get("evaluation_version") != pins["evaluation_version"]):
-                mismatches.append("evaluator_mismatch")
+            # A known fail with partial coverage still needs the correct evaluator.
+            if normalized["requirements"] or normalized["outcome"] is not None:
+                scoring = actual.get("scoring", {})
+                if (scoring.get("evaluator_sha256") != pins["evaluator_sha256"] or
+                        scoring.get("evaluation_version") != pins["evaluation_version"]):
+                    normalized["quality_integrity_issues"].append("evaluator_mismatch")
+                if not normalized["artifact_present"]:
+                    normalized["quality_integrity_issues"].append("artifact_not_fixed")
+                if scoring.get("state") == "rejected_mismatch" or any(
+                        issue.get("kind") == "mismatch" for issue in actual.get("issues", [])):
+                    normalized["quality_integrity_issues"].append("evaluation_identity_mismatch")
             normalized["integrity_issues"] = [*normalized["integrity_issues"], *mismatches]
+        normalized["recorded_outcome"] = normalized["outcome"]
+        if normalized["integrity_issues"] or normalized["quality_integrity_issues"]:
+            normalized["outcome"] = None
         rows.append(normalized)
     instances = [r["run_instance_id"] for r in rows if r["run_instance_id"]]
     if len(instances) != len(set(instances)):
@@ -369,8 +455,32 @@ def analyze(plan, observations, purpose="confirmatory"):
         sensitivity = pair_bootstrap(c, e, analysis.get("bootstrap_seed", 20260921),
                                      analysis.get("bootstrap_repetitions", 20000))
     tokens = complete_summary if len(complete_pairs) == len(pairs) else None
-    integrity_ok = all(not r["integrity_issues"] and r["cleanup_confirmed"] for r in rows)
-    result = classify(tokens, quality, integrity_ok)
+    shared_ok = all(not r["integrity_issues"] for r in rows)
+    token_ok = shared_ok and all(not r["token_integrity_issues"] for r in rows)
+    quality_ok = shared_ok and all(not r["quality_integrity_issues"] for r in rows)
+    confirmatory = purpose == "confirmatory"
+    token_reasons = ([] if confirmatory else ["pilot_descriptive_only"])
+    quality_reasons = list(token_reasons)
+    if not token_ok:
+        token_reasons.append("token_or_shared_integrity_fault")
+    if not quality_ok:
+        quality_reasons.append("quality_or_shared_integrity_fault")
+    if tokens is None:
+        token_reasons.append("missing_usage_in_assigned_population")
+    elif tokens["ci95"] is None:
+        token_reasons.append("undefined_token_interval")
+    if not quality["outcomes_complete"]:
+        quality_reasons.append("unknown_binary_outcomes")
+    token_eligible, quality_eligible = not token_reasons, not quality_reasons
+    token_supported = bool(token_eligible and tokens["ci95"][1] < 0)
+    quality_ci = quality["ci95_or_missingness_envelope"]
+    quality_supported = bool(quality_eligible and quality_ci[0] > 0)
+    quality.update(inference_eligible=quality_eligible, inference_blockers=quality_reasons,
+                   relative_quality_supported=quality_supported,
+                   quality_condition_status=("not_inferable" if not quality_eligible else
+                       "relative_superiority_supported" if quality_supported else
+                       "evidence_of_degradation" if quality_ci[1] < 0 else "difference_unresolved"))
+    result = classify(token_eligible, quality_eligible)
     descriptive = {}
     for arm in ARMS:
         selected = [r for r in rows if r["condition"] == arm]
@@ -385,10 +495,21 @@ def analyze(plan, observations, purpose="confirmatory"):
                             "mean_output_tokens": float(np.mean([r["output_tokens"] for r in measured])) if len(measured) == len(selected) else None,
                             "success_only_mean_total_secondary": float(np.mean([r["total_tokens"] for r in success])) if success else None,
                             "success_only_n_secondary": len(success)}
-    return {"schema_version": 1, "purpose": purpose, "cohort": plan["cohort"],
+    return {"schema_version": 2, "purpose": purpose, "cohort": plan["cohort"],
             "model_called": False, "evaluator_called": False,
             "assigned_runs": len(rows), "n_pairs": len(pairs),
-            "primary_tokens": tokens, "quality": quality,
+            "primary_tokens": tokens if token_ok else None, "quality": quality,
+            "all_assigned_tokens_descriptive": tokens,
+            "token_inference": {"eligible": token_eligible, "blockers": token_reasons,
+                "reduction_supported": token_supported,
+                "status": "not_inferable" if not token_eligible else
+                          "reduction_supported" if token_supported else "reduction_not_supported"},
+            "conclusions": {"token_reduction_supported": token_supported,
+                "relative_quality_superiority_supported": quality_supported,
+                "token_reduction_and_relative_quality_supported": token_supported and quality_supported,
+                "quality_maintenance": "not_established_no_justified_margin",
+                "research_success": "not_defined_by_joint_superiority",
+                "intervals": "marginal_95pct_not_a_joint_95pct_confidence_region"},
             "complete_pair_tokens_secondary": complete_summary,
             "bootstrap_secondary": sensitivity,
             "order_diagnostics_secondary": {
@@ -398,11 +519,16 @@ def analyze(plan, observations, purpose="confirmatory"):
                           if pair[0]["position"] == (1 if arm == COMPACT else 2)]))
                       if any(pair[0]["position"] == (1 if arm == COMPACT else 2) for pair in complete_pairs) else None}
                 for arm in ARMS},
-            "descriptive": descriptive, "integrity_ok": integrity_ok,
+            "descriptive": descriptive, "integrity_ok": token_ok and quality_ok,
+            "metric_integrity": {"shared": shared_ok, "tokens": token_ok, "quality": quality_ok},
+            "operational": {"cleanup_complete": all(r["cleanup_confirmed"] for r in rows),
+                "coverage_complete": quality["coverage_complete"],
+                "behavior_complete": all(r["behavior_observation_present"] and not r["behavior_integrity_issues"] for r in rows),
+                "role": "reported_separately_not_an_automatic_inference_veto"},
             "decision": result if purpose == "confirmatory" else "not_a_confirmatory_result",
-            "quality_maintenance_under_equality": "not_established_by_this_zero_margin_design",
+            "quality_maintenance_under_equality": "not_established_no_justified_margin",
             "practical_efficiency_claim": "not_authorized_without_absolute_quality_criterion",
-            "at_least_planning_target_reduction_supported": bool(tokens and tokens["ci95"] and
+            "at_least_planning_target_reduction_supported": bool(token_eligible and
                  tokens["ci95"][1] < -plan.get("planning", {}).get("token_difference_target", math.inf)),
             "rows": rows}
 
@@ -416,20 +542,10 @@ def main():
     parser.add_argument("--launch-receipt", type=Path)
     args = parser.parse_args()
     plan, observations = read_json(args.plan), read_json(args.observations)
-    if observations.get("plan_sha256") != sha256(args.plan):
+    if args.purpose == "pilot_smoke" and observations.get("plan_sha256") != sha256(args.plan):
         raise ValueError("Observation plan hash mismatch")
-    if args.launch_receipt:
-        receipt = read_json(args.launch_receipt)
-        required = plan.get("launch", {}).get("receipt_required", [])
-        if any(not receipt.get(key) for key in required):
-            raise ValueError("Incomplete pre-dispatch launch receipt")
-        if receipt.get("analysis_plan_sha256") != sha256(args.plan) or not receipt.get("pre_dispatch_verified"):
-            raise ValueError("Launch receipt is not bound to this frozen plan")
-        for name, digest in receipt.get("frozen_analysis_code_hashes", {}).items():
-            if sha256(Path(__file__).resolve().parents[1] / name) != digest:
-                raise ValueError("Analysis code differs from pre-dispatch receipt")
-        observations["launch_receipt"] = receipt
-    result = analyze(plan, observations, args.purpose)
+    receipt = read_json(args.launch_receipt) if args.launch_receipt else None
+    result = analyze(plan, observations, args.purpose, launch_receipt=receipt, plan_path=args.plan)
     result["source_files"] = {"plan_sha256": sha256(args.plan),
                               "observations_sha256": sha256(args.observations)}
     write_new(args.out, result)

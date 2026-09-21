@@ -1,9 +1,12 @@
 # MS1 exploratory analysis
 
 This directory contains research code, not an alternative agent/evaluator.
-The current next-stage deliverable is the [catalog confirmation design](../docs/ms1-catalog-confirmatory-plan.md):
-an offline plan, saved allocation, sample-size calculations and tested analysis.
-It authorizes no model acquisition. Its dedicated dependencies are in
+The current deliverable is the [catalog comparison v2 revision](../docs/ms1-catalog-comparison-v2-plan.md):
+metric-specific inference, resource/information comparisons and tested offline analysis.
+No Run count is adopted and no model acquisition is authorized. The
+[v1 confirmation design](../docs/ms1-catalog-confirmatory-plan.md), its 320-pair
+candidate and saved calculations are historical, not the current execution plan.
+The dedicated analysis dependencies are in
 `requirements-confirmatory.txt`; the existing analysis environment is separate.
 Start with the [uniform browser correction](../docs/ms1-browser-cart-20260919-report.md),
 [correction and original-first audit](../docs/ms1-correction-20260919-report.md),
@@ -26,10 +29,16 @@ analysis contains 955 new calls; the historical six retain exactly 322 calls.
 ## Programs
 
 - `catalog_design`: reproduce parametric sample-size, precision and resource
-  scenarios without models, Docker or evaluation.
+  scenarios for historical v1 without models, Docker or evaluation. Its default
+  remains v1; it does not choose the v2 allocation.
+- `catalog_resources`: read file sizes/saved evaluation timestamps or reuse v1
+  calculation rows with algebraic missingness and resource scenarios. No new
+  simulations, model execution, evaluation or account mutation.
 - `catalog_confirmatory`: analyze plan-bound saved catalog observations at Run
   and pair level; retain missingness and product failure. `--purpose pilot_smoke`
-  labels the old four Runs as input/output validation only.
+  cannot set any confirmatory support flag. Confirmation requires a saved,
+  allocated v2 plan and the same validated receipt through every input path;
+  the current unallocated v2 plan intentionally cannot analyze confirmation data.
 
 - `analyze`: read saved provider requests/SSE and native trace; emit call,
   action, source-range and Run tables plus hash/audit receipts. No model or

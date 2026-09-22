@@ -85,11 +85,19 @@ host writes can exceed it. Keep the user reserve at zero, but re-read actual fre
 space before each pair and halt new dispatch if the explicit reservation does
 not fit. Full-study storage capacity is not certified by the 106 MiB rehearsal.
 
-## Concrete pair-start rule, still awaiting account evidence and adoption
+## Pair-start rule after the user's no-overage clarification
 
 The [proposed admission record](../research/design-results/catalog-pair-admission-20260922.json)
-and [offline decision helper](../research/catalog_admission.py) leave unknowns
-unknown and currently return `may_start_pair=false`. This helper never dispatches
+and [offline decision helper](../research/catalog_admission.py) apply the user's
+2026-09-22 clarification: **paid overage is disabled; exhausting the allowance
+only makes the API unavailable. Monetary-limit verification is not a start
+condition.** This is user-confirmed account policy, not a claim of independent
+Console inspection. No repeated setting confirmation or paid capacity is needed.
+
+The earlier dollar-reservation rule was an unnecessary added constraint and is
+superseded. The [correction receipt](../research/design-results/catalog-admission-policy-validation-20260922.json)
+records this change separately from the original sharing-validation snapshot.
+The current record still returns `may_start_pair=false`. This helper never dispatches
 a Run and has not been integrated into the acquisition controller.
 
 From the repository root, save a fresh decision to an absent output path:
@@ -99,52 +107,42 @@ python -B -m research.catalog_admission --record research/design-results/catalog
 ```
 
 Exit code **2** means held; the written JSON explains every blocking reason.
-The saved account/disk evidence is historical and must not be reused for dispatch.
+The saved disk evidence is a snapshot and must be refreshed for actual dispatch.
 
-1. Immediately before a pair, obtain a successful usage GET and disk readback
-   no older than five minutes. Record the actual account's rolling/weekly/monthly
-   monetary limits, their effective period, current rates, no paid overage, and
-   whether other account consumers could consume the reservation. Public
-   promotional terms alone do not verify those account fields.
-2. Require all three windows to be `ok`. The official
-   [usage route](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/go/v1/usage.ts)
-   returns status, integer percent and reset time; the
-   [calculation floors the percent](https://github.com/anomalyco/opencode/blob/dev/packages/console/core/src/subscription.ts).
-   For an actual monetary limit `L` and returned percent `p`, use the conservative
-   remaining amount `L * max(0, 99-p) / 100`. A displayed 0% is not assumed zero.
-3. Reserve both members before starting either. The proposed fixed reference is
-   **$2.8837356 equivalent**: twice the largest saved pilot Run, repriced at the
-   accepted peak input/output rates with no cache discount. The four saved values
-   are $0.6817458, $0.8742108, $0.9711930 and $1.4418678. Every window's conservative
-   remainder must cover the two-Run reservation. This is a prospective planning
-   rule, not a charge prediction, spending cap or guaranteed maximum; do not
-   change it in response to comparison outcomes.
-4. Do not assume a future reset or promotional carryover. Use a two-hour planning
-   horizon (the two existing 1,800-second generation budgets plus one hour for
-   operations); if a window/term expires inside it, wait and read back again.
-   This horizon changes neither the Run timeout nor the fixed N.
-5. Require the measured local free space to cover every stated storage component.
-   Pause between pairs for staged publication or quota resets. If an unexpected
-   limit/storage failure occurs inside a pair, preserve partial/uncertain work
-   and reconcile dispatch before continuation. Do not replace a Run, skip to a
-   new pair, switch models/accounts, purchase capacity or replay uncertain calls.
-6. A successful resource calculation is insufficient by itself: a fixed execution
+1. Do not require monetary caps, prices, a dollar reserve for two Runs, proof of
+   exclusive account use, or completion before a reset/promotional expiry.
+   Usage percentages and reset times, when available, help schedule waiting;
+   a successful fresh usage GET is not itself a prerequisite. A pair may exhaust
+   the allowance before both Runs finish; completion is not guaranteed.
+2. On known API unavailability or a quota/rate-limit response, record the failure
+   and set `api_recovery_pending=true`; stop new dispatch and wait for recovery.
+   The offline helper takes this state from the caller; it does not observe or
+   retry the API. Clear the pause only after recovery and dispatch reconciliation,
+   not merely because a predicted reset passed. Preserve the same provider/model,
+   allocated slots and any partial/uncertain work. Recovery does not authorize a
+   replacement Run, skipping to a new pair, or replaying an uncertain call.
+3. Require a disk readback no older than five minutes and enough physical space
+   for all seven stated storage components. Stop new dispatch on storage failure.
+   User discretionary reserve remains zero; uploads alone free no local space.
+4. A successful resource calculation is insufficient by itself: a fixed execution
    plan with its allocation/pins and separate start authorization are still
    required. Nothing in this helper grants either.
 
-The fresh account GET at **2026-09-22 15:13:58 JST** returned rolling **0%**, weekly
+The historical account GET at **2026-09-22 15:13:58 JST** returned rolling **0%**, weekly
 **0%**, monthly **14%** used. Reset timestamps were respectively **20:13:57 JST**,
 **September 28 09:00 JST**, and **October 9 12:46:44 JST**. All statuses were `ok`.
-The API supplies no monetary limit or overage setting; Console was a login page.
-Those fields remain unverified. The saved readback is already too old for actual
-dispatch, deliberately producing an additional stale-evidence blocker.
+These observations are retained as context, not a claim of present API availability
+or a required dollar calculation. The later user confirmation resolves the
+no-overage policy; no further account query or model request was made for this fix.
 
 ## Validation and remaining acceptance
 
-The latest focused test run passed **22/22**: 12 new sharing/admission checks and
-the prior 10 allocation checks rerun now. Earlier 20- and 21-test passes are separately
-recorded, not added together. The older 91-test suite was not rerun. A new actual
-read-only four-DB check reconciled 218 request spans without source changes.
+The original sharing rehearsal passed **22/22**: 12 sharing/admission checks and
+the prior 10 allocation checks. Earlier 20- and 21-test passes are separately
+recorded, not added together. Its read-only four-DB check reconciled 218 request
+spans without source changes. The correction receipt records the subsequent test
+run independently; those four DBs and the older 91-test suite were not rerun for
+the policy correction.
 
 The initial public scan found home paths inside four trace ZIPs; a second copy
 fixed them. Final scanning covered all 464 files, SQLite text/BLOBs, decompressed
@@ -155,11 +153,12 @@ privacy/packaging inspection, not human product acceptance or re-evaluation.
 Two failures are retained separately: the first offline extraction wrapper broke
 Python's SSL class import by replacing `socket.socket`; using an audit hook then
 passed with unchanged bundle bytes. The first admission-record construction
-exposed an unhandled null terms timestamp; the helper now rejects unknown dates
-and a regression test covers them. Neither failure dispatched a model/evaluator.
+exposed an unhandled null terms timestamp, fixed in that rehearsal. Terms expiry
+is no longer an admission input after the policy correction; disk timestamp
+validation remains covered. Neither failure dispatched a model/evaluator.
 
-Remaining work is account-specific capacity/overage evidence, acceptance of the
-explicit two-Run and storage reservations, and review of the full future sharing
-set's required inputs. Only then fix formal N, save the exact allocation,
+Remaining work is the physical storage and recovery procedure at the actual
+acquisition path, and review of the full future sharing set's required inputs.
+Then fix formal N, save the exact allocation,
 plan/code/environment hashes and real pre-dispatch evidence, and obtain separate
 experiment start approval. **N, 640 execution slots and launch remain unset.**

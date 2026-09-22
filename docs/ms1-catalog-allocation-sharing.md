@@ -3,7 +3,10 @@
 Follow-up, 2026-09-22: the [first-pair sharing rehearsal](ms1-catalog-sharing-rehearsal.md)
 has now exercised a bounded public upload/download/restore path. The statements
 below describe the accepted 2026-09-21 proposal; they do not supersede the
-follow-up's remaining account-capacity, full-corpus and launch limitations.
+follow-up's current admission rule, full-corpus and launch limitations. The user
+subsequently confirmed paid overage is disabled: monetary-limit verification and
+reserving both Runs' dollar demand below are superseded. API unavailability now
+causes a pause; the original dated resource record remains historical.
 
 The user allocated this PC continuously, 100% of the existing OpenCode Go
 allowance, and no discretionary minimum free-disk reserve on 2026-09-21.

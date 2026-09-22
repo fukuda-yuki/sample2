@@ -1,0 +1,57 @@
+{
+  "kind": "offline_no_overage_admission_policy_correction",
+  "recorded_at_utc": "2026-09-22T07:05:37.752172+00:00",
+  "policy_authority": {
+    "confirmed_date": "2026-09-22",
+    "authority": "User clarification in the current task",
+    "paid_overage_disabled": true,
+    "verification_source": "user_confirmation",
+    "independent_account_setting_check_performed": false,
+    "monetary_limit_verification_required": false,
+    "two_run_dollar_reservation_required": false,
+    "completion_before_reset_required": false,
+    "on_api_unavailable": "Stop new dispatch, retain partial/uncertain slots, wait for recovery and reconcile dispatch before continuation."
+  },
+  "admission_record": {
+    "path": "research/design-results/catalog-pair-admission-20260922.json",
+    "sha256": "e2be94db6f5a0e313fdbbf305b89d92e78327986794586f14374da84c60b832f"
+  },
+  "tests": {
+    "command": "python -B -m unittest research.tests.test_catalog_sharing research.tests.test_catalog_allocation_review -v",
+    "passed": 22,
+    "failed": 0,
+    "log": "artifacts/catalog-sharing-20260922/tests-no-overage-01.log",
+    "sha256": "23703eba965ea441b66209dfaf2fd7b226d7ccbb634ee3ec676b320941eecec0",
+    "scope": "6 revised admission tests, 6 sharing tests and 10 allocation tests. Not added to any previous total."
+  },
+  "saved_record_cli": {
+    "exit_code": 2,
+    "blocking_reasons": [
+      "execution_plan_not_fixed",
+      "experiment_start_not_authorized"
+    ],
+    "monetary_gate_applied": false,
+    "sha256": "2c240cc5b1aa66b799c1dffb4534fa85b80ee37802bf69ab4cbfcff4afd05928"
+  },
+  "unchanged_file_hashes": {
+    "research/protocols/ms1-catalog-comparison-v2.json": "e4d6d4b918d2b4ce85d8285ebe0d412ee2a5d429f43bb7d0e590f5e65e95df3d",
+    "research/protocols/ms1-catalog-resource-allocation-20260921.json": "d6423fb0ef1a271bd3494349ce4d3af3ea41ae1658475b841952170442ec8190",
+    "research/design-results/catalog-sharing-validation-20260922.json": "d845d784fa57eae9d0c3337ba5340265ee1e94b8cc1a7885f7927e8925c7597c",
+    "research/catalog_share.py": "cec4b5f8b411730c55bad8fadb92faa0212760d3be6864567084973f710dd8aa"
+  },
+  "code_hashes": {
+    "research/catalog_admission.py": "ef9b4cca9b213e21c07d29bf427315ed1fff0d9ae090fbacd043518b9928e0ed",
+    "research/tests/test_catalog_sharing.py": "e5c13cdfc05964180e0b714b79b458fbfb83d7e45bc8e54ce7060b2b50f4ac1c"
+  },
+  "model_runs": 0,
+  "evaluator_runs": 0,
+  "historical_rejudgments": 0,
+  "account_requests": 0,
+  "account_settings_changed": false,
+  "published_assets_changed": false,
+  "original_pilot_db_recheck": "not_run",
+  "older_91_test_suite": "not_run",
+  "launch_authorized": false,
+  "formal_n_fixed": false,
+  "launcher_integration": "not_implemented"
+}

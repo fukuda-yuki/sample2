@@ -4,7 +4,9 @@ This directory contains research code, not an alternative agent/evaluator.
 The [first-pair sharing rehearsal](../docs/ms1-catalog-sharing-rehearsal.md)
 now records actual Release upload, anonymous download, hash-verified restore and
 identical offline extraction. Its tested pair-admission rule remains proposed;
-account-specific capacity and experiment start are still unverified/unapproved.
+the user confirmed paid overage is disabled, so monetary limits are not a start
+condition. API unavailability causes a pause. Storage checks, execution freeze
+and separate experiment start approval remain required.
 The current deliverable is the [catalog comparison v2 revision](../docs/ms1-catalog-comparison-v2-plan.md):
 metric-specific inference, resource/information comparisons and tested offline analysis.
 The subsequent [allocation and data-sharing proposal](../docs/ms1-catalog-allocation-sharing.md)
@@ -38,9 +40,10 @@ analysis contains 955 new calls; the historical six retain exactly 322 calls.
 - `catalog_share`: stage the first pilot pair, scan public copies, bind a review
   to exact bytes, package, safely restore and extract saved SQLite/OTLP offline.
   Exclusions/licenses are explicit; it does not upload or dispatch anything.
-- `catalog_admission`: evaluate a two-Run quota/local-storage reservation from
-  timestamped evidence. Unknown/stale limits and absent start authorization
-  reject admission; this is not yet integrated into an acquisition controller.
+- `catalog_admission`: check local storage, an outstanding API recovery pause,
+  execution freeze and start authorization. Financial limits, dollar reservations
+  and reset horizons are not gates under the user's no-overage policy. This is
+  not yet integrated into an acquisition controller.
 - `catalog_design`: reproduce parametric sample-size, precision and resource
   scenarios for historical v1 without models, Docker or evaluation. Its default
   remains v1; it does not choose the v2 allocation.

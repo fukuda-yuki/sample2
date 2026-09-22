@@ -3,12 +3,19 @@
 The three preparation tasks are implemented by
 [`catalog_execution`](../research/catalog_execution.py),
 [`catalog_delivery`](../research/catalog_delivery.py) and the bounded pair reader.
-The [frozen execution plan](../research/protocols/ms1-catalog-comparison-v2-execution-20260922.json)
+The [revised frozen execution plan](../research/protocols/ms1-catalog-comparison-v2-execution-20260922-r2.json)
 allocates **320 pairs / 640 Runs**, with the existing seed, one compact and one
 expanded Run per adjacent pair, attempts 1001 through 1320 per condition.
-The [preparation receipt](../research/design-results/catalog-execution-preparation-20260922.json)
+The [recovery validation receipt](../research/design-results/catalog-recovery-readiness-20260922.json)
 records the exact plan/code/environment hashes and actual verification results.
 **No experiment start approval or real dispatch is included in preparation.**
+
+This revision closes the cleanup-append and unfinished-sharing recovery defects
+reported against `283804b`. The [previous plan](../research/protocols/ms1-catalog-comparison-v2-execution-20260922.json)
+and [previous preparation receipt](../research/design-results/catalog-execution-preparation-20260922.json)
+remain unchanged historical evidence. Their readiness statement did not cover
+these two defects. Approval must name the revised plan hash; approval of the old
+hash cannot authorize this code.
 
 The prior unallocated v2 JSON and all earlier receipts remain historical and
 unchanged. Scientific endpoints, inference, missingness, model, intervention,
@@ -38,6 +45,19 @@ fallback. Recovery requires evidence bound to the exact plan and current journal
 documented API/environment recovery and reconciliation of owned processes and
 resources. Preserved results are rechecked. Only never-dispatched slots continue,
 in their original order. An uncertain slot stays uncertain in the denominator.
+
+The original Run seal is never overwritten. For a declared browser cleanup,
+recovery accepts only new receipts/intents for the preserved resource owner and
+an unchanged byte prefix followed by complete JSONL rows in its cleanup index.
+For separately authorized evaluation recovery, it accepts one new sequence and
+evaluation directory, its work directory and scoring logs, and the corresponding
+append to the evaluation index. Artifact, evaluator and spec identities remain
+fixed, and the existing two-rescore limit includes interrupted attempts.
+Generated files, original requests/responses and existing evaluation evidence
+remain immutable. Undeclared additions, deleted files, edited old index bytes or
+changed original evidence are rejected. Each accepted delta records its operation,
+file paths, old/new sizes and hashes, and appended byte ranges in the acquisition
+journal. Subsequent recovery protects those accepted additions too.
 
 `_control/launch-receipt.json` is created immediately before the first approved
 dispatch and binds the fixed plan, analysis code, approval, checks and journal.
@@ -93,6 +113,20 @@ notices and exclusions. An approved review binds those bytes. `share` then:
 
 A durable delivery receipt permits completion after an interruption during
 cleanup without republishing. Failed transfer attempts are retained for diagnosis.
+Copy and package interruptions are retried separately from Run faults. Reinvoke
+`stage --pair N` (or the held `execute`) after an interrupted public copy; reinvoke
+`share --pair N --review ...` after a scan or ZIP failure. These operations do not
+need a fabricated Run pause or a `recover` record. An absent or truncated completion
+manifest identifies an unfinished attempt. The driver records its inventory and
+failure context, moves it to a unique `*.incomplete-<id>` sibling, and builds a new
+attempt at the normal path. These retained attempts survive successful cleanup.
+Resolve the scan cause before retrying; changed public bytes require a new exact
+review. Every new package must pass scanning. A completed copy/package is reused
+only after manifest, file, review and scan checks; corrupt completed data is held,
+not silently replaced. Existing publication intent or a delivery receipt requires
+reconciliation through `share`. No retry dispatches either member again, deletes
+an original Run, or publishes unreviewed bytes. New pairs remain held until the
+same pair's download, restoration, extraction and cleanup finish.
 Native state/auth caches, evaluation DB/WALs, runtime binaries and most upstream
 legacy files remain excluded under the existing bounded sharing contract. This
 limits native-state, DB-query and full environment replay; it does not remove
@@ -130,29 +164,38 @@ an `evidence_files` mapping of actual file paths to hashes. For uncertain dispat
 `in_flight_processes_stopped` must also be confirmed. These are evidence attestations,
 not a mechanism for inventing a successful Run or retrying a lost request.
 
+When recovery added records inside the last completed Run, also declare its
+operations. Paths below are relative to that Run; use the actual attempt name:
+
+```json
+{"operations": [{"kind": "browser_cleanup", "directory": "evaluations/attempt-1-<id>"}]}
+```
+
+For an authorized evaluation recovery, use `kind: "evaluation"`, the new
+`directory`, integer `sequence`, and `authorization_reference` for the separate
+permission to rescore. Include actual receipts in `evidence_files`. The recovery
+validator does not run the evaluator or grant that permission. An API/storage
+recovery with no Run changes can omit `operations`.
+
 ## Verification boundary
 
-The final research suite passed **128/128 tests**, including 15 execution tests;
-this is one current suite run, not a sum of historical test reports. Actual
-anonymous re-download verified all four existing Release assets, restored 464
-public files and reproduced 81 saved requests. All 6,098 original pilot files
-matched their prior hashes at the final check. Failed probes and their corrected
-reruns remain separately listed in the preparation receipt.
+The revised code passed **142/142 research tests**, including 29 execution tests,
+and **41/41 existing cleanup/scoring harness tests** on Windows. These are separate
+suite runs; neither total includes historical results. Regression coverage includes
+production cleanup receipts after a simulated Docker failure, unchanged original
+seals, rejected original/index edits, protected prior recovery additions, evaluation
+record/index appends, interrupted copying, failed scanning, interrupted ZIP writes,
+truncated manifests, completed-package corruption, and retry storage admission.
 
-The frozen plan SHA-256 is
-`28f6863a2e4f73b8c397e48cb019e258772f9f6dec43f7b822b2682cb183763e`.
-Its implementation source commit is `2b6b5be51d150a7c299a1cb87ed335e0eb8481cd`;
-all 40 frozen source files match both the committed bytes and a relocated public
-copy. The real unapproved execute command was refused before cohort creation.
+Model dispatch, Docker and remote transfer boundaries are synthetic in these tests.
+Evaluation-recovery tests use the harness record/index writers; existing scoring
+tests use the stand-in evaluator. No real model, product evaluation, historical
+re-evaluation, pilot repetition or historical archive recreation was performed.
+The prior receipt's live download, compression and 6,098-file checks are historical;
+this revision does not claim to repeat them. No remote publication is included.
 
-Fault-injection tests use synthetic dispatch and controlled remote transport at
-the two external boundaries; the journal, storage, packaging, restoration and
-cleanup paths are the production implementations. Real existing pilot evidence
-is also staged, scanned, downloaded and extracted without regenerating historical
-archives or evaluating products. The receipt separates failures, reruns, current
-tests and prior Release publication. New uploader mutations are tested through
-controlled transport; no new live Release write is claimed for this preparation.
-
-The final read-only host check is a snapshot. Fresh disk and identity checks run
-again at actual dispatch. Only the separate experiment start approval remains a
-user decision after a passing preparation receipt.
+The new receipt records the exact revised plan SHA-256 and committed code hashes,
+the unchanged 640-slot allocation and scientific conditions, the fresh read-only
+host check, and refusal of unapproved execution before cohort creation. Fresh disk
+and identity checks run again at actual dispatch. Separate user start approval
+bound to the revised hash is still required.

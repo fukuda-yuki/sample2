@@ -66,6 +66,16 @@ def validate_launch_receipt(plan, observations, receipt, plan_path):
     This verifies shape and content binding, not the truth of a human attestation.
     The pre-dispatch journal and resource/pin evidence remain reviewable sources.
     """
+    if plan.get('date_revision'):
+        from research.catalog_date_revision import validate_history
+        if plan_path is None or read_json(plan_path) != plan or observations.get('plan_sha256') != sha256(plan_path):
+            raise ValueError('Revised observations must bind their exact saved plan')
+        public = (REPO / 'MANIFEST.json').is_file()
+        history = validate_history(plan_path, REPO, public=public)
+        if (observations.get('date_revision_history') != history or
+                receipt != read_json(REPO / plan['runs_dir'] / '_control/launch-receipt.json')):
+            raise ValueError('Missing or changed original launch/amendment history')
+        return
     required = set(REQUIRED_RECEIPT) | set(plan.get("launch", {}).get("receipt_required", []))
     if not isinstance(receipt, dict) or any(not receipt.get(key) for key in required):
         raise ValueError("Incomplete pre-dispatch launch receipt")
@@ -404,6 +414,13 @@ def analyze(plan, observations, purpose="confirmatory", *, launch_receipt=None, 
             actual = observation.get("row", {})
             pins = plan["fixed_conditions"]
             initial = observation.get("initial_input", {})
+            if plan.get('date_revision') and observation.get('row'):
+                from research.catalog_identity import compare_initial
+                baseline = REPO / plan['probe'] / ('MS1-001-' + slot['condition'] + '-001')
+                comparison = compare_initial(REPO / plan['runs_dir'] / slot['run_id'], baseline, plan)
+                if initial.get('comparison') != comparison or initial.get('semantic_match_to_mock') != bool(comparison and comparison['matches']):
+                    raise ValueError('Observation comparison differs from the revised rule/raw evidence')
+                normalized['initial_input_comparison'] = comparison
             mismatches = []
             if actual.get("task_id") != plan["task"] or actual.get("attempt") != slot["attempt"]:
                 mismatches.append("task_or_attempt_mismatch")
@@ -496,6 +513,8 @@ def analyze(plan, observations, purpose="confirmatory", *, launch_receipt=None, 
                             "success_only_mean_total_secondary": float(np.mean([r["total_tokens"] for r in success])) if success else None,
                             "success_only_n_secondary": len(success)}
     return {"schema_version": 2, "purpose": purpose, "cohort": plan["cohort"],
+            **({'date_revision_history': observations['date_revision_history']}
+               if plan.get('date_revision') and purpose == 'confirmatory' else {}),
             "model_called": False, "evaluator_called": False,
             "assigned_runs": len(rows), "n_pairs": len(pairs),
             "primary_tokens": tokens if token_ok else None, "quality": quality,

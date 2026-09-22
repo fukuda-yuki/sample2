@@ -12,7 +12,7 @@ import re
 
 from outer.harness import aggregate, evaluate, profiles, util
 from research.analyze import numbered_lines, provider_response, strings
-from research.catalog_connection_probe import common_body
+from research.catalog_identity import compare_initial
 
 
 def access_labels(tool, inputs):
@@ -113,8 +113,10 @@ def observe(root, plan):
     baseline = Path(plan['probe'])/('MS1-001-'+manifest['intervention_id']+'-001')
     receipt_path = root/'usage/raw/first-request-contract.json'
     access_path = root/'state/catalog-access.json'
+    comparison = compare_initial(root, baseline, plan) if starts else None
     initial = {'gateway':util.read_json(receipt_path) if receipt_path.exists() else None,
-        'semantic_match_to_mock':common_body(root)==common_body(baseline) if starts else False,
+        'semantic_match_to_mock':comparison['matches'] if comparison else False,
+        'comparison': comparison,
         'same_files_permissions_ranges':util.read_json(access_path)==util.read_json(baseline/'state/catalog-access.json') if access_path.exists() else False}
     sums = {}
     for key in ('input_tokens','output_tokens'):
@@ -145,6 +147,10 @@ def main():
     parser.add_argument('--out',type=Path,required=True)
     args=parser.parse_args()
     plan=util.read_json(args.plan)
+    history = None
+    if plan.get('date_revision'):
+        from research.catalog_date_revision import validate_history
+        history = validate_history(args.plan, Path(__file__).resolve().parents[1])
     result=[]
     for case in plan['slots']:
         root=Path(plan['runs_dir'])/case['run_id']
@@ -154,6 +160,7 @@ def main():
             result.append({'case':case,'run_id':case['run_id'],'state':'not_started','tokens':None,'requirements':[]})
     util.write_new_json(args.out, {'schema_version':1,'plan_sha256':util.sha256_file(args.plan),
         'cohort':plan['cohort'],'read_only':True,'runs':result,
+        **({'date_revision_history': history, 'launch_receipt': util.read_json(Path(plan['runs_dir'])/'_control/launch-receipt.json')} if history else {}),
         'interpretation':'Technical pilot only; no efficacy or noninferiority inference; harness preflight reads excluded from model actions'})
     print(json.dumps([{'run':r['run_id'],'calls':len(r.get('calls',[])),'tokens':r['tokens'],
         'issues':r.get('audit_issues'),'quality':r.get('row',{}).get('quality')} for r in result]))

@@ -21,12 +21,14 @@ from research import catalog_admission, catalog_delivery, catalog_environment, c
 from research.catalog_allocation_review import read, sha256, write_new
 from research.catalog_confirmatory import allocation, validate_plan, REQUIRED_CODE
 from research.catalog_pilot import assess
+from research import catalog_date_revision
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT = REPO / 'research/protocols/ms1-catalog-comparison-v2-execution-20260922-r2.json'
 STORAGE_KEYS = ('next_pair_retained_bytes', 'generation_scratch_bytes', 'sqlite_finalize_bytes',
                 'public_copy_bytes', 'archive_bytes', 'download_bytes', 'restore_bytes')
 CODE = ('research/catalog_execution.py', 'research/catalog_delivery.py', 'research/catalog_share.py',
+        'research/catalog_identity.py', 'research/catalog_date_revision.py',
         'research/catalog_storage.py', 'research/catalog_recovery.py',
         'research/catalog_admission.py', 'research/catalog_allocation_review.py',
         'research/catalog_pilot.py', 'research/catalog_connection_probe.py',
@@ -93,6 +95,10 @@ def exclusive(control):
 def check_fixed(plan, repo=REPO):
     repo = Path(repo).resolve()
     validate_plan(plan, require_allocation=True)
+    if plan.get('date_revision'):
+        revision_plan, _, _ = catalog_date_revision.validate_proposal(repo / catalog_date_revision.NEW_PATH, repo)
+        if revision_plan != plan:
+            raise ValueError('Revised plan differs from its saved proposal')
     execution = plan['execution']
     if sha256(repo / execution['retention_evidence']) != execution['retention_evidence_sha256']:
         raise ValueError('Retention preparation evidence changed')
@@ -242,6 +248,11 @@ def run_case(plan, case, batch, env, repo=REPO):
     row = aggregate.row_for(batch, case['run_id'])
     machine.verify_conditions(root, plan['fixed_conditions']['condition_fingerprints'], case['condition'])
     stops = assess(root, {**plan, 'probe': str(Path(repo) / plan['probe'])}, row)
+    comparison = {}
+    if plan.get('date_revision'):
+        from research.catalog_identity import compare_initial
+        baseline = Path(repo) / plan['probe'] / ('MS1-001-' + case['condition'] + '-001')
+        comparison['initial_input_comparison'] = compare_initial(root, baseline, plan)
     reference = read(root / 'archive-reference.json')
     preserve.verify(batch / '_archive', reference['package_id'], reference['sha256'])
     if row['scoring']['state'] in ('evaluator_fault', 'rejected_mismatch', 'not_attempted'):
@@ -253,7 +264,7 @@ def run_case(plan, case, batch, env, repo=REPO):
         except (ValueError, OSError, subprocess.SubprocessError):
             stops.append('retention_compression_incomplete')
     return {'cli_exit_code': process.returncode, 'stops': stops, 'row': row,
-            'archive_reference': reference, 'retention': retention}
+            'archive_reference': reference, 'retention': retention, **comparison}
 
 
 def pair_workspace(plan, pair, repo=REPO):
@@ -263,6 +274,7 @@ def pair_workspace(plan, pair, repo=REPO):
 
 def prepare_pair(plan_path, pair, repo=REPO):
     plan = read(plan_path)
+    history = catalog_date_revision.validate_history(plan_path, repo) if plan.get('date_revision') else None
     workspace = pair_workspace(plan, pair, repo)
     decision = catalog_admission.decide({'storage': storage_record(plan, repo),
         'fixed_execution_plan_verified': True, 'experiment_start_authorized': True})
@@ -300,6 +312,7 @@ def prepare_pair(plan_path, pair, repo=REPO):
         launch_path = batch / '_control/launch-receipt.json'
         write_new(observations_path, {'plan_sha256': sha256(plan_path), 'cohort': plan['cohort'],
             'launch_receipt': read(launch_path) if launch_path.exists() else None,
+            **({'date_revision_history': history} if history else {}),
             'runs': rows, 'read_only': True, 'model_called': False, 'evaluator_called': False})
     catalog_share.stage(repo, workspace, plan_path=plan_path, pair=pair)
     write_new(workspace / 'owned-workspace.json', {'plan_sha256': sha256(plan_path), 'pair': pair,
@@ -317,10 +330,14 @@ def execute(plan_path, approval_path, *, repo=REPO, dispatch=run_case, verify=ch
     with exclusive(control):
         journal = control / 'journal.jsonl'
         if not journal.exists():
+            if plan.get('date_revision'):
+                raise ValueError('Date revision must retain the existing r2 batch')
             write_new(control / 'frozen-plan.json', plan)
             write_new(control / 'start-approval.json', approval)
             append(journal, {'kind': 'begin', 'plan_sha256': sha256(plan_path), 'assigned': len(plan['slots'])})
-        if sha256(control / 'frozen-plan.json') != sha256(plan_path) or read(control / 'start-approval.json') != approval:
+        if plan.get('date_revision'):
+            catalog_date_revision.validate_history(plan_path, repo, approval=approval)
+        elif sha256(control / 'frozen-plan.json') != sha256(plan_path) or read(control / 'start-approval.json') != approval:
             raise ValueError('Plan or authorization differs from the existing batch')
         current = state(plan, journal)
         if current['uncertain']:
@@ -382,6 +399,8 @@ def recover(plan_path, evidence_path, *, repo=REPO, verify=check_fixed):
     verify(plan, repo)
     control = relative_path(repo, plan['runs_dir'], 'runs') / '_control'
     with exclusive(control):
+        if plan.get('date_revision'):
+            catalog_date_revision.validate_history(plan_path, repo)
         journal = control / 'journal.jsonl'
         if (evidence.get('plan_sha256') != sha256(plan_path) or evidence.get('journal_sha256') != sha256(journal)
                 or evidence.get('verified') is not True or not evidence.get('explanation')
@@ -391,6 +410,13 @@ def recover(plan_path, evidence_path, *, repo=REPO, verify=check_fixed):
         if not refs or any(sha256(path) != digest for path, digest in refs.items()):
             raise ValueError('Recovery evidence is missing or changed')
         current = state(plan, journal)
+        if (plan.get('date_revision') and current['pause'] and
+                current['pause'].get('stops') == ['initial_request_differs_from_probe']):
+            from research.catalog_identity import compare_initial
+            root = relative_path(repo, plan['runs_dir'], 'runs') / plan['slots'][0]['run_id']
+            baseline = Path(repo) / plan['probe'] / 'MS1-001-catalog-expanded-001'
+            if not compare_initial(root, baseline, plan)['matches']:
+                raise ValueError('Date comparison still fails; no recovery')
         if not current['pause'] and not current['uncertain']:
             raise ValueError('No pending fault to recover')
         if current['pause'] and current['pause']['reason'] == 'run_fault' and evidence.get('api_or_environment_recovered') is not True:
@@ -440,6 +466,8 @@ def share_pair(plan_path, pair, review_path, *, repo=REPO, transfer=catalog_deli
     plan = read(plan_path)
     control = relative_path(repo, plan['runs_dir'], 'runs') / '_control'
     with exclusive(control):
+        if plan.get('date_revision'):
+            catalog_date_revision.validate_history(plan_path, repo)
         journal = control / 'journal.jsonl'
         current = state(plan, journal)
         if current['uncertain'] or current['pause'] or len(current['results']) != pair * 2 or pair in current['shared']:
@@ -514,7 +542,7 @@ def share_pair(plan_path, pair, review_path, *, repo=REPO, transfer=catalog_deli
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('freeze', 'check', 'execute', 'recover', 'stage', 'share'))
+    parser.add_argument('mode', choices=('freeze', 'check', 'execute', 'recover', 'stage', 'share', 'adopt-date-revision', 'propose-date-revision'))
     parser.add_argument('--plan', type=Path, default=DEFAULT)
     parser.add_argument('--source-plan', type=Path, default=REPO / 'research/protocols/ms1-catalog-comparison-v2.json')
     parser.add_argument('--out', type=Path)
@@ -526,6 +554,10 @@ def main():
     if args.mode == 'freeze':
         freeze(args.source_plan, args.plan)
         result = check(args.plan)
+    elif args.mode == 'adopt-date-revision':
+        result = catalog_date_revision.adopt(args.plan, args.approval, REPO, check_fixed)
+    elif args.mode == 'propose-date-revision':
+        result = catalog_date_revision.propose(REPO)
     elif args.mode == 'check':
         result = check(args.plan)
     elif args.mode == 'recover':

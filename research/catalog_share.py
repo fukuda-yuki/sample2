@@ -183,6 +183,9 @@ def stage(repo, destination, *, plan_path=None, pair=1):
         raise ValueError('Use a new staging directory outside original Runs')
     plan_path = Path(plan_path or repo / PLAN).resolve()
     plan = read(plan_path)
+    if plan.get('date_revision'):
+        from research.catalog_date_revision import validate_history
+        validate_history(plan_path, repo)
     if type(pair) is not int or pair < 1:
         raise ValueError('Positive pair number required')
     selected = plan['slots'][(pair - 1) * 2:pair * 2]
@@ -207,6 +210,8 @@ def stage(repo, destination, *, plan_path=None, pair=1):
         'complete_research_corpus': False, 'model_called': False, 'evaluator_called': False,
         'files': [], 'excluded': [], 'original_inventory': before}
     manifest['kind'] = 'catalog_allocated_pair_public_copy'
+    if plan.get('date_revision'):
+        manifest['date_revision_plan'] = plan_path.relative_to(repo).as_posix()
     manifest['missing_run_directories'] = [run for run in runs if not (cohort_path / run).is_dir()]
     for run in runs:
         for relative, source in files(cohort_path / run) if (cohort_path / run).is_dir() else []:
@@ -239,6 +244,11 @@ def stage(repo, destination, *, plan_path=None, pair=1):
             path = cohort_path / '_control' / name
             if path.exists():
                 extra.append(path.relative_to(repo).as_posix())
+        if plan.get('date_revision'):
+            from research.catalog_date_revision import OLD_PATH, RECORD_PATH, ADOPTION
+            extra += [OLD_PATH, RECORD_PATH,
+                      (cohort_path / '_control/start-approval.json').relative_to(repo).as_posix(),
+                      (cohort_path / '_control' / ADOPTION).relative_to(repo).as_posix()]
         # Actual no-model baseline files needed by the existing observation
         # reader to independently check the single intervention/common access.
         probe = (repo / plan['probe']).resolve()
@@ -431,8 +441,29 @@ def extract(root):
             'evaluation_attempts': [{k: a.get(k) for k in ('sequence','adopted','scoring_state','verdict','quality','directory')} for a in attempts]})
     kind = ('restored_pilot_offline_extraction_not_reevaluation' if manifest.get('kind') == 'pilot_first_pair_sharing_rehearsal'
             else 'restored_catalog_pair_offline_extraction_not_reevaluation')
+    revision = {}
+    # Older bounded distributions do not contain the revision module.
+    revision_plan_path = 'research/protocols/ms1-catalog-comparison-v2-execution-20260923-r3.json'
+    if manifest.get('date_revision_plan') or (root / revision_plan_path).exists():
+        from research.catalog_date_revision import NEW_PATH, validate_history
+        if manifest.get('date_revision_plan') != NEW_PATH:
+            raise ValueError('Missing or changed public date revision plan reference')
+        from research.catalog_identity import compare_initial
+        plan_path = root / safe_member(manifest['date_revision_plan'])
+        if sha256(plan_path) != manifest['plan_sha256']:
+            raise ValueError('Public revised plan hash mismatch')
+        plan = read(plan_path)
+        revision['date_revision_history'] = validate_history(plan_path, root, public=True)
+        for result in results:
+            run_root = root / plan['runs_dir'] / result['run_id']
+            if (run_root / 'usage/raw/started.jsonl').exists():
+                case = next(s for s in plan['slots'] if s['run_id'] == result['run_id'])
+                baseline = root / plan['probe'] / ('MS1-001-' + case['condition'] + '-001')
+                result['initial_input_comparison'] = compare_initial(run_root, baseline, plan)
+            else:
+                result['initial_input_comparison'] = None
     return {'kind': kind, 'model_called': False,
-        'evaluator_called': False, 'human_review': 'not_run', 'runs': results}
+        'evaluator_called': False, 'human_review': 'not_run', 'runs': results, **revision}
 
 
 def saved_attempts(root):

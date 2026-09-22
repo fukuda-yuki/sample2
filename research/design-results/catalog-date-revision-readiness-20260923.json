@@ -1,0 +1,470 @@
+{
+  "schema_version": 1,
+  "kind": "bounded_post_start_date_revision_verified_proposal_not_adopted",
+  "recorded_at_utc": "2026-09-22T17:48:04.464980+00:00",
+  "authority": {
+    "recorded_at_utc": "2026-09-22T17:33:07.808321+00:00",
+    "source": "Current user message in Codex task 01a0c951-428f-7ef3-a37e-1c1f1c90250b; message ID not exposed",
+    "instruction_title": "初回Runの日付差分による停止への限定対応",
+    "quoted_scope": "今回は修正・オフライン検証・改訂案の保存までです。新規モデル実行、停止解除、再送、再評価は行わないでください。",
+    "implementation_and_offline_verification_authorized": true,
+    "adoption_authorized": false,
+    "resumption_authorized": false
+  },
+  "old_plan": {
+    "path": "research/protocols/ms1-catalog-comparison-v2-execution-20260922-r2.json",
+    "sha256": "14622f31c510607c8999026fe2fa308630ce6bb528bcfeb6667b3d46c349ea9b"
+  },
+  "proposed_plan": {
+    "path": "research/protocols/ms1-catalog-comparison-v2-execution-20260923-r3.json",
+    "sha256": "8bbe1301bf4cb5d81baa0688c5c643300fb1a463c82f213082a09d605bff9ca6"
+  },
+  "amendment": {
+    "path": "research/protocols/ms1-catalog-date-revision-20260923.json",
+    "sha256": "a97e4c3a8c338e23251782a336d1d4926ad03b62bfd574081908f840877c3694"
+  },
+  "proposal_recorded_after_first_result_seen": true,
+  "proposed_at_utc": "2026-09-22T17:41:40.208080+00:00",
+  "approval_required_for_adoption_and_resumption": true,
+  "adoption_performed": false,
+  "recovery_performed": false,
+  "model_calls": 0,
+  "new_evaluations": 0,
+  "replacements": 0,
+  "publications": 0,
+  "changed_code": {
+    "research/catalog_execution.py": {
+      "old_sha256": "cc3b7177d8263245b5fc51893c25321b65e15972c4ed0dfda15a8b855cc297aa",
+      "new_sha256": "5d95c811d81075208f3103be4095acbbdf9867f0a85518ea8ba6d075d3fd8f68"
+    },
+    "research/catalog_pilot.py": {
+      "old_sha256": "f6537827968fade821c076634b254d282945157437b30bee9d73a700daff512a",
+      "new_sha256": "2c105616e0c87582af5b578f41d3065653982486ba2d7530bbc6888a19ad75a7"
+    },
+    "research/catalog_observations.py": {
+      "old_sha256": "5def0175934cdbbe89db04edede2c67ff07b20bfaa89eb04fe8647b0ff0ff5e1",
+      "new_sha256": "83ef2af1b9033361f0a8e95fccafab608d7f4b23626cc7510f7b8c63cd345e46"
+    },
+    "research/catalog_confirmatory.py": {
+      "old_sha256": "e45d1c5728d13e4b23aaa2d930757161bd235048ddeec772bacf513a7cb562da",
+      "new_sha256": "0b96adbf0a74e971989031721c39063cd017e7b8a3be12ed018c089b46c277e7"
+    },
+    "research/catalog_share.py": {
+      "old_sha256": "51c4a1e68641a7addf841d08282f6e8d9c7b52f9ebaaf90d1bdf7acbbeba7ae9",
+      "new_sha256": "d8c302c4c1d8aa89575058cac887fd81065c36f7e3447002591d07fadbe6281a"
+    },
+    "research/catalog_identity.py": {
+      "old_sha256": null,
+      "new_sha256": "27eee97c0777a1e82b5b1a603d15388d958f84a1d199de6f04fadac5dd8bb395"
+    },
+    "research/catalog_date_revision.py": {
+      "old_sha256": null,
+      "new_sha256": "4372c11f3eb62f491778e6b257c3c544e8a8187e47b25fa4df001e5be3c9fa98"
+    }
+  },
+  "all_current_execution_code_files": 43,
+  "full_code_maps_reference": "research/protocols/ms1-catalog-date-revision-20260923.json",
+  "unchanged": [
+    "N=320 pairs/640 slots",
+    "seed and complete allocation",
+    "model/agent/task and request generation",
+    "available files and retrieval",
+    "timeouts/concurrency",
+    "evaluation and missingness",
+    "estimands/interval methods and all other scientific settings"
+  ],
+  "exact_640_slot_allocation_unchanged": true,
+  "request_generation_and_evaluator_code_unchanged": true,
+  "current_batch": {
+    "counts": {
+      "assigned": 640,
+      "dispatched": 1,
+      "terminal": 1,
+      "undispatched": 639,
+      "uncertain": 0
+    },
+    "acquired_under_r2": {
+      "slot": 1,
+      "block": 1,
+      "position": 1,
+      "condition": "catalog-expanded",
+      "attempt": 1001,
+      "run_id": "MS1-001-catalog-expanded-1001"
+    },
+    "next_undispatched": {
+      "slot": 2,
+      "block": 1,
+      "position": 2,
+      "condition": "catalog-compact",
+      "attempt": 1001,
+      "run_id": "MS1-001-catalog-compact-1001"
+    },
+    "pause": {
+      "at": "2026-09-22T13:51:09.677900+00:00",
+      "kind": "pause",
+      "reason": "run_fault",
+      "stops": [
+        "initial_request_differs_from_probe"
+      ]
+    },
+    "journal_sha256": "b481ccb80c84cc95acc0d72b58a2582d455d2bf9d4f5fa94d3b8a38a53634aaf",
+    "journal_events": 5,
+    "new_adoption_receipt_exists": false,
+    "initial_dispatch_at_utc": "2026-09-22T13:34:35.340879+00:00"
+  },
+  "difference_audit": {
+    "path": "artifacts/catalog-date-revision-20260923/saved-request-audit-final.json",
+    "checks": {
+      "recorded_original_request_hashes_match": true,
+      "legacy_diff_paths": [
+        "/messages/0/content"
+      ],
+      "literal_date_replacement_is_entire_difference": true,
+      "task_prompt_bytes_equal": true,
+      "tools_equal": true,
+      "request_parameters_equal": true,
+      "other_messages_equal": true,
+      "other_system_instructions_equal": true,
+      "source_packet_equal": true,
+      "file_access_equal": true
+    },
+    "original_request_references": {
+      "actual_request": {
+        "path": "runs/catalog-comparison-v2/MS1-001-catalog-expanded-1001/usage/raw/cbbc035894ba4f9ca1508c29c21f66a3.request.json",
+        "sha256": "292f1b2ee939062f117663aabd22c8d6fe46d07edb2c61b93124b3d0884f5b5c"
+      },
+      "baseline_request": {
+        "path": "artifacts/catalog-pilot/20260920/connection-01/MS1-001-catalog-expanded-001/usage/raw/fcc0567aac8d4763af51dd0074b86c83.request.json",
+        "sha256": "5fd4110515b1685a6fe7a10d86a9eb36f829c92367bc01ef8d5fc4de0681165c"
+      }
+    },
+    "automatic_generation_source": {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/v1.17.11/packages/opencode/src/session/system.ts",
+      "version": "1.17.11",
+      "path": "artifacts/catalog-date-revision-20260923/opencode-v1.17.11-system.ts",
+      "sha256": "0ae8028c3b6b972f990d34f290dad3a0b631651a812c68826e6415902ac1fb6d",
+      "automatic_date_expression": "new Date().toDateString()",
+      "lines": [
+        61,
+        68
+      ],
+      "read_only_fetch": true
+    },
+    "comparison": {
+      "rule": "opencode-1.17.11-system-environment-date-v1",
+      "hash_encoding": "sorted compact UTF-8 JSON for comparison objects only",
+      "actual_request": {
+        "path_within_run": "usage/raw/cbbc035894ba4f9ca1508c29c21f66a3.request.json",
+        "original_file_sha256": "292f1b2ee939062f117663aabd22c8d6fe46d07edb2c61b93124b3d0884f5b5c"
+      },
+      "baseline_request": {
+        "path_within_run": "usage/raw/fcc0567aac8d4763af51dd0074b86c83.request.json",
+        "original_file_sha256": "5fd4110515b1685a6fe7a10d86a9eb36f829c92367bc01ef8d5fc4de0681165c"
+      },
+      "raw_common_equal": false,
+      "actual_common_object_sha256": "af38a9fd86653ccce910356021ddd4e4ae1f24d012f7553d190745b33b4359e3",
+      "baseline_common_object_sha256": "0197414d17977aa1707ad2cb4d34b3afa633efda84b1cec81248c1cc910d8297",
+      "source_packet_equal": true,
+      "access_equal": true,
+      "actual_date": {
+        "text": "Tue Sep 22 2026",
+        "iso_date": "2026-09-22",
+        "message_index": 0,
+        "role": "system",
+        "field": "<env>/Today's date"
+      },
+      "baseline_date": {
+        "text": "Sun Sep 20 2026",
+        "iso_date": "2026-09-20",
+        "message_index": 0,
+        "role": "system",
+        "field": "<env>/Today's date"
+      },
+      "date_text_equal": false,
+      "actual_normalized_object_sha256": "dbe54d47a52f380c5a7059b0a07669539d325e21e204e185ce236350c2cd84dd",
+      "baseline_normalized_object_sha256": "dbe54d47a52f380c5a7059b0a07669539d325e21e204e185ce236350c2cd84dd",
+      "normalized_equal": true,
+      "structure_valid": true,
+      "matches": true
+    },
+    "old_rule_stops": [
+      "initial_request_differs_from_probe"
+    ],
+    "proposed_rule_stops": [],
+    "read_only_audit_does_not_clear_pause": true
+  },
+  "original_record_preservation": {
+    "before": "artifacts/catalog-date-revision-20260923/preservation-before.json",
+    "after": "artifacts/catalog-date-revision-20260923/preservation-after.json",
+    "files": {
+      "research/protocols/ms1-catalog-comparison-v2-execution-20260922-r2.json": "14622f31c510607c8999026fe2fa308630ce6bb528bcfeb6667b3d46c349ea9b",
+      "runs/catalog-comparison-v2/_control/dispatch.lock": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+      "runs/catalog-comparison-v2/_control/frozen-plan.json": "14622f31c510607c8999026fe2fa308630ce6bb528bcfeb6667b3d46c349ea9b",
+      "runs/catalog-comparison-v2/_control/journal.jsonl": "b481ccb80c84cc95acc0d72b58a2582d455d2bf9d4f5fa94d3b8a38a53634aaf",
+      "runs/catalog-comparison-v2/_control/launch-receipt.json": "a38ab763a01a99b299236918dc594bcd1f3992f6e388937f45d34d288dbc6203",
+      "runs/catalog-comparison-v2/_control/MS1-001-catalog-expanded-1001.log": "7e4d3ea80e65a16ae2dc171ff039a0f26f82b029c25131c76019e681a1485b7e",
+      "runs/catalog-comparison-v2/_control/MS1-001-catalog-expanded-1001.seal.json": "6eaaa523a39cad3638fbfebf46c35cb1074e40b6b81ad3fb7d62c9d13d35a6d4",
+      "runs/catalog-comparison-v2/_control/start-approval.json": "f61515014096ed87c7899d91a8b23cbed4949e75d908855846ced04ed3d4af33",
+      "artifacts/catalog-execution-operations-20260922/start-approval.json": "f61515014096ed87c7899d91a8b23cbed4949e75d908855846ced04ed3d4af33"
+    },
+    "all_original_control_files_unchanged": true,
+    "original_run_files": 663,
+    "original_run_inventory_unchanged": true,
+    "archive_reference": {
+      "package_id": "run-MS1-001-catalog-expanded-1001",
+      "sha256": "932fdcd9678aacffde4d3a56bd24f3087e3ed21e6dc0a079e36ee2602295568e"
+    },
+    "archive_verified": true
+  },
+  "saved_outcome_readback": {
+    "input_tokens": 4763249,
+    "output_tokens": 49682,
+    "total_tokens": 4812931,
+    "usage_complete": true,
+    "requests": 65,
+    "runs": 1,
+    "cache_write_tokens": null,
+    "quality": 93.1,
+    "verdict": "fail",
+    "failed_requirements": [
+      "R-014",
+      "R-015"
+    ],
+    "evaluation_id": "MS1-001-c7fccad468e9-1.2.0-001",
+    "human_review": "not_run",
+    "reevaluated": false,
+    "inference_performed": false
+  },
+  "verification": {
+    "fixed_python": {
+      "path": "artifacts/catalog-confirmatory-design/analysis-env/Scripts/python.exe",
+      "sha256": "4b8c3912806b3c1591ba3cb403bff77ad309c3fe5756f87c20b7a6f8f0174262",
+      "version": "3.14.4"
+    },
+    "test_attempts": [
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-existing-first.log",
+        "sha256": "9b1258ef5afb5667ad010eaa43de5564c6f7f174bca40b6a4dd6ee0b87fd32c6",
+        "tests": 142,
+        "seconds": 13.064,
+        "status": "failed",
+        "final_candidate": false,
+        "failure_summary": "Historical plan test incorrectly required unchanged current hashes; replaced with old r2 versus approved-target r3 lineage checks."
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-date-revision-first.log",
+        "sha256": "bb7ceb4e20bea2ce9292565b9a7b93aaafcd3a4e8764eacdc9d46ddb8bbd250e",
+        "tests": 22,
+        "seconds": 4.435,
+        "status": "passed",
+        "final_candidate": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-date-revision-second.log",
+        "sha256": "21b80004fbb67dd4a94ee3254894ae6a6192db5fc1f705fa986d549a6b0a7963",
+        "tests": 26,
+        "seconds": 6.199,
+        "status": "passed",
+        "final_candidate": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-date-revision-third.log",
+        "sha256": "7ad81bf7055be79ab52389ea334689ef4eb549abe1d204808cf5cfbc8f859fe6",
+        "tests": 27,
+        "seconds": 6.199,
+        "status": "passed",
+        "final_candidate": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-research-final.log",
+        "sha256": "2ca4c8672fb058ecd972348cfd23aa9bb597d6ad75405b9f7e6b455d2fb96faa",
+        "tests": 169,
+        "seconds": 18.773,
+        "status": "passed",
+        "final_candidate": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-harness-final.log",
+        "sha256": "9fd20b45408cd51dea82617c8dca30c307b8b45699c0fb3d86434f47dc1a5387",
+        "tests": 154,
+        "seconds": 46.985,
+        "status": "passed",
+        "final_candidate": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-date-revision-final.log",
+        "sha256": "703783fe9672cd0a5489fa124bf85ca5f045597f1b13c45d652304965e06655e",
+        "tests": 28,
+        "seconds": 6.912,
+        "status": "passed",
+        "final_candidate": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-research-final-v2.log",
+        "sha256": "d11ced694a99531aeea6efd8473f7e5dbfb1740423a5b8e3d26aa6457878ecc7",
+        "tests": 170,
+        "seconds": 19.97,
+        "status": "passed",
+        "final_candidate": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-date-revision-final-v3.log",
+        "sha256": "13f688371625216a442e8dcb6e9f7b03065fde915072306b76e590f2853e7165",
+        "tests": 29,
+        "seconds": 8.095,
+        "status": "failed",
+        "final_candidate": false,
+        "failure_summary": "New regression test used an incorrect analysis output key; fixed to rows. Production execution completed without model/evaluator dispatch."
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-date-revision-final-v4.log",
+        "sha256": "956b1b54569e13af599784887d66bb03519499a0f0e5853ff18851a064a5db8e",
+        "tests": 29,
+        "seconds": 6.822,
+        "status": "passed",
+        "final_candidate": true,
+        "scope": "focused_regressions",
+        "subset_of_research": true
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-research-final-v3.log",
+        "sha256": "22af9d07f381f76e9612d2fa0c63f8626b73635500543086206262b14e47ff81",
+        "tests": 171,
+        "seconds": 19.253,
+        "status": "passed",
+        "final_candidate": true,
+        "scope": "all_research",
+        "subset_of_research": false
+      },
+      {
+        "log": "artifacts/catalog-date-revision-20260923/tests-harness-final-v3.log",
+        "sha256": "7f7c48f80f3a81e1d142fb277d7fb5c34407c79f74d5a8b251d5a0e1fe0323f0",
+        "tests": 154,
+        "seconds": 36.555,
+        "status": "passed",
+        "final_candidate": true,
+        "scope": "all_harness",
+        "subset_of_research": false
+      }
+    ],
+    "final_full_suite_tests": 325,
+    "focused_29_are_a_subset_not_additional_tests": true,
+    "external_boundaries": {
+      "real_saved_data": "read-only first-request comparison, aggregate/assessment/observation readers, seal inventory and archive verification",
+      "revision_continuation": "synthetic private repository; production lineage/journal/adoption/recovery/analysis paths; dispatch and environment/profile checks mocked",
+      "terminal_retention": "synthetic request fixtures; subprocess/model, profile, archive and compression boundaries mocked",
+      "public_reextraction": "synthetic staging plus real relocated standard-library offline reader with socket networking disabled; same comparison and lineage and analysis output",
+      "existing_suites": "local fixtures and stubs for provider, Docker, browser/evaluator and GitHub boundaries; no live provider run or saved-product reevaluation"
+    },
+    "not_performed": [
+      "real batch adoption/recovery/resumption",
+      "new model request/probe/pilot",
+      "artifact reevaluation or repair",
+      "actual Release upload/download/restore",
+      "new original compression or archive creation",
+      "commit/push/PR/merge"
+    ],
+    "preflight": {
+      "kind": "preparation_check_not_start_authorization",
+      "checked_at_utc": "2026-09-22T17:41:41.850486+00:00",
+      "plan_sha256": "8bbe1301bf4cb5d81baa0688c5c643300fb1a463c82f213082a09d605bff9ca6",
+      "pairs": 320,
+      "assigned_runs": 640,
+      "ready_for_start_approval": true,
+      "admission": {
+        "kind": "offline_pair_admission_not_dispatch",
+        "checked_at_utc": "2026-09-22T17:41:41.850465+00:00",
+        "planning_admission_pass": true,
+        "may_start_pair": false,
+        "blocking_reasons": [
+          "experiment_start_not_authorized"
+        ],
+        "required_additional_local_bytes": 5222266792,
+        "monetary_gate_applied": false,
+        "quota_policy": "user_confirmed_no_paid_overage_pause_on_unavailability",
+        "launcher_integration": "research.catalog_execution",
+        "model_called": false,
+        "new_allocation_created": false,
+        "account_rotated": false,
+        "completion_guaranteed": false,
+        "spending_cap_introduced": false,
+        "reservation_risk": "Pilot-based demand can be exceeded. Pause on quota/storage failure, preserve partial and uncertain slots, never replace or switch models."
+      },
+      "model_called": false,
+      "evaluator_called": false
+    }
+  },
+  "resumption": {
+    "requires_later_user_approval_of_both_hashes": true,
+    "procedure": "docs/ms1-catalog-date-revision-20260923.md",
+    "order": [
+      "check revised plan",
+      "record later explicit approval binding both hashes",
+      "adopt-date-revision adds receipt and journal event; retains pause",
+      "save actual recovery evidence bound to current post-adoption journal",
+      "recover",
+      "execute exactly the remaining compact-1001 slot",
+      "review/share/download/restore/extract pair 1 before next pair"
+    ],
+    "old_start_approval_is_preserved_not_reused_as_revision_approval": true,
+    "evaluation_recovery_requires_separate_approval": true
+  },
+  "draft_history": {
+    "draft-001": {
+      "status": "proposal_only_not_adopted",
+      "plan": "research/protocols/ms1-catalog-comparison-v2-execution-20260923-r3.json",
+      "plan_sha256": "cf8f91c2609f3028a46e903dd83d670203c91225293f6b7a4c991fdfe33a4f47",
+      "amendment": "research/protocols/ms1-catalog-date-revision-20260923.json",
+      "amendment_sha256": "03e5e40e61986ab384c59d8fab47bca6d1f7cd9511f11c5da7695d901558c23d",
+      "journal_unchanged": true,
+      "dispatches": 0,
+      "recoveries": 0
+    },
+    "draft-002": {
+      "status": "proposal_only_not_adopted",
+      "plan": "research/protocols/ms1-catalog-comparison-v2-execution-20260923-r3.json",
+      "plan_sha256": "c59adbcf48b4a326f505f6a1a162c37f8f31a8294f3c8c1da32d37beb9eecd9c",
+      "amendment": "research/protocols/ms1-catalog-date-revision-20260923.json",
+      "amendment_sha256": "ac060c5deb025b3aeb52eae400743bb7e2b13def9f8fc913e40004adeb9f7b1f",
+      "journal_unchanged": true,
+      "dispatches": 0,
+      "recoveries": 0
+    },
+    "approval_targets_are_only_current_canonical_plan_and_amendment": true
+  },
+  "local_evidence_sha256": {
+    "artifacts/catalog-date-revision-20260923/audit-final.py": "309a3515de7820006ddba0aab4e0cab73898a219cf71f272c6eec8a2744ce441",
+    "artifacts/catalog-date-revision-20260923/draft-001/ms1-catalog-comparison-v2-execution-20260923-r3.json": "cf8f91c2609f3028a46e903dd83d670203c91225293f6b7a4c991fdfe33a4f47",
+    "artifacts/catalog-date-revision-20260923/draft-001/ms1-catalog-date-revision-20260923.json": "03e5e40e61986ab384c59d8fab47bca6d1f7cd9511f11c5da7695d901558c23d",
+    "artifacts/catalog-date-revision-20260923/draft-002/ms1-catalog-comparison-v2-execution-20260923-r3.json": "c59adbcf48b4a326f505f6a1a162c37f8f31a8294f3c8c1da32d37beb9eecd9c",
+    "artifacts/catalog-date-revision-20260923/draft-002/ms1-catalog-date-revision-20260923.json": "ac060c5deb025b3aeb52eae400743bb7e2b13def9f8fc913e40004adeb9f7b1f",
+    "artifacts/catalog-date-revision-20260923/implementation-authorization.json": "77c28f3c56deff8fd791282a3c6b809241dcc230c3f912d41657ecabcf383a04",
+    "artifacts/catalog-date-revision-20260923/opencode-v1.17.11-system.ts": "0ae8028c3b6b972f990d34f290dad3a0b631651a812c68826e6415902ac1fb6d",
+    "artifacts/catalog-date-revision-20260923/preservation-after.json": "8863e33955c2dab1b2ecc42bc2fa229a06122e7ca78b2c22c35508abce0abc51",
+    "artifacts/catalog-date-revision-20260923/preservation-before.json": "056ba63fd985502eee7bcebe5a3ea5177aa34d7f816ec4505c1427249db3c10a",
+    "artifacts/catalog-date-revision-20260923/proposal-created-final-v3.json": "cffa35d3ee2352b91fb955431d8c444ae15bcd09d295c1db2b10f37af24b98bb",
+    "artifacts/catalog-date-revision-20260923/proposal-created-final.json": "06215d70890cf56fc514486d42838cc4b2e97e22e7ef20e6dfb725eec7fcc12d",
+    "artifacts/catalog-date-revision-20260923/proposal-created.json": "d163467e2a6e3634f7c46b261178219328113d794d231a7fa55d8ddef3d9b29d",
+    "artifacts/catalog-date-revision-20260923/proposal-preflight-final-v3.json": "cae33aab461855972a66a4a79715a4e473f2baf55fbe1d13924a30e494199592",
+    "artifacts/catalog-date-revision-20260923/proposal-preflight-final.json": "5d59355c94bd8fddb365f678b65e44c629d779592e539fb19184acca676a40f6",
+    "artifacts/catalog-date-revision-20260923/proposal-preflight.json": "cac525b7288c211cffbcaa8b1efe99391b712e75cfd340772ea41df5a235cb79",
+    "artifacts/catalog-date-revision-20260923/saved-request-audit-final.json": "bbf5cc2844b23086cc10562034c9c1c3fe260fa3d09191d7c303f8fa812bd1c3",
+    "artifacts/catalog-date-revision-20260923/saved-request-audit.json": "1b0eda8507ed438611bef449a3beddc32d6df6c04179f7414d80a6e4967fa20a",
+    "artifacts/catalog-date-revision-20260923/saved-run-observation-revised-rule-final.json": "9e8189814715626bc989c4e7af6a6b4314350e404c1f7b1235956b47ba30f097",
+    "artifacts/catalog-date-revision-20260923/saved-run-observation-revised-rule.json": "8ba737c231de362fb62c14d09b78a31b5418a94f9ed2037723a4d454a52f0e64",
+    "artifacts/catalog-date-revision-20260923/tests-date-revision-final-v3.log": "13f688371625216a442e8dcb6e9f7b03065fde915072306b76e590f2853e7165",
+    "artifacts/catalog-date-revision-20260923/tests-date-revision-final-v4.log": "956b1b54569e13af599784887d66bb03519499a0f0e5853ff18851a064a5db8e",
+    "artifacts/catalog-date-revision-20260923/tests-date-revision-final.log": "703783fe9672cd0a5489fa124bf85ca5f045597f1b13c45d652304965e06655e",
+    "artifacts/catalog-date-revision-20260923/tests-date-revision-first.log": "bb7ceb4e20bea2ce9292565b9a7b93aaafcd3a4e8764eacdc9d46ddb8bbd250e",
+    "artifacts/catalog-date-revision-20260923/tests-date-revision-second.log": "21b80004fbb67dd4a94ee3254894ae6a6192db5fc1f705fa986d549a6b0a7963",
+    "artifacts/catalog-date-revision-20260923/tests-date-revision-third.log": "7ad81bf7055be79ab52389ea334689ef4eb549abe1d204808cf5cfbc8f859fe6",
+    "artifacts/catalog-date-revision-20260923/tests-existing-first.log": "9b1258ef5afb5667ad010eaa43de5564c6f7f174bca40b6a4dd6ee0b87fd32c6",
+    "artifacts/catalog-date-revision-20260923/tests-harness-final-v3.log": "7f7c48f80f3a81e1d142fb277d7fb5c34407c79f74d5a8b251d5a0e1fe0323f0",
+    "artifacts/catalog-date-revision-20260923/tests-harness-final.log": "9fd20b45408cd51dea82617c8dca30c307b8b45699c0fb3d86434f47dc1a5387",
+    "artifacts/catalog-date-revision-20260923/tests-research-final-v2.log": "d11ced694a99531aeea6efd8473f7e5dbfb1740423a5b8e3d26aa6457878ecc7",
+    "artifacts/catalog-date-revision-20260923/tests-research-final-v3.log": "22af9d07f381f76e9612d2fa0c63f8626b73635500543086206262b14e47ff81",
+    "artifacts/catalog-date-revision-20260923/tests-research-final.log": "2ca4c8672fb058ecd972348cfd23aa9bb597d6ad75405b9f7e6b455d2fb96faa",
+    "artifacts/catalog-date-revision-20260923/upstream-source.json": "257a61af843702b4b3d6a3967196ba1341d8fec73cc4307deb986fe3599e151c"
+  },
+  "documentation_sha256": "5809b7199978023bdb520cae332c3e83ce6cd18ea7e11c49eb5c6297662e1073"
+}

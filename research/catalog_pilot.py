@@ -12,6 +12,7 @@ from outer.harness import aggregate, machine, preserve, profiles, run, runtime, 
 from outer.harness.security import child_environment
 from research.catalog_connection_probe import ARMS, RUNTIME, common_body
 from research import catalog_environment
+from research.catalog_identity import compare_initial
 
 REPO = Path(__file__).resolve().parents[1]
 PINNED = ('research/catalog_pilot.py','research/catalog_connection_probe.py','research/catalog_return_contract.py',
@@ -90,7 +91,7 @@ def assess(root, plan, row):
         if not (root/relative).exists() or not util.read_json(root/relative)['verified']: stops.append(relative)
     if not stops:
         baseline=Path(plan['probe'])/run.run_id_for('MS1-001',manifest['intervention_id'],1)
-        if common_body(root) != common_body(baseline): stops.append('initial_request_differs_from_probe')
+        if not (compare_initial(root, baseline, plan) or {}).get('matches'): stops.append('initial_request_differs_from_probe')
         if util.read_json(root/'state/catalog-access.json') != util.read_json(baseline/'state/catalog-access.json'):
             stops.append('worker_files_or_retrieval_differs')
     profiles.validate_run(root)

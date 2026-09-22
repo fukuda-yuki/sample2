@@ -84,8 +84,16 @@ class ConfirmatoryTests(unittest.TestCase):
         plan = read_json(DEFAULT_PLAN)
         validate_plan(plan)
         root = Path(__file__).resolve().parents[2]
+        # Historical plans remain byte-identical. Current changed code is bound
+        # by the explicit post-start amendment, never written into the old plan.
+        from research.catalog_date_revision import CHANGED_CODE, NEW_PATH, validate_proposal
+        revised, original, _ = validate_proposal(root / NEW_PATH, root)
         for name, digest in plan["pinned_files"].items():
-            self.assertEqual(sha256(root / name), digest, name)
+            if name in CHANGED_CODE:
+                self.assertEqual(original['execution']['code_hashes'][name], digest, name)
+                self.assertEqual(sha256(root / name), revised['execution']['code_hashes'][name], name)
+            else:
+                self.assertEqual(sha256(root / name), digest, name)
         self.assertEqual(plan["runs_per_condition"], plan["pairs"])
 
     def test_schedule_is_reproducible_both_orders_and_no_duplicate_slots(self):

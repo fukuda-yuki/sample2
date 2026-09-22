@@ -3,6 +3,9 @@
 This directory contains research code, not an alternative agent/evaluator.
 The current deliverable is the [catalog comparison v2 revision](../docs/ms1-catalog-comparison-v2-plan.md):
 metric-specific inference, resource/information comparisons and tested offline analysis.
+The subsequent [allocation and data-sharing proposal](../docs/ms1-catalog-allocation-sharing.md)
+records the user's full resource allocation, a justified 320-pair working candidate,
+and the evidence needed for independent analysis from this GitHub repository.
 No Run count is adopted and no model acquisition is authorized. The
 [v1 confirmation design](../docs/ms1-catalog-confirmatory-plan.md), its 320-pair
 candidate and saved calculations are historical, not the current execution plan.
@@ -34,6 +37,11 @@ analysis contains 955 new calls; the historical six retain exactly 322 calls.
 - `catalog_resources`: read file sizes/saved evaluation timestamps or reuse v1
   calculation rows with algebraic missingness and resource scenarios. No new
   simulations, model execution, evaluation or account mutation.
+- `catalog_allocation_review`: inspect the four existing pilot SQLite databases
+  read-only, reconcile their saved OTLP with normalized usage, and calculate
+  cache-mix quota references. No provider re-audit, acquisition or publication.
+  `sql/catalog_otel_requests.sql` exposes each saved request span, its identity,
+  timing, reported usage and original JSON for independent SQL analysis.
 - `catalog_confirmatory`: analyze plan-bound saved catalog observations at Run
   and pair level; retain missingness and product failure. `--purpose pilot_smoke`
   cannot set any confirmatory support flag. Confirmation requires a saved,

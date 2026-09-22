@@ -17,17 +17,17 @@ import sys
 
 from outer.harness import aggregate, machine, preserve, profiles, runtime, util
 from outer.harness.security import child_environment
-from research import catalog_admission, catalog_delivery, catalog_environment, catalog_share, catalog_observations, catalog_storage
+from research import catalog_admission, catalog_delivery, catalog_environment, catalog_share, catalog_observations, catalog_storage, catalog_recovery
 from research.catalog_allocation_review import read, sha256, write_new
 from research.catalog_confirmatory import allocation, validate_plan, REQUIRED_CODE
 from research.catalog_pilot import assess
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT = REPO / 'research/protocols/ms1-catalog-comparison-v2-execution-20260922.json'
+DEFAULT = REPO / 'research/protocols/ms1-catalog-comparison-v2-execution-20260922-r2.json'
 STORAGE_KEYS = ('next_pair_retained_bytes', 'generation_scratch_bytes', 'sqlite_finalize_bytes',
                 'public_copy_bytes', 'archive_bytes', 'download_bytes', 'restore_bytes')
 CODE = ('research/catalog_execution.py', 'research/catalog_delivery.py', 'research/catalog_share.py',
-        'research/catalog_storage.py',
+        'research/catalog_storage.py', 'research/catalog_recovery.py',
         'research/catalog_admission.py', 'research/catalog_allocation_review.py',
         'research/catalog_pilot.py', 'research/catalog_connection_probe.py',
         'research/catalog_environment.py', 'research/catalog_return_contract.py', *REQUIRED_CODE,
@@ -155,8 +155,12 @@ def approval_for(path, plan_path):
 def freeze(source, destination, repo=REPO):
     repo = Path(repo).resolve()
     plan = deepcopy(read(source))
+    fixed_slots = allocation(320, plan['randomization_seed'], plan['attempt_start'])
+    if plan.get('slots') is not None and plan['slots'] != fixed_slots:
+        raise ValueError('Refreezing must retain the existing fixed allocation')
+    is_revision = bool(plan.get('execution'))
     plan.update(pairs=320, runs_per_condition=320, maximum_runs=640,
-        slots=allocation(320, plan['randomization_seed'], plan['attempt_start']),
+        slots=plan['slots'] if plan.get('slots') is not None else fixed_slots,
         status='fixed_320_pairs_prepared_awaiting_separate_start_approval')
     # Keep the frozen plan publishable byte-for-byte. Machine-specific home
     # paths belong in local environment evidence, not the hashed analysis plan.
@@ -164,7 +168,8 @@ def freeze(source, destination, repo=REPO):
     plan['launch'].update(authorized=False, authorization_stored_separately=True,
         notes='Frozen plan is immutable. A separate explicit user approval bound to its SHA-256 is required by the launcher. Fresh pre-dispatch evidence is appended at execution.')
     plan['preparation'] = {'at': now(), 'source_plan_sha256': sha256(source),
-        'authority': 'User instructed completion of execution, storage/sharing and 320-pair freeze preparation.',
+        'authority': ('User requested bounded recovery repairs and refreezing with allocation and scientific conditions unchanged.'
+                      if is_revision else 'User instructed completion of execution, storage/sharing and 320-pair freeze preparation.'),
         'model_calls': 0, 'evaluator_calls': 0, 'start_authorized': False}
     storage = read(repo / 'research/design-results/catalog-pair-admission-20260922.json')['record']['storage']
     storage = {k: v for k, v in storage.items() if k not in ('checked_at_utc', 'free_bytes')}
@@ -264,10 +269,22 @@ def prepare_pair(plan_path, pair, repo=REPO):
     if not decision['may_start_pair']:
         raise ValueError('Insufficient physical staging space; original pair remains retained')
     if workspace.exists():
-        manifest = catalog_share.verify_public(workspace / 'public')
-        if manifest.get('plan_sha256') != sha256(plan_path) or manifest.get('pair') != pair:
-            raise ValueError('Existing staging attempt differs; never overwrite it')
-        return workspace
+        try:
+            read(workspace / 'public/MANIFEST.json')
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+            if list(workspace.glob('delivery-*.json')) or (workspace / 'package').exists():
+                raise ValueError('Existing delivery must be reconciled with share; cannot restage it')
+            catalog_share.quarantine(workspace, workspace.parent, 'stage',
+                {'plan_sha256': sha256(plan_path), 'pair': pair})
+        else:
+            manifest = catalog_share.verify_public(workspace / 'public', exact=True)
+            if manifest.get('plan_sha256') != sha256(plan_path) or manifest.get('pair') != pair:
+                raise ValueError('Existing staging attempt differs; never overwrite it')
+            batch = relative_path(repo, plan['runs_dir'], 'runs')
+            for name, original in manifest['original_inventory'].items():
+                if (catalog_share.inventory(batch / name) if (batch / name).exists() else {}) != original:
+                    raise ValueError('Original pair changed after staging')
+            return workspace
     batch = relative_path(repo, plan['runs_dir'], 'runs')
     observations_path = batch / '_control' / f'observations-pair-{pair:03d}.json'
     if not observations_path.exists():
@@ -382,13 +399,17 @@ def recover(plan_path, evidence_path, *, repo=REPO, verify=check_fixed):
             'fixed_execution_plan_verified': True, 'experiment_start_authorized': True})
         if not admission['may_start_pair']:
             raise ValueError('Physical storage remains unavailable')
+        recovery_delta = None
         if current['results']:
             last = current['results'][-1]
             if last.get('seal_path'):
                 seal = read(last['seal_path'])
                 root = relative_path(repo, plan['runs_dir'], 'runs') / last['case']['run_id']
-                if sha256(last['seal_path']) != last['seal_sha256'] or (catalog_share.inventory(root) if root.exists() else {}) != seal['files']:
+                if sha256(last['seal_path']) != last['seal_sha256'] or root.exists() != seal['directory_present']:
                     raise ValueError('Preserved result changed during recovery')
+                prior = [e['run_delta'] for e in events(journal) if e.get('run_id') == root.name and e.get('run_delta')]
+                protected = catalog_recovery.replay(seal['files'], prior)
+                recovery_delta = catalog_recovery.validate(root, protected, evidence.get('operations', []))
         if current['uncertain']:
             if evidence.get('in_flight_processes_stopped') is not True:
                 raise ValueError('Uncertain dispatch still needs process reconciliation')
@@ -396,7 +417,9 @@ def recover(plan_path, evidence_path, *, repo=REPO, verify=check_fixed):
                 'stops': ['uncertain_retained'], 'row': None, 'dispatch_certainty': 'unknown_never_replayed',
                 'evidence_sha256': sha256(evidence_path)})
         append(journal, {'kind': 'recovery', 'evidence_path': str(Path(evidence_path).resolve()),
-            'evidence_sha256': sha256(evidence_path), 'prior_journal_sha256': evidence['journal_sha256']})
+            'evidence_sha256': sha256(evidence_path), 'prior_journal_sha256': evidence['journal_sha256'],
+            'run_id': last['case']['run_id'] if recovery_delta is not None else None,
+            'run_delta': recovery_delta})
     return {'status': 'reconciled', 'replayed_runs': 0}
 
 
@@ -441,7 +464,7 @@ def share_pair(plan_path, pair, review_path, *, repo=REPO, transfer=catalog_deli
             append(journal, {'kind': 'pair_shared', 'pair': pair, 'receipt': str(receipt_path),
                 'receipt_sha256': sha256(receipt_path), 'cleanup': cleanup, 'recovered_finalization': True})
             return {'pair': pair, 'status': 'shared_restored_extracted', 'recovered_finalization': True}
-        manifest = catalog_share.verify_public(workspace / 'public')
+        manifest = catalog_share.verify_public(workspace / 'public', exact=True)
         if manifest['plan_sha256'] != sha256(plan_path) or manifest['pair'] != pair:
             raise ValueError('Staging belongs to another plan or pair')
         for name, original in manifest['original_inventory'].items():
@@ -452,15 +475,15 @@ def share_pair(plan_path, pair, review_path, *, repo=REPO, transfer=catalog_deli
         public_bytes = sum(item['bytes'] for item in catalog_share.inventory(workspace / 'public').values())
         # Include ZIP overhead and both assembled and split copies when needed.
         zip_bound = public_bytes + public_bytes // 100 + 1024 * 1024
-        needed = public_bytes + zip_bound * (2 if package_dir.exists() else 4)
+        try:
+            catalog_delivery.verify_package(package_dir)
+            package_complete = True
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+            package_complete = False
+        needed = public_bytes + zip_bound * (2 if package_complete else 4)
         if shutil.disk_usage(workspace).free < needed:
             raise ValueError('Insufficient physical space for package/download/restore; no upload attempted')
-        if not package_dir.exists():
-            asset = catalog_delivery.package(workspace / 'public', package_dir, review_path)
-        else:
-            asset = read(package_dir / 'pair.manifest.json')
-            if asset['review_sha256'] != sha256(review_path) or asset['file_inventory'] != catalog_share.inventory(workspace / 'public'):
-                raise ValueError('Existing package differs from the current review')
+        asset = catalog_delivery.package(workspace / 'public', package_dir, review_path)
         if not (workspace / 'before-upload-extraction.json').exists():
             catalog_delivery.offline_extract(workspace / 'public', workspace / 'before-upload-extraction.json')
         urls = transfer(package_dir, f'catalog-comparison-v2-pair-{pair:03d}', plan['execution']['github_target_commit'])

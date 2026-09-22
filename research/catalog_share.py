@@ -7,6 +7,7 @@ This is intentionally not a general publication service or cross-Run database.
 import argparse
 from collections import Counter
 from contextlib import closing
+from datetime import datetime, timezone
 import hashlib
 import io
 import json
@@ -16,6 +17,7 @@ import re
 import shutil
 import sqlite3
 import stat
+import uuid
 import zipfile
 
 from research.catalog_allocation_review import inspect_run, read, sha256, write_new
@@ -55,6 +57,26 @@ def files(root):
 
 def inventory(root):
     return {rel: {'bytes': p.stat().st_size, 'sha256': sha256(p)} for rel, p in files(root)}
+
+
+def quarantine(path, allowed_root, operation, context):
+    """Keep an incomplete owned attempt and its inventory before a fresh retry."""
+    path, allowed_root = Path(path), Path(allowed_root).resolve()
+    if path.is_symlink() or path.is_junction():
+        raise ValueError('Cannot quarantine a linked workspace')
+    path = path.resolve()
+    target = path.with_name(path.name + '.incomplete-' + uuid.uuid4().hex)
+    if path == allowed_root or not path.is_relative_to(allowed_root) or not target.is_relative_to(allowed_root):
+        raise ValueError('Quarantine must remain inside the designated staging root')
+    saved = inventory(path)  # also rejects nested links/junctions before moving
+    receipt = target.with_name(target.name + '.json')
+    write_new(receipt, {'kind': 'incomplete_sharing_attempt_retained', 'operation': operation,
+        'at': datetime.now(timezone.utc).isoformat(), 'reason': 'completion_manifest_missing_or_incomplete',
+        'source': str(path), 'retained_at': str(target), 'files': saved, **context})
+    native(path).rename(native(target))
+    if inventory(target) != saved:
+        raise ValueError('Quarantined attempt changed during preservation')
+    return target
 
 
 def exclusion(relative):
@@ -304,13 +326,17 @@ def safe_member(name):
     return p
 
 
-def verify_public(root):
+def verify_public(root, *, exact=False):
     manifest = read(native(Path(root) / 'MANIFEST.json'))
     for item in manifest['files']:
         safe_member(item['path'])
         path = native(Path(root) / item['path'])
         if sha256(path) != item['sha256'] or path.stat().st_size != item['bytes']:
             raise ValueError('Public file differs from reviewed manifest')
+    if exact:
+        expected = {item['path'] for item in manifest['files']}
+        if len(expected) != len(manifest['files']) or set(inventory(root)) != expected | {'MANIFEST.json'}:
+            raise ValueError('Public directory must contain exactly its manifest inventory')
     return manifest
 
 

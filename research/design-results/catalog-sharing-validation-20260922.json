@@ -256,7 +256,8 @@
     "artifacts/catalog-sharing-20260922/restoration-receipt.json": "aa059edbbc581a9960858fd17060087e0aa338a1ad47578a19bae41bf6287855",
     "artifacts/catalog-sharing-20260922/public-review.json": "036c4d592b89b0021fa24dd935d180a53ec9baf9f8373127bb35e9a4eb8738d5",
     "artifacts/catalog-sharing-20260922/release-readback.json": "e024d288071fbc31c13f5f5b8fe23b428bba658e68f556c3493420dce6740dce",
-    "artifacts/catalog-sharing-20260922/cleanup-receipt.json": "336cc21a05ddbd284cf84af56e9141fef6ff4e596bf93db3dd0663807b6588e2"
+    "artifacts/catalog-sharing-20260922/cleanup-receipt.json": "336cc21a05ddbd284cf84af56e9141fef6ff4e596bf93db3dd0663807b6588e2",
+    "artifacts/catalog-sharing-20260922/public-bootstrap-receipt.json": "88a64bbcee9ffe16d4fe5db9c100aa2a34fe1167104076683e1dc58536a3dfd3"
   },
   "code_hashes": {
     "research/catalog_share.py": "cec4b5f8b411730c55bad8fadb92faa0212760d3be6864567084973f710dd8aa",
@@ -298,5 +299,12 @@
     "new_pr_created": false,
     "push_status": "Automatic approval review denied: Pushing to a remote is denied; do it manually.",
     "ci_run_for_new_code": false
+  },
+  "public_zip_only_bootstrap": {
+    "asset_sha256": "933f0e2e13ed7d897b8c66690eff18f592672b31b7ae7ad65e3daba88c1a8646",
+    "files_verified": 464,
+    "hashes_match": true,
+    "reader_loaded_from_public_zip": true,
+    "workspace_reader_used": false
   }
 }

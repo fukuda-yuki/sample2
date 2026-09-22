@@ -28,6 +28,10 @@ evaluation results, browser/HTTP evidence, PNGs/traces and a standard-library
 reader. It needs one ZIP part; all four Release assets are below 1 GiB.
 The tag anchors accepted base `b005f55`; the exact newly added reader bytes are
 embedded and hashed in the bundle. It is not an execution-plan freeze.
+The Release notes also provide a tested bootstrap using only the downloaded ZIP
+and its manifest; it restored all 464 files without the unpublished checkout.
+The new code/index commits remain local because automatic approval review denied
+Git push. No new PR or CI is claimed; the public data assets are already available.
 
 `MANIFEST.json` enumerates the selected Runs' **1,424 original files**, included
 public hashes, **972 exclusions**, and **34 transformed files**. All 1,424 original

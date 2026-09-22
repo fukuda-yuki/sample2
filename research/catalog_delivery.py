@@ -16,7 +16,7 @@ import zipfile
 
 from outer.harness.security import child_environment
 from research.catalog_allocation_review import read, sha256, write_new
-from research.catalog_share import files, inventory, native, restore, safe_member, scan, verify_public
+from research.catalog_share import files, inventory, native, quarantine, restore, safe_member, scan, verify_public
 
 REPOSITORY = 'fukuda-yuki/sample2'
 PART_BYTES = 2**30
@@ -31,6 +31,21 @@ def package(public, output, review, *, part_bytes=PART_BYTES):
         raise ValueError('Publication review must cover exactly these bytes, images, licenses and exclusions')
     if not 1 <= part_bytes <= PART_BYTES:
         raise ValueError('Parts must be at most 1 GiB')
+    if output.exists():
+        try:
+            read(output / 'pair.manifest.json')
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+            if (output / 'publication-intent.json').exists():
+                raise ValueError('Publication intent needs reconciliation; cannot recreate package')
+            quarantine(output, output.parent, 'package',
+                {'plan_sha256': manifest.get('plan_sha256'), 'pair': manifest.get('pair'),
+                 'review_sha256': sha256(review)})
+        else:
+            asset = verify_package(output)
+            if (asset['review_sha256'] != sha256(review) or asset['file_inventory'] != current
+                    or asset.get('plan_sha256') != manifest.get('plan_sha256') or asset.get('pair') != manifest.get('pair')):
+                raise ValueError('Existing package differs from the current review')
+            return asset
     output.mkdir(parents=True, exist_ok=False)
     scan(public, output / 'scan.json')
     if read(output / 'scan.json')['pass'] is not True:
@@ -58,8 +73,28 @@ def package(public, output, review, *, part_bytes=PART_BYTES):
         'parts': parts, 'review_sha256': sha256(review), 'scan_sha256': sha256(output / 'scan.json'),
         'plan_sha256': manifest.get('plan_sha256'), 'pair': manifest.get('pair'),
         'selected_runs': manifest.get('selected_runs'), 'attachment_count': len(parts) + 3}
-    write_new(output / 'pair.manifest.json', asset)
     shutil.copyfile(review, output / 'public-review.json')
+    # Completion is written last. A directory, scan or partial ZIP is not a
+    # package. A killed writer's incomplete manifest is quarantined on retry.
+    write_new(output / 'pair.manifest.json', asset)
+    return asset
+
+
+def verify_package(output):
+    output = Path(output)
+    asset = read(output / 'pair.manifest.json')
+    if (sha256(output / 'public-review.json') != asset['review_sha256']
+            or sha256(output / 'scan.json') != asset['scan_sha256']
+            or read(output / 'scan.json').get('pass') is not True
+            or read(output / 'public-review.json').get('publication_approved') is not True
+            or read(output / 'public-review.json').get('reviewed_inventory') != asset['file_inventory']):
+        raise ValueError('Review/scan changed after packaging')
+    for item in [{'name': asset['asset'], 'bytes': asset['bytes'], 'sha256': asset['sha256']}, *asset['parts']]:
+        if len(safe_member(item['name']).parts) != 1:
+            raise ValueError('Unsafe package asset name')
+        path = output / item['name']
+        if path.stat().st_size != item['bytes'] or sha256(path) != item['sha256']:
+            raise ValueError('Local package changed')
     return asset
 
 
@@ -158,7 +193,7 @@ def publish(package_dir, tag, target_commit):
     package_dir = Path(package_dir).resolve()
     if not tag.startswith('catalog-comparison-v2-pair-') or not tag.rsplit('-', 1)[-1].isdigit():
         raise ValueError('Expected the fixed cohort/pair release tag')
-    asset = read(package_dir / 'pair.manifest.json')
+    asset = verify_package(package_dir)
     expected = {part['name']: part for part in asset['parts']}
     for name in ('pair.manifest.json', 'public-review.json', 'scan.json'):
         path = package_dir / name

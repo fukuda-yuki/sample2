@@ -4,12 +4,15 @@ Only the dispatch and remote transport boundaries are synthetic. No model,
 evaluator, provider credential or GitHub write is used by this suite.
 """
 from copy import deepcopy
+import json
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from outer.harness import browser_cleanup, evaluate, runtime, util
 from research import catalog_delivery as delivery, catalog_execution as execution, catalog_share as sharing, catalog_storage as storage
 from research.catalog_allocation_review import read, sha256, write_new
 from research.catalog_confirmatory import allocation
@@ -136,6 +139,137 @@ class ExecutionTests(unittest.TestCase):
             execution.recover(self.plan_path, evidence, repo=self.repo, verify=lambda *_: {})
         self.assertEqual(len(self.sent), 1)
 
+    def cleanup_pause(self):
+        def dispatch(*args):
+            result = self.dispatch(*args)
+            root = self.batch / self.sent[-1]
+            out = root / 'evaluations/attempt-1-test'
+            write_new(out / 'evaluation.json', {'verdict': 'fail', 'original': True})
+            write_new(root / 'frozen/source.json', {'original': True})
+            write_new(root / 'usage/raw/request.json', {'original': True})
+            browser_cleanup.register(out, 'test-instance', 'container', 's2-browser-' + 'a' * 32, 'id')
+            with patch.object(runtime, 'docker', side_effect=RuntimeError('injected daemon failure')):
+                self.assertFalse(browser_cleanup.cleanup(out)['confirmed'])
+            return {**result, 'stops': ['browser_cleanup_failed']}
+        self.execute(dispatch=dispatch)
+        root = self.batch / self.sent[-1]
+        out = root / 'evaluations/attempt-1-test'
+        with patch.object(runtime, 'docker', return_value=subprocess.CompletedProcess([], 0, '', '')):
+            self.assertTrue(browser_cleanup.cleanup(out)['confirmed'])
+        return root, [{'kind': 'browser_cleanup', 'directory': 'evaluations/attempt-1-test'}]
+
+    def test_real_cleanup_receipts_append_then_only_unsent_slot_resumes(self):
+        root, operations = self.cleanup_pause()
+        seal = self.batch / '_control' / (root.name + '.seal.json')
+        old_seal = seal.read_bytes()
+        execution.recover(self.plan_path, self.recovery(operations=operations), repo=self.repo, verify=lambda *_: {})
+        delta = execution.events(self.journal)[-1]['run_delta']
+        index = 'evaluations/attempt-1-test/browser-cleanup-attempts/index.jsonl'
+        self.assertGreater(delta['changes'][index]['appended_byte_range'][0], 0)
+        self.assertNotEqual(delta['changes'][index]['before']['sha256'], delta['changes'][index]['after']['sha256'])
+        self.assertEqual(seal.read_bytes(), old_seal)
+        self.execute()
+        self.assertEqual(self.sent, [s['run_id'] for s in self.plan['slots'][:2]])
+
+    def test_cleanup_additions_need_declared_operation(self):
+        self.cleanup_pause()
+        with self.assertRaisesRegex(ValueError, 'Preserved result'):
+            execution.recover(self.plan_path, self.recovery(), repo=self.repo, verify=lambda *_: {})
+
+    def test_cleanup_does_not_allow_original_edits_or_unrelated_additions(self):
+        root, operations = self.cleanup_pause()
+        for name in ('frozen/source.json', 'usage/raw/request.json',
+                     'evaluations/attempt-1-test/evaluation.json',
+                     'evaluations/attempt-1-test/browser-cleanup-attempts/index.jsonl'):
+            with self.subTest(name=name):
+                path = root / name
+                original = path.read_bytes()
+                path.write_bytes(original.replace(b'original', b'modified') if 'index' not in name else b'{}\n' + original)
+                with self.assertRaisesRegex(ValueError, 'Preserved result'):
+                    execution.recover(self.plan_path, self.recovery(operations=operations), repo=self.repo, verify=lambda *_: {})
+                path.write_bytes(original)
+        write_new(root / 'evaluations/attempt-1-test/browser-cleanup-attempts/unrelated.json', {})
+        with self.assertRaisesRegex(ValueError, 'Unexpected cleanup'):
+            execution.recover(self.plan_path, self.recovery(operations=operations), repo=self.repo, verify=lambda *_: {})
+
+    def test_later_recovery_protects_previously_accepted_additions(self):
+        root, operations = self.cleanup_pause()
+        execution.recover(self.plan_path, self.recovery(operations=operations), repo=self.repo, verify=lambda *_: {})
+        delta = execution.events(self.journal)[-1]['run_delta']
+        execution.append(self.journal, {'kind': 'pause', 'reason': 'storage'})
+        result = root / next(n for n in delta['changes'] if n.endswith('-result.json'))
+        old = result.read_bytes()
+        result.write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'Preserved result'):
+            execution.recover(self.plan_path, self.recovery(), repo=self.repo, verify=lambda *_: {})
+        result.write_bytes(old)
+        execution.recover(self.plan_path, self.recovery(), repo=self.repo, verify=lambda *_: {})
+
+    def evaluation_pause(self):
+        def dispatch(*args):
+            result = self.dispatch(*args)
+            root = self.batch / self.sent[-1]
+            write_new(root / 'frozen/source.json', {'original': True})
+            artifact = util.artifact_hash(root / 'frozen')
+            write_new(root / 'snapshot.json', {'artifact_sha256': artifact})
+            write_new(root / 'condition.json', {'evaluation': {'evaluation_version': '1.2.0',
+                'spec_sha256': 'a' * 64, 'evaluator_sha256': 'b' * 64}})
+            self.evaluation_record(root, 1)
+            return {**result, 'stops': ['evaluation_recovery_required']}
+        self.execute(dispatch=dispatch)
+        return self.batch / self.sent[-1]
+
+    def evaluation_record(self, root, sequence):
+        directory = f'evaluations/fault-{sequence:03d}-synthetic'
+        record = {'run_id': root.name, 'sequence': sequence, 'directory': directory,
+            'scoring_state': 'evaluator_fault', 'evaluation_version': '1.2.0',
+            'spec_sha256': 'a' * 64, 'evaluator_sha256': 'b' * 64,
+            'artifact_sha256_outer': util.artifact_hash(root / 'frozen')}
+        write_new(root / directory / 'evaluation.json', {'synthetic': True})
+        evaluate._write_record(root / directory, record)
+        evaluate._append_index(root, record)
+        write_new(root / f'evaluation-work/{sequence:03d}/evidence.json', {'synthetic': True})
+        log = root / f'evidence/scoring-{sequence:03d}-stdout.log'
+        log.parent.mkdir(exist_ok=True)
+        log.write_text('synthetic subprocess output')
+        return {'kind': 'evaluation', 'directory': directory, 'sequence': sequence,
+            'authorization_reference': 'Synthetic record writer only; no real evaluation authorized'}
+
+    def test_evaluation_recovery_keeps_original_attempt_and_append_prefix(self):
+        root = self.evaluation_pause()
+        original = sharing.inventory(root)
+        operation = self.evaluation_record(root, 2)
+        execution.recover(self.plan_path, self.recovery(operations=[operation]), repo=self.repo, verify=lambda *_: {})
+        for name, item in original.items():
+            if name != 'evaluations/index.jsonl':
+                self.assertEqual(sharing.inventory(root)[name], item)
+        self.execute()
+        self.assertEqual(self.sent, [s['run_id'] for s in self.plan['slots'][:2]])
+
+    def test_evaluation_recovery_refuses_rewritten_index_or_changed_conditions(self):
+        root = self.evaluation_pause()
+        operation = self.evaluation_record(root, 2)
+        index = root / 'evaluations/index.jsonl'
+        original = index.read_bytes()
+        index.write_bytes(original.replace(b'evaluator_fault', b'scored', 1))
+        with self.assertRaisesRegex(ValueError, 'append-only'):
+            execution.recover(self.plan_path, self.recovery(operations=[operation]), repo=self.repo, verify=lambda *_: {})
+        index.write_bytes(original)
+        record_path = root / operation['directory'] / 'record.json'
+        record_path.write_text(record_path.read_text().replace('b' * 64, 'c' * 64))
+        with self.assertRaisesRegex(ValueError, 'fixed artifact'):
+            execution.recover(self.plan_path, self.recovery(operations=[operation]), repo=self.repo, verify=lambda *_: {})
+
+    def test_evaluation_recovery_retains_two_rescore_limit(self):
+        root = self.evaluation_pause()
+        for sequence in (2, 3):
+            operation = self.evaluation_record(root, sequence)
+            execution.recover(self.plan_path, self.recovery(operations=[operation]), repo=self.repo, verify=lambda *_: {})
+            execution.append(self.journal, {'kind': 'pause', 'reason': 'run_fault'})
+        operation = self.evaluation_record(root, 4)
+        with self.assertRaisesRegex(ValueError, 'two-rescore'):
+            execution.recover(self.plan_path, self.recovery(operations=[operation]), repo=self.repo, verify=lambda *_: {})
+
     def test_concurrent_driver_and_incomplete_journal_refused(self):
         with execution.exclusive(self.batch / '_control'):
             with self.assertRaises(OSError):
@@ -210,6 +344,138 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(sharing.inventory(self.batch / name), saved)
         self.execute()
         self.assertEqual(self.sent, [s['run_id'] for s in self.plan['slots']])
+
+    def finish_pair(self, workspace, review=None):
+        review = review or self.review(workspace)
+        with patch.object(sharing, 'known_secret', return_value=b'synthetic-unlogged-key'):
+            execution.share_pair(self.plan_path, 1, review, repo=self.repo,
+                transfer=self.transport, fetch=lambda source, target: shutil.copyfile(source, target))
+        self.execute()
+        self.assertEqual(self.sent, [s['run_id'] for s in self.plan['slots']])
+
+    def test_interrupted_public_copy_is_preserved_and_same_pair_can_finish(self):
+        calls = []
+        original_copy = sharing.public_bytes
+        def interrupted(source):
+            calls.append(source)
+            if len(calls) == 2:
+                raise OSError('injected copy interruption before manifest')
+            return original_copy(source)
+        with patch.object(sharing, 'public_bytes', side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, 'copy interruption'):
+                self.execute()
+        workspace = execution.pair_workspace(self.plan, 1, self.repo)
+        partial = sharing.inventory(workspace)
+        self.assertNotIn('public/MANIFEST.json', partial)
+        originals = {n: sharing.inventory(self.batch / n) for n in self.sent}
+        self.assertEqual(self.execute()['reason'], 'pair_publication_required')
+        self.assertEqual(len(self.sent), 2)
+        retained = next(p for p in workspace.parent.glob('pair-001.incomplete-*') if p.is_dir())
+        self.assertEqual(sharing.inventory(retained), partial)
+        receipt = read(retained.with_name(retained.name + '.json'))
+        self.assertEqual(receipt['files'], partial)
+        self.assertEqual(receipt['operation'], 'stage')
+        self.finish_pair(workspace)
+        self.assertTrue(retained.exists())
+        for n, saved in originals.items():
+            self.assertEqual(sharing.inventory(self.batch / n), saved)
+
+    def test_failed_scan_is_retained_then_same_review_retries_without_dispatch(self):
+        self.execute()
+        workspace = execution.pair_workspace(self.plan, 1, self.repo)
+        review = self.review(workspace)
+        originals = {n: sharing.inventory(self.batch / n) for n in self.sent}
+        with patch.object(sharing, 'known_secret', return_value=None), patch.object(delivery, 'publish') as publish:
+            with self.assertRaisesRegex(ValueError, 'scan failed'):
+                execution.share_pair(self.plan_path, 1, review, repo=self.repo, transfer=publish)
+            publish.assert_not_called()
+        partial = sharing.inventory(workspace / 'package')
+        self.assertFalse(read(workspace / 'package/scan.json')['pass'])
+        self.assertNotIn('pair.manifest.json', partial)
+        self.finish_pair(workspace, review)
+        retained = next(p for p in workspace.glob('package.incomplete-*') if p.is_dir())
+        self.assertEqual(sharing.inventory(retained), partial)
+        for n, saved in originals.items():
+            self.assertEqual(sharing.inventory(self.batch / n), saved)
+
+    def test_interrupted_zip_is_retained_then_same_pair_finishes(self):
+        self.execute()
+        workspace = execution.pair_workspace(self.plan, 1, self.repo)
+        review = self.review(workspace)
+        original_write = delivery.zipfile.ZipFile.write
+        calls = []
+        def interrupted(archive, *args, **kwargs):
+            calls.append(args)
+            if len(calls) == 2:
+                raise OSError('injected ZIP interruption')
+            return original_write(archive, *args, **kwargs)
+        with patch.object(sharing, 'known_secret', return_value=b'synthetic-unlogged-key'), \
+                patch.object(delivery.zipfile.ZipFile, 'write', interrupted), patch.object(delivery, 'publish') as publish:
+            with self.assertRaisesRegex(OSError, 'ZIP interruption'):
+                execution.share_pair(self.plan_path, 1, review, repo=self.repo, transfer=publish)
+            publish.assert_not_called()
+        partial = sharing.inventory(workspace / 'package')
+        self.assertIn('pair.zip', partial)
+        self.assertNotIn('pair.manifest.json', partial)
+        self.assertEqual(self.execute()['reason'], 'pair_publication_required')
+        self.assertEqual(len(self.sent), 2)
+        self.finish_pair(workspace, review)
+        retained = next(p for p in workspace.glob('package.incomplete-*') if p.is_dir())
+        self.assertEqual(sharing.inventory(retained), partial)
+
+    def test_truncated_completion_manifest_is_quarantined_on_retry(self):
+        self.execute()
+        workspace = execution.pair_workspace(self.plan, 1, self.repo)
+        review = self.review(workspace)
+        package = workspace / 'package'
+        package.mkdir()
+        (package / 'pair.manifest.json').write_text('{"incomplete":')
+        self.finish_pair(workspace, review)
+        retained = next(p for p in workspace.glob('package.incomplete-*') if p.is_dir())
+        self.assertEqual((retained / 'pair.manifest.json').read_text(), '{"incomplete":')
+
+    def test_completed_package_is_verified_before_reuse_and_upload(self):
+        self.execute()
+        workspace = execution.pair_workspace(self.plan, 1, self.repo)
+        review = self.review(workspace)
+        with patch.object(sharing, 'known_secret', return_value=b'synthetic-unlogged-key'):
+            asset = delivery.package(workspace / 'public', workspace / 'package', review)
+        with patch.object(delivery, 'scan', side_effect=AssertionError('Completed package should be reused')):
+            self.assertEqual(delivery.package(workspace / 'public', workspace / 'package', review), asset)
+        (workspace / 'package/pair.zip').write_bytes(b'corrupt')
+        with patch.object(delivery, 'publish') as publish:
+            with self.assertRaisesRegex(ValueError, 'Local package changed'):
+                execution.share_pair(self.plan_path, 1, review, repo=self.repo, transfer=publish)
+            publish.assert_not_called()
+        self.assertFalse(list(workspace.glob('package.incomplete-*')))
+        self.assertEqual(len(self.sent), 2)
+
+    def test_incomplete_package_requires_full_creation_space_before_retry(self):
+        self.execute()
+        workspace = execution.pair_workspace(self.plan, 1, self.repo)
+        review = self.review(workspace)
+        write_new(workspace / 'package/scan.json', {'pass': False})
+        size = sum(item['bytes'] for item in sharing.inventory(workspace / 'public').values())
+        zip_bound = size + size // 100 + 1024 * 1024
+        disk = shutil.disk_usage(workspace)._replace(free=size + 3 * zip_bound)
+        with patch.object(shutil, 'disk_usage', return_value=disk), patch.object(delivery, 'publish') as publish:
+            with self.assertRaisesRegex(ValueError, 'Insufficient physical space'):
+                execution.share_pair(self.plan_path, 1, review, repo=self.repo, transfer=publish)
+            publish.assert_not_called()
+        self.assertEqual(len(self.sent), 2)
+        self.assertFalse(read(workspace / 'package/scan.json')['pass'])
+
+    def test_completed_public_copy_requires_exact_inventory_and_unchanged_originals(self):
+        self.execute()
+        workspace = execution.pair_workspace(self.plan, 1, self.repo)
+        self.assertEqual(execution.prepare_pair(self.plan_path, 1, self.repo), workspace)
+        write_new(workspace / 'public/unexpected.json', {})
+        with self.assertRaisesRegex(ValueError, 'exactly'):
+            execution.prepare_pair(self.plan_path, 1, self.repo)
+        (workspace / 'public/unexpected.json').unlink()
+        (self.batch / self.sent[0] / 'manifest.json').write_text('changed')
+        with self.assertRaisesRegex(ValueError, 'Original pair changed'):
+            execution.prepare_pair(self.plan_path, 1, self.repo)
 
     def test_review_change_or_corrupt_download_cannot_release_next_pair(self):
         self.execute()

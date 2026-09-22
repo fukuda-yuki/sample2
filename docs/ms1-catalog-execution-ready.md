@@ -132,6 +132,19 @@ not a mechanism for inventing a successful Run or retrying a lost request.
 
 ## Verification boundary
 
+The final research suite passed **128/128 tests**, including 15 execution tests;
+this is one current suite run, not a sum of historical test reports. Actual
+anonymous re-download verified all four existing Release assets, restored 464
+public files and reproduced 81 saved requests. All 6,098 original pilot files
+matched their prior hashes at the final check. Failed probes and their corrected
+reruns remain separately listed in the preparation receipt.
+
+The frozen plan SHA-256 is
+`28f6863a2e4f73b8c397e48cb019e258772f9f6dec43f7b822b2682cb183763e`.
+Its implementation source commit is `2b6b5be51d150a7c299a1cb87ed335e0eb8481cd`;
+all 40 frozen source files match both the committed bytes and a relocated public
+copy. The real unapproved execute command was refused before cohort creation.
+
 Fault-injection tests use synthetic dispatch and controlled remote transport at
 the two external boundaries; the journal, storage, packaging, restoration and
 cleanup paths are the production implementations. Real existing pilot evidence

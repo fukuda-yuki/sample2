@@ -3,7 +3,8 @@
 The user confirmed on 2026-09-22 that paid overage is disabled. Monetary limits,
 two-Run dollar reservations and reset horizons are not admission conditions.
 API unavailability pauses acquisition; recovery does not replace failed slots.
-Storage forecasts are not bounds. This check is not wired to a launcher.
+Storage forecasts are not bounds. catalog_execution applies this check before
+each dispatched slot and retains the independent approval and journal gates.
 """
 import argparse
 from datetime import datetime, timezone, timedelta
@@ -59,7 +60,7 @@ def decide(record, now=None):
         'blocking_reasons': reasons, 'required_additional_local_bytes': required,
         'monetary_gate_applied': False,
         'quota_policy': 'user_confirmed_no_paid_overage_pause_on_unavailability',
-        'launcher_integration': 'not_implemented', 'model_called': False,
+        'launcher_integration': 'research.catalog_execution', 'model_called': False,
         'new_allocation_created': False, 'account_rotated': False,
         'completion_guaranteed': False, 'spending_cap_introduced': False,
         'reservation_risk': 'Pilot-based demand can be exceeded. Pause on quota/storage failure, preserve partial and uncertain slots, never replace or switch models.'}

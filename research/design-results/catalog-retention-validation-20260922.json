@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "kind": "accepted_completed_run_retention_preparation",
+  "at": "2026-09-22T08:34:48.153134+00:00",
+  "source_cohort": "runs/catalog-technical-pilot-20260920",
+  "probe_on_owned_copies_only": true,
+  "original_files_verified": 6098,
+  "originals_unchanged": true,
+  "method": "NTFS compression of completed Run and referenced archive-package directories; after generation/evaluation and owned network cleanup, never on a future live Run parent.",
+  "original_logical_bytes_deleted": false,
+  "model_calls": 0,
+  "evaluator_calls": 0,
+  "historical_archive_recreated": false,
+  "compression_content_hashes_unchanged": true,
+  "logical_bytes": 1855399176,
+  "stored_bytes_before": 1855399176,
+  "stored_bytes_after": 1272881404,
+  "restored_files": 589,
+  "archive_restoration_verified": true,
+  "reference_640_runs_logical_bytes": 296863868160,
+  "reference_640_runs_stored_bytes": 203661024640,
+  "one_pair_temporary_reference_bytes": 4294567204,
+  "reference_640_runs_plus_temporary_bytes": 207955591844,
+  "compressed_sqlite_readback": {
+    "databases": 4,
+    "requests": 218,
+    "copies_and_original_hashes_match": true
+  },
+  "owned_probe_copies_removed": true,
+  "free_bytes_after_probes": 293700046848,
+  "local_evidence": {
+    "artifacts/catalog-execution-preparation-20260922/retention-probe-01/validation.json": "15b2c3cb67037b4850c427f3abee01daf82e6677a7c44a1061f91af6467438ef",
+    "artifacts/catalog-execution-preparation-20260922/retention-probe-01/cleanup.json": "b2d3fafbff106d7d37a3ee18e1bef1e72b7fc435319888c48c6b5b40b75ef36d",
+    "artifacts/catalog-execution-preparation-20260922/retention-db-probe-02/validation.json": "79a95e11d605c9b35df94b3bb607ae820ab28a1d2c049aa85411541b26331b3e",
+    "artifacts/catalog-execution-preparation-20260922/retention-db-probe-02/cleanup.json": "5eeb07f529f5d293d8ba0588188cbc26435cd66359bfb647ee37dd24c9bf0316"
+  },
+  "failed_probe_retained": {
+    "path": "artifacts/catalog-execution-preparation-20260922/retention-db-probe-01",
+    "result": "Read-only query attempted an assumed otel_requests table that does not exist. No original mutation; corrected rerun uses the repository SQL over raw_records."
+  },
+  "limitations": "GetCompressedFileSizeW counts file storage, not filesystem metadata. Four historical Runs are a planning reference, not a compression or future size guarantee. Each new dispatch still checks actual free space; compression runs only after generation/evaluation stops.",
+  "official_references": [
+    "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/compact",
+    "https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getcompressedfilesizew"
+  ]
+}

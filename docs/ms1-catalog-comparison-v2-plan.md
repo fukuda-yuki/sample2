@@ -1,5 +1,10 @@
 # MS1 catalog comparison v2: estimate effects within verified resources
 
+The later [execution preparation](ms1-catalog-execution-ready.md) adopts and fixes
+320 pairs under the clarified resource policy, while retaining this document and
+its unallocated machine plan as design history. Scientific comparisons below
+remain applicable. Dispatch requires separate approval of the new frozen plan.
+
 **Recommendation: one fixed, resource-bounded paired comparison whose primary
 outputs are total-token and all-29-pass-rate differences, their uncertainty,
 and descriptive behavior. No Run count is adopted yet.** Quality superiority

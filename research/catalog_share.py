@@ -1,4 +1,4 @@
-"""Bounded first-pair sharing rehearsal. No model, evaluator, upload or deletion.
+"""Bounded allocated-pair sharing. No model, evaluator, upload or deletion.
 
 Stage explicit evidence, review a new public copy, then package only reviewed
 bytes. Restore checks every member before writing into a fresh directory.
@@ -155,24 +155,43 @@ def public_bytes(source):
     return raw
 
 
-def stage(repo, destination):
+def stage(repo, destination, *, plan_path=None, pair=1):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if destination.exists() or destination.is_relative_to(repo / 'runs'):
         raise ValueError('Use a new staging directory outside original Runs')
-    plan = read(repo / PLAN)
-    if [s['run_id'] for s in plan['slots'][:2]] != list(RUNS):
-        raise ValueError('Expected the first complete randomized pilot pair')
-    before = {run: inventory(repo / COHORT / run) for run in RUNS}
+    plan_path = Path(plan_path or repo / PLAN).resolve()
+    plan = read(plan_path)
+    if type(pair) is not int or pair < 1:
+        raise ValueError('Positive pair number required')
+    selected = plan['slots'][(pair - 1) * 2:pair * 2]
+    if len(selected) != 2 or {s['condition'] for s in selected} != {'catalog-compact', 'catalog-expanded'}:
+        raise ValueError('Select one allocated adjacent pair, including both conditions')
+    cohort_path = Path(plan['runs_dir'])
+    cohort_path = (repo / cohort_path).resolve()
+    if not cohort_path.is_relative_to(repo / 'runs'):
+        raise ValueError('Original cohort must be below the repository runs directory')
+    cohort = cohort_path.relative_to(repo).as_posix()
+    runs = [s['run_id'] for s in selected]
+    for name in runs:
+        if len(safe_member(name).parts) != 1:
+            raise ValueError('Run identity must be a single path component')
+    before = {run: inventory(cohort_path / run) if (cohort_path / run).is_dir() else {} for run in runs}
     public = destination / 'public'
     public.mkdir(parents=True)
     manifest = {'schema_version': 1, 'kind': 'pilot_first_pair_sharing_rehearsal',
-        'cohort': COHORT, 'selected_runs': list(RUNS), 'selection': 'First randomized pair, selected by slot order, not outcomes.',
+        'cohort': cohort, 'selected_runs': runs, 'assigned_slots': selected,
+        'pair': pair, 'plan_sha256': sha256(plan_path),
+        'selection': 'One adjacent allocated pair, selected by slot order, including failures and missing files.',
         'complete_research_corpus': False, 'model_called': False, 'evaluator_called': False,
         'files': [], 'excluded': [], 'original_inventory': before}
-    for run in RUNS:
-        for relative, source in files(repo / COHORT / run):
-            target = f'{COHORT}/{run}/{relative}'
+    manifest['kind'] = 'catalog_allocated_pair_public_copy'
+    manifest['missing_run_directories'] = [run for run in runs if not (cohort_path / run).is_dir()]
+    for run in runs:
+        for relative, source in files(cohort_path / run) if (cohort_path / run).is_dir() else []:
+            target = f'{cohort}/{run}/{relative}'
             reason = exclusion(relative)
+            if plan.get('execution') and relative == 'state/catalog-access.json':
+                reason = None  # public worker preflight hashes/permissions, not native auth state
             original = before[run][relative]
             if reason:
                 manifest['excluded'].append({'path': target, **original, 'reason': reason})
@@ -186,23 +205,69 @@ def stage(repo, destination):
                 'bytes': len(transformed), 'sha256': sha256(out),
                 'transformation': 'local_home_path_only' if transformed != raw else 'byte_identical'})
     # Read-only tools plus all fixed identities; no evaluator or model entry point.
-    for rel in (PLAN, 'research/__init__.py', 'research/catalog_allocation_review.py',
+    plan_relative = plan_path.relative_to(repo).as_posix()
+    extra = ['research/sharing/PAIR-README.md'] if plan.get('execution') else []
+    # Include the full frozen analysis source and its dependency specification.
+    # Distribution remains explicit: original native state and runtime binaries
+    # are retained locally, with public exclusions enumerated below.
+    if plan.get('execution'):
+        extra += list(plan['execution']['code_hashes'])
+        extra += ['inner/spec/requirements-1.2.0.json']
+        for name in ('launch-receipt.json', 'frozen-plan.json', f'observations-pair-{pair:03d}.json'):
+            path = cohort_path / '_control' / name
+            if path.exists():
+                extra.append(path.relative_to(repo).as_posix())
+        # Actual no-model baseline files needed by the existing observation
+        # reader to independently check the single intervention/common access.
+        probe = (repo / plan['probe']).resolve()
+        if probe.is_relative_to(repo) and probe.exists():
+            for arm in ('catalog-compact', 'catalog-expanded'):
+                baseline = probe / f'MS1-001-{arm}-001'
+                names = ['condition.json', 'state/catalog-access.json',
+                         'inputs/catalog-derived/raw-first.txt', 'usage/raw/started.jsonl']
+                starts = baseline / 'usage/raw/started.jsonl'
+                if starts.exists():
+                    names += ['usage/raw/' + json.loads(line)['request_file'] for line in starts.read_text(encoding='utf-8').splitlines()]
+                for name in names:
+                    safe_member(name)
+                    path = baseline / name
+                    if path.exists():
+                        extra.append(path.relative_to(repo).as_posix())
+    for rel in dict.fromkeys((plan_relative, 'research/__init__.py', 'research/catalog_allocation_review.py',
                 'research/catalog_share.py', 'research/sql/catalog_otel_requests.sql',
-                'inner/spec/requirements.json', 'research/protocols/ms1-catalog-comparison-v2.json'):
+                'inner/spec/requirements.json', *extra)):
         out = public / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         raw = (repo / rel).read_bytes()
-        out.write_bytes(local_paths_redacted(raw))
+        transformed = local_paths_redacted(raw)
+        fixed_source = plan.get('execution', {}).get('code_hashes', {})
+        if plan.get('execution') and (rel == plan_relative or rel in fixed_source) and raw != transformed:
+            raise ValueError('Fixed plan/analysis source must be portable before freezing; no hash-changing redaction')
+        out.write_bytes(transformed)
         manifest['files'].append({'path': rel, 'source_sha256': sha256(repo / rel),
             'bytes': out.stat().st_size, 'sha256': sha256(out),
             'transformation': 'local_home_path_only' if out.read_bytes() != raw else 'byte_identical'})
     for rel, source in files(repo / 'research/sharing'):
+        if rel == 'PAIR-README.md':
+            continue
+        if rel == 'README.md' and plan.get('execution'):
+            source = repo / 'research/sharing/PAIR-README.md'
         out = public / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, out)
         manifest['files'].append({'path': rel, 'source_sha256': sha256(source),
             'bytes': out.stat().st_size, 'sha256': sha256(out), 'transformation': 'byte_identical'})
-    manifest['originals_unchanged'] = all(inventory(repo / COHORT / run) == before[run] for run in RUNS)
+    # The journal distinguishes an absent directory after uncertain dispatch
+    # from an allocated slot that was never sent. Do not infer zero usage.
+    journal_path = cohort_path / '_control/journal.jsonl'
+    if journal_path.exists():
+        rel = 'acquisition-journal.jsonl'
+        out = public / rel
+        out.write_bytes(local_paths_redacted(journal_path.read_bytes()))
+        manifest['files'].append({'path': rel, 'source_sha256': sha256(journal_path),
+            'bytes': out.stat().st_size, 'sha256': sha256(out), 'transformation': 'local_home_path_only'})
+    manifest['originals_unchanged'] = all(
+        (inventory(cohort_path / run) if (cohort_path / run).is_dir() else {}) == before[run] for run in runs)
     if not manifest['originals_unchanged']:
         raise ValueError('Original changed during staging')
     write_new(public / 'MANIFEST.json', manifest)
@@ -240,7 +305,7 @@ def safe_member(name):
 
 
 def verify_public(root):
-    manifest = read(Path(root) / 'MANIFEST.json')
+    manifest = read(native(Path(root) / 'MANIFEST.json'))
     for item in manifest['files']:
         safe_member(item['path'])
         path = native(Path(root) / item['path'])
@@ -308,30 +373,51 @@ def restore(archive_path, asset_manifest, destination):
 
 def extract(root):
     """Use original SQL and normalized totals; never import or score a product."""
-    root = Path(root)
-    verify_public(root)
+    root = native(root)
+    manifest = verify_public(root)
     sql = (root / 'research/sql/catalog_otel_requests.sql').read_text(encoding='utf-8')
     results = []
-    for run in RUNS:
-        run_root = root / COHORT / run
-        reviewed = inspect_run(run_root)
+    for run in manifest.get('selected_runs', RUNS):
+        run_root = root / manifest.get('cohort', COHORT) / run
+        if not (run_root / 'telemetry/monitor.db').exists():
+            results.append({'run_id': run, 'sqlite': None, 'requests': None,
+                'evaluation_attempts': saved_attempts(run_root),
+                'missing_evidence': 'No sealed gateway database; usage remains unknown, not zero.'})
+            continue
+        try:
+            reviewed = inspect_run(run_root)
+        except (FileNotFoundError, KeyError, ValueError, sqlite3.DatabaseError) as exc:
+            results.append({'run_id': run, 'sqlite': None, 'requests': None,
+                'evaluation_attempts': saved_attempts(run_root),
+                'inspection_error_type': type(exc).__name__,
+                'missing_evidence': 'Gateway evidence is incomplete or inconsistent; originals are retained and totals remain unknown.'})
+            continue
         with closing(sqlite3.connect((run_root / 'telemetry/monitor.db').resolve().as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
             db.row_factory = sqlite3.Row
             rows = [dict(r) for r in db.execute(sql)]
         if len(rows) != reviewed['request_spans'] or any(r['run_id'] != run for r in rows):
             raise ValueError('Restored SQL identities differ')
         for key in ('input_tokens', 'output_tokens', 'cache_read_tokens'):
-            if sum(r[key] for r in rows) != reviewed[key]:
+            if reviewed[key] is not None and (any(r[key] is None for r in rows) or sum(r[key] for r in rows) != reviewed[key]):
                 raise ValueError('SQL token projection mismatch')
-        attempts = [json.loads(line) for line in (run_root / 'evaluations/index.jsonl').read_text(encoding='utf-8').splitlines()]
-        for attempt in attempts:
-            evaluation = run_root / attempt['directory'] / 'evaluation.json'
-            if not evaluation.is_file():
-                raise ValueError('An evaluation attempt was lost')
+        attempts = saved_attempts(run_root)
         results.append({'run_id': run, 'sqlite': reviewed, 'requests': rows,
             'evaluation_attempts': [{k: a.get(k) for k in ('sequence','adopted','scoring_state','verdict','quality','directory')} for a in attempts]})
-    return {'kind': 'restored_pilot_offline_extraction_not_reevaluation', 'model_called': False,
+    kind = ('restored_pilot_offline_extraction_not_reevaluation' if manifest.get('kind') == 'pilot_first_pair_sharing_rehearsal'
+            else 'restored_catalog_pair_offline_extraction_not_reevaluation')
+    return {'kind': kind, 'model_called': False,
         'evaluator_called': False, 'human_review': 'not_run', 'runs': results}
+
+
+def saved_attempts(root):
+    root = native(root)
+    path = root / 'evaluations/index.jsonl'
+    attempts = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()] if path.exists() else []
+    for attempt in attempts:
+        directory = safe_member(attempt['directory'])
+        if not (root / directory / 'evaluation.json').is_file():
+            raise ValueError('An evaluation attempt was lost')
+    return attempts
 
 
 def main():
@@ -341,9 +427,11 @@ def main():
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--review', type=Path)
     p.add_argument('--asset-manifest', type=Path)
+    p.add_argument('--plan', type=Path)
+    p.add_argument('--pair', type=int, default=1)
     a = p.parse_args()
     if a.mode == 'stage':
-        stage(a.root, a.out)
+        stage(a.root, a.out, plan_path=a.plan, pair=a.pair)
     elif a.mode == 'scan':
         scan(a.root, a.out)
     elif a.mode == 'pack':

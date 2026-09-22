@@ -170,7 +170,10 @@ def freeze(source, destination, repo=REPO):
     storage = {k: v for k, v in storage.items() if k not in ('checked_at_utc', 'free_bytes')}
     names = set(CODE) | {p.relative_to(repo).as_posix() for p in (repo / 'outer/harness').glob('*.py')}
     names |= {p.relative_to(repo).as_posix() for p in (repo / 'research/sharing/LICENSES').glob('*')}
-    names |= {'outer/__init__.py', 'outer/harness/__init__.py', 'research/__init__.py'}
+    # outer is a namespace package in this checkout; pin package markers only
+    # when present, without inventing a missing file or changing the package.
+    names |= {n for n in ('outer/__init__.py', 'outer/harness/__init__.py', 'research/__init__.py')
+              if (repo / n).is_file()}
     lock_path = profiles.runtime_root(repo, plan['task'], profiles.read(repo, 'runtimes', plan['runtime'])) / 'lock.json'
     import numpy, scipy
     plan['execution'] = {'code_hashes': {n: sha256(repo / n) for n in sorted(names)},

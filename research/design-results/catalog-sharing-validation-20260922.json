@@ -106,10 +106,10 @@
   },
   "checks": {
     "focused_tests_last_attempt": {
-      "executed": 21,
-      "passed": 21,
+      "executed": 22,
+      "passed": 22,
       "failed": 0,
-      "new_tests": 11,
+      "new_tests": 12,
       "previous_allocation_tests_rerun": 10,
       "prior_91_test_suite_rerun": false
     },
@@ -131,6 +131,12 @@
         "sha256": "2e35a2c7dcb7c5f2a8d16691268866bcdb64520feb4b2dd960393d7224552c2c",
         "executed": 21,
         "passed": 21
+      },
+      {
+        "path": "artifacts/catalog-sharing-20260922/tests-04.log",
+        "sha256": "992accb91f9d579911c10c226c46acb83b239c4650cb912be35febe3b6fc0c22",
+        "executed": 22,
+        "passed": 22
       }
     ],
     "actual_admission_record_attempts": [
@@ -203,6 +209,12 @@
       "databases": 4,
       "requests": 218,
       "source_unchanged": true
+    },
+    "admission_cli": {
+      "exit_code": 2,
+      "may_start_pair": false,
+      "receipt_sha256": "25511a43f9887afc5ed4c0679a7db40520aeb03e8938a58110c36805a2f38f0c",
+      "saved_record_wrapper_accepted": true
     }
   },
   "storage": {
@@ -211,7 +223,7 @@
     "future_640_run_retention_reference_bytes": 296863868160,
     "one_pair_temporary_reference_bytes": 4294567204,
     "remaining_after_640_plus_one_pair_temporary_reference_bytes": 1214010844,
-    "basis": "Pilot-based reservation only. All raw originals retained. At most one pair is staged/downloaded/restored at once. Four-Run retained cohort divided by two estimates a pair, including historical archive duplication; two largest Run directories provision scratch. Native-state snapshot growth and future tails remain unbounded.",
+    "basis": "Pilot-based reservation only. All raw originals retained. At most one pair is staged/downloaded/restored at once. Four-Run retained cohort divided by two estimates a pair, including historical archive duplication; two copies of the largest Run directory provision scratch. Native-state snapshot growth and future tails remain unbounded.",
     "reference_is_capacity_guarantee": false,
     "originals_deleted": false,
     "upload_counted_as_local_space_freed": false
@@ -248,8 +260,8 @@
   },
   "code_hashes": {
     "research/catalog_share.py": "cec4b5f8b411730c55bad8fadb92faa0212760d3be6864567084973f710dd8aa",
-    "research/catalog_admission.py": "9b83a3bbe615e654016bc5ae0f530dc9842838f151f06be2b05423cb73af8a07",
-    "research/tests/test_catalog_sharing.py": "1dc7d1031794c5cd470baa66af0006fc5c1542d0a130b2fd4e30f8c0c45baba0"
+    "research/catalog_admission.py": "00e026c23f3294bd14680c94f8c18c1bae060ced9b24d0a11efd974db6fccd5d",
+    "research/tests/test_catalog_sharing.py": "764d6f4d67a505e8fd34fdff77eb1b72ae554393c82b7847a133c57ede0ccee1"
   },
   "owned_staging_cleanup": {
     "kind": "owned_temporary_public_copies_reclaimed_after_verified_release_restore",
@@ -278,5 +290,13 @@
     "failed_scan_records_preserved": true,
     "note": "Only task-created staging public copies removed; free-space differences also include concurrent host activity.",
     "originals_rehashed_unchanged_after_cleanup": true
+  },
+  "delivery": {
+    "branch": "codex/catalog-sharing-readiness",
+    "release_published_and_download_verified": true,
+    "code_pushed": false,
+    "new_pr_created": false,
+    "push_status": "Automatic approval review denied: Pushing to a remote is denied; do it manually.",
+    "ci_run_for_new_code": false
   }
 }

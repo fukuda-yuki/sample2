@@ -131,7 +131,11 @@ def main():
     p.add_argument('--record', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
     a = p.parse_args()
-    write_new(a.out, decide(read(a.record)))
+    saved = read(a.record)
+    result = decide(saved.get('record', saved))
+    write_new(a.out, result)
+    if not result['may_start_pair']:
+        raise SystemExit(2)
 
 
 if __name__ == '__main__':

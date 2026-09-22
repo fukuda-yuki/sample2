@@ -3,6 +3,8 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -161,6 +163,21 @@ class AdmissionTests(unittest.TestCase):
             self.assertFalse(decide(value,self.now)['may_start_pair'])
         self.record['account']['usage']['rolling']['resetsAt'] = None
         self.assertFalse(decide(self.record,self.now)['may_start_pair'])
+
+    def test_cli_saved_record_exits_nonzero_when_launch_is_held(self):
+        self.record['experiment_start_authorized'] = False
+        with tempfile.TemporaryDirectory() as folder:
+            source, output = Path(folder)/'record.json', Path(folder)/'decision.json'
+            write_new(source, {'record':self.record, 'decision':{'historical':True}})
+            result = subprocess.run([sys.executable,'-B','-m','research.catalog_admission',
+                '--record',str(source),'--out',str(output)],capture_output=True,text=True,
+                cwd=Path(__file__).resolve().parents[2])
+            self.assertEqual(result.returncode,2,result.stderr)
+            import json
+            decision = json.loads(output.read_text(encoding='utf-8'))
+            self.assertFalse(decision['may_start_pair'])
+            self.assertIn('experiment_start_not_authorized',decision['blocking_reasons'])
+            self.assertNotIn('account_readback_unsuccessful',decision['blocking_reasons'])
 
 
 if __name__ == '__main__':

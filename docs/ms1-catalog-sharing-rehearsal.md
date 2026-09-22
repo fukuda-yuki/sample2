@@ -73,7 +73,7 @@ actual free-space readings separately because other host activity can change the
 The admission record explicitly counts next-pair retained growth, generation
 scratch, SQLite finalization, public copy, archive, download and restored copy.
 The current pilot-based temporary reference is **4,294,567,204 bytes (4.00 GiB)**:
-one half of full pilot retention per pair, two largest saved Run directories for
+one half of full pilot retention per pair, twice the largest saved Run directory for
 scratch, sealed DB finalization and ZIP overhead. With the complete 640-Run
 retention reference, only **1.13 GiB** remains at this disk snapshot. This is a
 forecast, not an upper bound: future trace/state growth, Docker growth and other
@@ -87,6 +87,15 @@ The [proposed admission record](../research/design-results/catalog-pair-admissio
 and [offline decision helper](../research/catalog_admission.py) leave unknowns
 unknown and currently return `may_start_pair=false`. This helper never dispatches
 a Run and has not been integrated into the acquisition controller.
+
+From the repository root, save a fresh decision to an absent output path:
+
+```powershell
+python -B -m research.catalog_admission --record research/design-results/catalog-pair-admission-20260922.json --out new-admission-decision.json
+```
+
+Exit code **2** means held; the written JSON explains every blocking reason.
+The saved account/disk evidence is historical and must not be reused for dispatch.
 
 1. Immediately before a pair, obtain a successful usage GET and disk readback
    no older than five minutes. Record the actual account's rolling/weekly/monthly
@@ -128,8 +137,8 @@ dispatch, deliberately producing an additional stale-evidence blocker.
 
 ## Validation and remaining acceptance
 
-The latest focused test run passed **21/21**: 11 new sharing/admission checks and
-the prior 10 allocation checks rerun now. Earlier 20-test passes are separately
+The latest focused test run passed **22/22**: 12 new sharing/admission checks and
+the prior 10 allocation checks rerun now. Earlier 20- and 21-test passes are separately
 recorded, not added together. The older 91-test suite was not rerun. A new actual
 read-only four-DB check reconciled 218 request spans without source changes.
 

@@ -68,7 +68,7 @@
       "archive_bytes": 952676996,
       "download_bytes": 952676996,
       "restore_bytes": 927699588,
-      "definition": "Pilot-based reservation only. All raw originals retained. At most one pair is staged/downloaded/restored at once. Four-Run retained cohort divided by two estimates a pair, including historical archive duplication; two largest Run directories provision scratch. Native-state snapshot growth and future tails remain unbounded.",
+      "definition": "Pilot-based reservation only. All raw originals retained. At most one pair is staged/downloaded/restored at once. Four-Run retained cohort divided by two estimates a pair, including historical archive duplication; two copies of the largest Run directory provision scratch. Native-state snapshot growth and future tails remain unbounded.",
       "user_discretionary_reserve_bytes": 0,
       "forecast_not_upper_bound": true,
       "work_temp_docker_volumes": [

@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "kind": "actual_small_public_sharing_and_offline_readiness_review",
+  "recorded_at_utc": "2026-09-22T06:34:57.378991+00:00",
+  "base_commit": "b005f558852bcb9263601ea18ba7ee678c8ff8fb",
+  "release": {
+    "checked_at_utc": "2026-09-22T06:28:20.423244+00:00",
+    "transport": "Anonymous HTTPS GET of public release asset URLs, no GitHub authorization header",
+    "release_id": 393496616,
+    "url": "https://github.com/fukuda-yuki/sample2/releases/tag/catalog-pilot-sharing-20260922",
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/catalog-pilot-first-pair.manifest.json",
+        "digest": "sha256:1efdc35fee5eefcbe46fe4e57d28197ed91ebf63c545c1da3288fa748e20b7da",
+        "id": 580733176,
+        "name": "catalog-pilot-first-pair.manifest.json",
+        "size": 112028,
+        "download_sha256": "1efdc35fee5eefcbe46fe4e57d28197ed91ebf63c545c1da3288fa748e20b7da",
+        "download_bytes": 112028,
+        "local_source_hash_match": true
+      },
+      {
+        "browser_download_url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/catalog-pilot-first-pair.zip",
+        "digest": "sha256:933f0e2e13ed7d897b8c66690eff18f592672b31b7ae7ad65e3daba88c1a8646",
+        "id": 580733177,
+        "name": "catalog-pilot-first-pair.zip",
+        "size": 6634495,
+        "download_sha256": "933f0e2e13ed7d897b8c66690eff18f592672b31b7ae7ad65e3daba88c1a8646",
+        "download_bytes": 6634495,
+        "local_source_hash_match": true
+      },
+      {
+        "browser_download_url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/public-review.json",
+        "digest": "sha256:036c4d592b89b0021fa24dd935d180a53ec9baf9f8373127bb35e9a4eb8738d5",
+        "id": 580733180,
+        "name": "public-review.json",
+        "size": 113057,
+        "download_sha256": "036c4d592b89b0021fa24dd935d180a53ec9baf9f8373127bb35e9a4eb8738d5",
+        "download_bytes": 113057,
+        "local_source_hash_match": true
+      },
+      {
+        "browser_download_url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/scan-03.json",
+        "digest": "sha256:7ba3469cb63b5fc1a0f91dcc28e5f57dbab3749d0dbc03cab3b298456db0df6e",
+        "id": 580733175,
+        "name": "scan-03.json",
+        "size": 336,
+        "download_sha256": "7ba3469cb63b5fc1a0f91dcc28e5f57dbab3749d0dbc03cab3b298456db0df6e",
+        "download_bytes": 336,
+        "local_source_hash_match": true
+      }
+    ],
+    "all_match": true
+  },
+  "restoration": {
+    "kind": "actual_download_restore_offline_extraction",
+    "download_receipt_sha256": "a2eee7ffb87d3caa5522ef0080eebea624ccc1f4ca67cd6c07e201ac143ec139",
+    "restored_file_count": 464,
+    "restored_file_hashes_match": true,
+    "before_upload_extraction_sha256": "a790b602f502d0b64d0ce132ed27f387107f421975c84bcbfb81e9b2a65fd2ce",
+    "downloaded_extraction_sha256": "a790b602f502d0b64d0ce132ed27f387107f421975c84bcbfb81e9b2a65fd2ce",
+    "extraction_byte_identical": true,
+    "bundled_reader_used": true,
+    "python": "3.14.4",
+    "python_isolated_mode": true,
+    "python_socket_audit_events_blocked": true,
+    "sql_request_rows": 81,
+    "databases": 2,
+    "evaluation_attempts_preserved": 3,
+    "original_files_rehashed": 1424,
+    "originals_unchanged": true,
+    "model_runs": 0,
+    "evaluator_runs": 0,
+    "human_review": "not_run",
+    "visual_review": {
+      "png_files": 12,
+      "trace_jpeg_frames": 36,
+      "method": "Agent inspection of saved contact sheets, not a new product evaluation"
+    },
+    "attempts": [
+      {
+        "attempt": 1,
+        "status": "failed_wrapper",
+        "cause": "Replacing socket.socket before ssl import broke Python class initialization; no extraction file produced."
+      },
+      {
+        "attempt": 2,
+        "status": "pass",
+        "change": "Use a Python socket audit hook; bundled reader and public dataset unchanged."
+      }
+    ]
+  },
+  "scope": {
+    "runs": 2,
+    "selection": "first randomized technical-pilot pair",
+    "files_published": 464,
+    "files_excluded": 972,
+    "files_transformed": 34,
+    "full_research_corpus_published": false,
+    "all_run_database_built": false,
+    "historical_reevaluations": 0,
+    "old_archives_recreated": 0,
+    "new_sharing_archive_created": true,
+    "human_review": "not_run",
+    "model_runs_this_work": 0
+  },
+  "checks": {
+    "focused_tests_last_attempt": {
+      "executed": 21,
+      "passed": 21,
+      "failed": 0,
+      "new_tests": 11,
+      "previous_allocation_tests_rerun": 10,
+      "prior_91_test_suite_rerun": false
+    },
+    "test_attempts": [
+      {
+        "path": "artifacts/catalog-sharing-20260922/tests-01.log",
+        "sha256": "76cdcf9627e72f8026c2c2c072a7f253e507536fa5cd38b44bb12b50b6c81b3b",
+        "executed": 20,
+        "passed": 20
+      },
+      {
+        "path": "artifacts/catalog-sharing-20260922/tests-02.log",
+        "sha256": "d823b698776eee0c0c779037517db78a9241f36ed60b99210b5566a0d8bdef7b",
+        "executed": 20,
+        "passed": 20
+      },
+      {
+        "path": "artifacts/catalog-sharing-20260922/tests-03.log",
+        "sha256": "2e35a2c7dcb7c5f2a8d16691268866bcdb64520feb4b2dd960393d7224552c2c",
+        "executed": 21,
+        "passed": 21
+      }
+    ],
+    "actual_admission_record_attempts": [
+      {
+        "attempt": 1,
+        "status": "failed",
+        "cause": "Unknown terms expiry was null; timestamp parser raised AttributeError. No admission receipt or dispatch created."
+      },
+      {
+        "attempt": 2,
+        "status": "pass_fail_closed",
+        "change": "Missing timestamps explicitly reject admission; regression test added."
+      }
+    ],
+    "scan_attempts": [
+      {
+        "kind": "public_copy_machine_scan_not_license_or_visual_acceptance",
+        "files_scanned": 460,
+        "known_provider_credential_checked": false,
+        "findings": [
+          {
+            "path": "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-001/evaluations/MS1-001-ee3d11e09a95-1.2.0-002/browser-cart/C-015-trace.zip",
+            "finding_counts": {
+              "zip_member:local_home_path": 1
+            }
+          },
+          {
+            "path": "runs/catalog-technical-pilot-20260920/MS1-001-catalog-compact-001/evaluations/MS1-001-ee3d11e09a95-1.2.0-002/browser-cart/C-016-trace.zip",
+            "finding_counts": {
+              "zip_member:local_home_path": 1
+            }
+          },
+          {
+            "path": "runs/catalog-technical-pilot-20260920/MS1-001-catalog-expanded-001/evaluations/MS1-001-aefadd61f68a-1.2.0-001/browser-cart/C-015-trace.zip",
+            "finding_counts": {
+              "zip_member:local_home_path": 1
+            }
+          },
+          {
+            "path": "runs/catalog-technical-pilot-20260920/MS1-001-catalog-expanded-001/evaluations/MS1-001-aefadd61f68a-1.2.0-001/browser-cart/C-016-trace.zip",
+            "finding_counts": {
+              "zip_member:local_home_path": 1
+            }
+          }
+        ],
+        "pass": false,
+        "values_logged": false,
+        "limitations": "Pattern checks cannot prove absence of all private context; targeted content, image and license review required."
+      },
+      {
+        "kind": "public_copy_machine_scan_not_license_or_visual_acceptance",
+        "files_scanned": 460,
+        "known_provider_credential_checked": true,
+        "findings": [],
+        "pass": true,
+        "values_logged": false,
+        "limitations": "Pattern checks cannot prove absence of all private context; targeted content, image and license review required."
+      },
+      {
+        "kind": "public_copy_machine_scan_not_license_or_visual_acceptance",
+        "files_scanned": 464,
+        "known_provider_credential_checked": true,
+        "findings": [],
+        "pass": true,
+        "values_logged": false,
+        "limitations": "Pattern checks cannot prove absence of all private context; targeted content, image and license review required."
+      }
+    ],
+    "four_original_sqlite_readback": {
+      "databases": 4,
+      "requests": 218,
+      "source_unchanged": true
+    }
+  },
+  "storage": {
+    "observed_free_bytes": 302372446208,
+    "measured_small_set_public_archive_download_restore_bytes": 111604100,
+    "future_640_run_retention_reference_bytes": 296863868160,
+    "one_pair_temporary_reference_bytes": 4294567204,
+    "remaining_after_640_plus_one_pair_temporary_reference_bytes": 1214010844,
+    "basis": "Pilot-based reservation only. All raw originals retained. At most one pair is staged/downloaded/restored at once. Four-Run retained cohort divided by two estimates a pair, including historical archive duplication; two largest Run directories provision scratch. Native-state snapshot growth and future tails remain unbounded.",
+    "reference_is_capacity_guarantee": false,
+    "originals_deleted": false,
+    "upload_counted_as_local_space_freed": false
+  },
+  "active_plan": {
+    "path": "research/protocols/ms1-catalog-comparison-v2.json",
+    "sha256": "e4d6d4b918d2b4ce85d8285ebe0d412ee2a5d429f43bb7d0e590f5e65e95df3d",
+    "pairs": null,
+    "slots": [],
+    "launch_authorized": false
+  },
+  "readiness": {
+    "experiment_ready": false,
+    "pair_rule_status": "implemented offline, proposed_not_adopted, no launcher integration",
+    "actual_account_limits_verified": false,
+    "paid_overage_disabled_verified": false,
+    "full_corpus_publication_pipeline_accepted": false,
+    "execution_frozen": false,
+    "remaining": [
+      "Confirm account-specific limits, current prices, no paid overage and concurrent account usage before start; read fresh windows before every pair.",
+      "Accept the explicit two-Run quota and one-pair storage reservation rule; observe actual growth and pause independently of outcomes.",
+      "Extend the bounded public-copy review to required future full-corpus inputs or explicitly retain the corresponding reproducibility limits.",
+      "Only after readiness is accepted, fix N/allocation, exact plan/code/environment hashes and real pre-dispatch record; obtain separate experiment start approval."
+    ]
+  },
+  "pr16_testing_body_corrected_and_read_back": true,
+  "local_evidence_hashes": {
+    "artifacts/catalog-sharing-20260922/resource-review.json": "ce9c39a3ff1c1d0426826add70065713b76a094c4f7f57f8df61635b0692cece",
+    "artifacts/catalog-sharing-20260922/go-usage-02.json": "b320eb3c721d47ba18ba706ebc90a03778d7bb9be94ca07dea6dfcd061f37258",
+    "artifacts/catalog-sharing-20260922/restoration-receipt.json": "aa059edbbc581a9960858fd17060087e0aa338a1ad47578a19bae41bf6287855",
+    "artifacts/catalog-sharing-20260922/public-review.json": "036c4d592b89b0021fa24dd935d180a53ec9baf9f8373127bb35e9a4eb8738d5",
+    "artifacts/catalog-sharing-20260922/release-readback.json": "e024d288071fbc31c13f5f5b8fe23b428bba658e68f556c3493420dce6740dce",
+    "artifacts/catalog-sharing-20260922/cleanup-receipt.json": "336cc21a05ddbd284cf84af56e9141fef6ff4e596bf93db3dd0663807b6588e2"
+  },
+  "code_hashes": {
+    "research/catalog_share.py": "cec4b5f8b411730c55bad8fadb92faa0212760d3be6864567084973f710dd8aa",
+    "research/catalog_admission.py": "9b83a3bbe615e654016bc5ae0f530dc9842838f151f06be2b05423cb73af8a07",
+    "research/tests/test_catalog_sharing.py": "1dc7d1031794c5cd470baa66af0006fc5c1542d0a130b2fd4e30f8c0c45baba0"
+  },
+  "owned_staging_cleanup": {
+    "kind": "owned_temporary_public_copies_reclaimed_after_verified_release_restore",
+    "checked_at_utc": "2026-09-22T06:38:31.7657831+00:00",
+    "targets": [
+      {
+        "path": "artifacts/catalog-sharing-20260922/stage-01/public",
+        "logical_bytes": 49156024.0,
+        "removed": true
+      },
+      {
+        "path": "artifacts/catalog-sharing-20260922/stage-02/public",
+        "logical_bytes": 49155913.0,
+        "removed": true
+      },
+      {
+        "path": "artifacts/catalog-sharing-20260922/stage-03/public",
+        "logical_bytes": 49167555.0,
+        "removed": true
+      }
+    ],
+    "free_bytes_before": 302359072768,
+    "free_bytes_after": 302509268992,
+    "original_runs_deleted": false,
+    "restored_download_preserved": true,
+    "failed_scan_records_preserved": true,
+    "note": "Only task-created staging public copies removed; free-space differences also include concurrent host activity.",
+    "originals_rehashed_unchanged_after_cleanup": true
+  }
+}

@@ -1,0 +1,110 @@
+{
+  "record": {
+    "kind": "proposed_pair_admission_record_not_execution_freeze",
+    "account": {
+      "checked_at_utc": "2026-09-22T06:13:58.8141102+00:00",
+      "method": "GET",
+      "endpoint": "https://opencode.ai/zen/go/v1/usage",
+      "http_status": 200,
+      "model_called": false,
+      "key_value_recorded": false,
+      "usage": {
+        "rolling": {
+          "status": "ok",
+          "percent": 0.0,
+          "resetsAt": "2026-09-22T11:13:57.468Z"
+        },
+        "weekly": {
+          "status": "ok",
+          "percent": 0.0,
+          "resetsAt": "2026-09-28T00:00:00.000Z"
+        },
+        "monthly": {
+          "status": "ok",
+          "percent": 14.0,
+          "resetsAt": "2026-10-09T03:46:44.000Z"
+        }
+      },
+      "applicable_limits_usd": null,
+      "limit_verification": "Not returned by usage API; requires account-specific evidence before pair admission"
+    },
+    "applicable_limits": {
+      "verified_from_account": false,
+      "evidence_sha256": null,
+      "usd": {
+        "rolling": null,
+        "weekly": null,
+        "monthly": null
+      },
+      "valid_until_utc": null
+    },
+    "paid_overage_disabled_verified": false,
+    "no_other_account_consumers_verified": false,
+    "pair_reservation": {
+      "quota_usd": "2.8837356",
+      "runs": 2,
+      "basis_verified": true,
+      "evidence_sha256": "ce9c39a3ff1c1d0426826add70065713b76a094c4f7f57f8df61635b0692cece",
+      "planning_horizon_seconds": 7200,
+      "basis": "Two times the largest saved pilot Run repriced at accepted peak rates with no cache discount; a prospective planning reservation, not a cap or future upper bound.",
+      "rate_source_sha256": "6e430b3b94e3f7c60e0b923cf601bb1117fc7caa8a397efa651877a8f9564b09",
+      "rates_per_million": {
+        "input_peak": "0.30",
+        "output_peak": "1.20",
+        "cache_discount_assumed": false
+      },
+      "horizon_definition": "Two existing 1800-second generation budgets plus one hour of operational allowance; an admission forecast, not a new Run timeout.",
+      "adoption": "Proposed before outcomes; reverify applicable prices and accept with execution freeze. No scientific Run cap introduced."
+    },
+    "storage": {
+      "checked_at_utc": "2026-09-22T06:34:57.378991+00:00",
+      "free_bytes": 302372446208,
+      "basis_verified": true,
+      "evidence_sha256": "ce9c39a3ff1c1d0426826add70065713b76a094c4f7f57f8df61635b0692cece",
+      "next_pair_retained_bytes": 927699588,
+      "generation_scratch_bytes": 532175636,
+      "sqlite_finalize_bytes": 1638400,
+      "public_copy_bytes": 927699588,
+      "archive_bytes": 952676996,
+      "download_bytes": 952676996,
+      "restore_bytes": 927699588,
+      "definition": "Pilot-based reservation only. All raw originals retained. At most one pair is staged/downloaded/restored at once. Four-Run retained cohort divided by two estimates a pair, including historical archive duplication; two largest Run directories provision scratch. Native-state snapshot growth and future tails remain unbounded.",
+      "user_discretionary_reserve_bytes": 0,
+      "forecast_not_upper_bound": true,
+      "work_temp_docker_volumes": [
+        "C:"
+      ],
+      "docker_storage_observed": "Docker WSL data and main VHDX files are on C:; no container was started."
+    },
+    "fixed_execution_plan_verified": false,
+    "experiment_start_authorized": false,
+    "after_unexpected_limit_or_storage_failure": "Stop new dispatch. Preserve partial/uncertain slots. Re-read account and reconcile actual dispatch before continuation; no replacement, new pair, model fallback, purchase or account rotation."
+  },
+  "decision": {
+    "kind": "offline_pair_admission_not_dispatch",
+    "checked_at_utc": "2026-09-22T06:34:57.378991+00:00",
+    "planning_admission_pass": false,
+    "may_start_pair": false,
+    "blocking_reasons": [
+      "account_readback_not_within_5_minutes",
+      "actual_account_limits_unverified",
+      "paid_overage_setting_unverified",
+      "account_usage_not_reserved_for_pair",
+      "rolling_window_or_limit_invalid",
+      "weekly_window_or_limit_invalid",
+      "monthly_window_or_limit_invalid",
+      "applicable_terms_validity_unknown",
+      "execution_plan_not_fixed",
+      "experiment_start_not_authorized"
+    ],
+    "windows": {},
+    "required_additional_local_bytes": 5222266792,
+    "launcher_integration": "not_implemented",
+    "model_called": false,
+    "new_allocation_created": false,
+    "account_rotated": false,
+    "completion_guaranteed": false,
+    "spending_cap_introduced": false,
+    "reservation_risk": "Pilot-based demand can be exceeded. Pause on quota/storage failure, preserve partial and uncertain slots, never replace or switch models."
+  }
+}

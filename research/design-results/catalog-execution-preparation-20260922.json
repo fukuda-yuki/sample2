@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "kind": "three_preparation_tasks_complete_experiment_not_started",
+  "recorded_at_utc": "2026-09-22T08:42:49.277470+00:00",
+  "implementation_commit": "2b6b5be51d150a7c299a1cb87ed335e0eb8481cd",
+  "user_authority": "Complete the three preparation tasks. User separately confirmed paid overage disabled; monetary limits are not an admission gate.",
+  "preparation_status": {
+    "execution_admission_pause_recovery": "complete",
+    "small_public_roundtrip_and_operational_storage": "complete",
+    "formal_N_allocation_code_environment_freeze": "complete"
+  },
+  "start_authorized": false,
+  "real_cohort_exists": false,
+  "new_model_runs": 0,
+  "new_evaluator_runs": 0,
+  "historical_archive_recreated": false,
+  "frozen_plan": {
+    "path": "research/protocols/ms1-catalog-comparison-v2-execution-20260922.json",
+    "sha256": "28f6863a2e4f73b8c397e48cb019e258772f9f6dec43f7b822b2682cb183763e",
+    "pairs": 320,
+    "slots": 640,
+    "by_condition": {
+      "catalog-expanded": 320,
+      "catalog-compact": 320
+    },
+    "attempt_range_each_condition": [
+      1001,
+      1320
+    ],
+    "randomization_seed": 2026092001,
+    "first_in_pair_counts": {
+      "catalog-expanded": 147,
+      "catalog-compact": 173
+    },
+    "allocation_sha256_canonical_json": "c6adc56878c1b75ba34f3a65cadde72ba8e6738930678d8e3c1197324ad75b78",
+    "source_plan_sha256_unchanged": "e4d6d4b918d2b4ce85d8285ebe0d412ee2a5d429f43bb7d0e590f5e65e95df3d",
+    "scientific_analysis_quality_and_fixed_conditions_unchanged": true,
+    "code_files": 40,
+    "committed_and_public_code_bytes_match": true
+  },
+  "environment": {
+    "python": {
+      "path": "artifacts/catalog-confirmatory-design/analysis-env/Scripts/python.exe",
+      "sha256": "4b8c3912806b3c1591ba3cb403bff77ad309c3fe5756f87c20b7a6f8f0174262",
+      "version": "3.14.4"
+    },
+    "analysis_packages": {
+      "numpy": "2.5.3",
+      "scipy": "1.18.0"
+    },
+    "images": {
+      "worker": "sha256:cd0231d5717baf4e334997aa84427cf00184dbf85d558e83c1b23793b4d5d31e",
+      "evaluator": "sha256:1756f71dd8e279cb6d69d5e6bec470e7f9a8ad9e9eda57dcff705051c5ab5a74",
+      "gateway": "sha256:f5c9c50bbcf205133f7eeab0c4d79476cf14efd15656257667200dd0984f02f9"
+    },
+    "runtime_lock_sha256": "8265780b46377b7a4ee80fbfe5267287ca1fc65f75f14ea4276b3fda5d2a0605",
+    "source_lock_sha256": "21379efb0a9a55cb09beebb708f71c7513c6616f9e8861eedcdb8e97906f5451",
+    "browser_pin_sha256": "c7cc3266f0644074387821d6076985f5a08d17c3caf3ecd392ab64f72d2cca8e",
+    "node": "v24.15.0",
+    "node_sha256": "3331e1ffe19874215472217c5e94f5a0c6d8e18c4ac7111d3937aa0ad5e9b4a5",
+    "playwright": "1.62.1",
+    "browser_sha256": "b798f9e53a98d29eb7f36f8c409f905d3184780a04d2bcb56989067194784bd1",
+    "connection_probe_sha256": "65f556859ba202faccd67b0f5f6c2cd54002de8940dded6fd214ac8a3394dd7f",
+    "actual_pin_check_passed": true
+  },
+  "execution_validation": {
+    "current_research_suite_tests": 128,
+    "current_research_suite_passed": 128,
+    "current_research_suite_failed": 0,
+    "current_research_suite_log": "artifacts/catalog-execution-preparation-20260922/tests-research-05.log",
+    "new_execution_tests": 15,
+    "test_dispatch_and_remote_transport": "controlled synthetic boundaries",
+    "production_paths_tested": [
+      "durable dispatch and OS lock",
+      "API quota pause and only-unsent resume",
+      "uncertain dispatch never replayed",
+      "disk failure between paired members",
+      "stale recovery or changed original rejected",
+      "pair review/download/restore/cleanup gate",
+      "metadata/part corruption and changed review rejected",
+      "multipart restoration",
+      "lost upload acknowledgment readback",
+      "interrupted post-delivery finalization",
+      "long Windows evaluation paths",
+      "stopped/cleaned-only compression and byte-integrity check"
+    ],
+    "real_unapproved_execute": {
+      "at": "2026-09-22T08:39:03.627924+00:00",
+      "exit_code": 1,
+      "reason": "Separate user start approval is required; no dispatch",
+      "real_cohort_created": false,
+      "real_model_dispatches": 0,
+      "log_sha256": "5d9d067864a4a8e92753a6ac37014292fa582531543afdfade761fd765b6241a"
+    },
+    "test_counts_not_added_to_historical_runs": true
+  },
+  "sharing_validation": {
+    "release_url": "https://github.com/fukuda-yuki/sample2/releases/tag/catalog-pilot-sharing-20260922",
+    "prior_actual_upload_receipt": "research/design-results/catalog-sharing-validation-20260922.json",
+    "new_live_uploads_this_preparation": 0,
+    "actual_existing_assets_redownloaded": 4,
+    "downloaded_asset_hashes": [
+      {
+        "name": "catalog-pilot-first-pair.manifest.json",
+        "sha256": "1efdc35fee5eefcbe46fe4e57d28197ed91ebf63c545c1da3288fa748e20b7da",
+        "bytes": 112028,
+        "url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/catalog-pilot-first-pair.manifest.json"
+      },
+      {
+        "name": "catalog-pilot-first-pair.zip",
+        "sha256": "933f0e2e13ed7d897b8c66690eff18f592672b31b7ae7ad65e3daba88c1a8646",
+        "bytes": 6634495,
+        "url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/catalog-pilot-first-pair.zip"
+      },
+      {
+        "name": "public-review.json",
+        "sha256": "036c4d592b89b0021fa24dd935d180a53ec9baf9f8373127bb35e9a4eb8738d5",
+        "bytes": 113057,
+        "url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/public-review.json"
+      },
+      {
+        "name": "scan-03.json",
+        "sha256": "7ba3469cb63b5fc1a0f91dcc28e5f57dbab3749d0dbc03cab3b298456db0df6e",
+        "bytes": 336,
+        "url": "https://github.com/fukuda-yuki/sample2/releases/download/catalog-pilot-sharing-20260922/scan-03.json"
+      }
+    ],
+    "restored_public_files": 464,
+    "saved_requests": 81,
+    "original_files_checked": 1424,
+    "originals_unchanged_after_cleanup": true,
+    "downloaded_extraction_sha256": "a790b602f502d0b64d0ce132ed27f387107f421975c84bcbfb81e9b2a65fd2ce",
+    "current_and_bundled_reader_run_data_equal": true,
+    "offline_extraction_sockets_blocked": true,
+    "new_public_scan_passed": true,
+    "license_and_exclusion_review": "Prior published pair review and bundled notices retained. Every new pair requires exact-byte review; full native-state, evaluation-DB and environment replay exclusions remain explicit.",
+    "frozen_unstarted_plan_portability_check": {
+      "at": "2026-09-22T08:39:05.274593+00:00",
+      "kind": "unstarted_frozen_plan_public_portability_check",
+      "no_completed_run_claim": true,
+      "plan_sha256": "28f6863a2e4f73b8c397e48cb019e258772f9f6dec43f7b822b2682cb183763e",
+      "public_plan_byte_identical": true,
+      "frozen_code_files_verified": 40,
+      "public_code_and_git_commit_bytes_match": true,
+      "missing_slots_retained_as_unknown": 2,
+      "scan_pass": true,
+      "scan_sha256": "3a028617e98ba3357ed4585b47af4f88f328f49d0af5cd2d8c5903e04c1140e9",
+      "extraction_sockets_blocked": true,
+      "extraction_sha256": "71a970847253a666750329279bc0d84d3a15222037b5b135cd10b24e9b62a71b",
+      "model_calls": 0,
+      "evaluator_calls": 0,
+      "historical_archive_recreated": false
+    }
+  },
+  "storage_validation": {
+    "policy": "Retain original bytes; NTFS-compress completed Run/package directories after timing and cleanup. Stage/transfer/restore one pair; delete only verified owned temporary copies.",
+    "retention_receipt": "research/design-results/catalog-retention-validation-20260922.json",
+    "retention_receipt_sha256": "847ac51168be17feb20ea166950dfa50e2db92cce9a06b63f9094d17e800f97c",
+    "volume": "C:",
+    "repository_temp_and_docker_data_same_volume": true,
+    "free_bytes_at_final_check": 293814423552,
+    "per_dispatch_additional_reference_bytes": 5222266792,
+    "reference_640_retained_plus_temporary_bytes": 207955591844,
+    "reference_headroom_bytes": 85858831708,
+    "all_pilot_originals_verified_at_final_check": 6098,
+    "actual_small_pair_temporary_logical_bytes": 112472672,
+    "verified_successful_probe_copies_cleaned": true,
+    "user_discretionary_reserve_bytes": 0,
+    "capacity_and_compression_forecasts_are_not_upper_bounds": true
+  },
+  "final_preflight": {
+    "kind": "preparation_check_not_start_authorization",
+    "checked_at_utc": "2026-09-22T08:42:49.234397+00:00",
+    "plan_sha256": "28f6863a2e4f73b8c397e48cb019e258772f9f6dec43f7b822b2682cb183763e",
+    "pairs": 320,
+    "assigned_runs": 640,
+    "ready_for_start_approval": true,
+    "admission": {
+      "kind": "offline_pair_admission_not_dispatch",
+      "checked_at_utc": "2026-09-22T08:42:49.234375+00:00",
+      "planning_admission_pass": true,
+      "may_start_pair": false,
+      "blocking_reasons": [
+        "experiment_start_not_authorized"
+      ],
+      "required_additional_local_bytes": 5222266792,
+      "monetary_gate_applied": false,
+      "quota_policy": "user_confirmed_no_paid_overage_pause_on_unavailability",
+      "launcher_integration": "research.catalog_execution",
+      "model_called": false,
+      "new_allocation_created": false,
+      "account_rotated": false,
+      "completion_guaranteed": false,
+      "spending_cap_introduced": false,
+      "reservation_risk": "Pilot-based demand can be exceeded. Pause on quota/storage failure, preserve partial and uncertain slots, never replace or switch models."
+    },
+    "model_called": false,
+    "evaluator_called": false
+  },
+  "failures_and_reruns": [
+    {
+      "attempt": "historical pilot code-pin check",
+      "result": "rejected obsolete pilot controller hash; actual v2 frozen conditions subsequently verified without altering historical plan"
+    },
+    {
+      "attempt": "tests-execution-01.log",
+      "result": "10 tests, 9 fixture errors; fixed missing required analysis-code hashes in fixture; subsequent current suite passed"
+    },
+    {
+      "attempt": "real-storage-01",
+      "result": "ordinary Windows path check misreported a 262-character evaluation file as missing; fixed reader to use resolved extended paths"
+    },
+    {
+      "attempt": "real-storage-02",
+      "result": "old downloaded reader had the same relocated path issue; fixed isolated extraction wrapper to pass explicit extended root; real-storage-03 passed"
+    },
+    {
+      "attempt": "tests-research-02.log",
+      "result": "128 tests, 1 fixture path-redaction failure and 1 long-path fixture cleanup error; corrected portable fixture and extended cleanup; final 128 passed"
+    },
+    {
+      "attempt": "retention-db-probe-01",
+      "result": "incorrect assumed SQL table; rerun with the existing repository SQL passed four compressed DBs and 218 requests"
+    },
+    {
+      "attempt": "initial freeze",
+      "result": "missing outer/__init__.py rejected before plan creation; fixed namespace package enumeration in implementation commit; freeze and host checks passed"
+    }
+  ],
+  "delivery_scope": {
+    "code_and_plan": "local commits",
+    "push_attempted_this_preparation": false,
+    "new_pull_request_created": false,
+    "prior_push_rejection_not_bypassed": true
+  },
+  "remaining_before_first_model_dispatch": [
+    "Separate explicit user start approval bound to plan SHA-256; the launcher rechecks current pins/storage at dispatch."
+  ],
+  "local_evidence_sha256": {
+    "artifacts/catalog-execution-preparation-20260922/preflight-02.json": "fc2d058a3fcf1c59a8d90284e1b607822e06a4b8d6aaf5310b0129c99d2d597d",
+    "artifacts/catalog-execution-preparation-20260922/preflight-final.json": "4a7a3411753d58ab65712c5f526093f89d91abc181700f4ac3032a47ebeb2115",
+    "artifacts/catalog-execution-preparation-20260922/real-storage-03/validation.json": "16e86cee561485eaf76bdaf5829624ad5bd910efd7ce8361c9f3b05cecee323c",
+    "artifacts/catalog-execution-preparation-20260922/real-storage-03/cleanup.json": "87c0aeac8b7f318ff41195122d45e9bc3aa09dcde60a6a5f022ab0d8f8c607a7",
+    "artifacts/catalog-execution-preparation-20260922/real-storage-03/preserved-public-manifest.json": "ddc926fd73a260b786beb186f4380280c58e8dafe9197296d554c0fba7ba91f4",
+    "artifacts/catalog-execution-preparation-20260922/retention-probe-01/validation.json": "15b2c3cb67037b4850c427f3abee01daf82e6677a7c44a1061f91af6467438ef",
+    "artifacts/catalog-execution-preparation-20260922/retention-probe-01/cleanup.json": "b2d3fafbff106d7d37a3ee18e1bef1e72b7fc435319888c48c6b5b40b75ef36d",
+    "artifacts/catalog-execution-preparation-20260922/retention-db-probe-02/validation.json": "79a95e11d605c9b35df94b3bb607ae820ab28a1d2c049aa85411541b26331b3e",
+    "artifacts/catalog-execution-preparation-20260922/retention-db-probe-02/cleanup.json": "5eeb07f529f5d293d8ba0588188cbc26435cd66359bfb647ee37dd24c9bf0316",
+    "artifacts/catalog-execution-preparation-20260922/frozen-public-preflight-01/validation.json": "043b9676f2513ea8601eb24f5daf7155ca13a2e39614de3ce0baf00feb1c316b",
+    "artifacts/catalog-execution-preparation-20260922/frozen-public-preflight-01/scan.json": "3a028617e98ba3357ed4585b47af4f88f328f49d0af5cd2d8c5903e04c1140e9",
+    "artifacts/catalog-execution-preparation-20260922/frozen-public-preflight-01/cleanup.json": "2de37dae6cbc19d87fefb922d87c5c97ffcbf469a16ff435c8ed32e2d9769d02",
+    "artifacts/catalog-execution-preparation-20260922/unapproved-execute.json": "757e9e225a538aad00cc742adc7b428004f4eeaa508abf6715f3f64baa3263f0",
+    "artifacts/catalog-execution-preparation-20260922/unapproved-execute.log": "5d9d067864a4a8e92753a6ac37014292fa582531543afdfade761fd765b6241a",
+    "artifacts/catalog-execution-preparation-20260922/tests-execution-01.log": "e978d2ceb13d10e62ddffac519acd8a7bb43de51818044310172ef3513737b90",
+    "artifacts/catalog-execution-preparation-20260922/tests-execution-02.log": "b1b5df7280b289119529419586ec53617f2f940b1d3885862af1b9e8dd92dd75",
+    "artifacts/catalog-execution-preparation-20260922/tests-research-01.log": "b218cef607ab2435cc8d289d8b4649bf1bab3a2061a1f845796c3aabe8557db7",
+    "artifacts/catalog-execution-preparation-20260922/tests-research-02.log": "2bc12e2b6db9235aa70c658fa4f775296abb34e07ed2e5dd91b185e72343a5af",
+    "artifacts/catalog-execution-preparation-20260922/tests-research-03.log": "8cd1f645183e58c15e1bb0c95e41601cdddecba55b07da088fa38730a6258c19",
+    "artifacts/catalog-execution-preparation-20260922/tests-research-04.log": "38ce2a24756d3c7add1f8fb2d286052fce76839f406e046e7bfc91f5d53e8765",
+    "artifacts/catalog-execution-preparation-20260922/tests-research-05.log": "3fb40b20909d68fff24067eac44e6beba6e69bd2707799800301c21d9985dd8e"
+  }
+}

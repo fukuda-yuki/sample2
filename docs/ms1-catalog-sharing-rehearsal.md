@@ -1,5 +1,10 @@
 # The first pilot pair was published, downloaded and extracted offline
 
+Subsequent preparation: [the fixed 320-pair execution plan and driver](ms1-catalog-execution-ready.md)
+supersede this rehearsal's remaining implementation/freeze items. Its historical
+evidence below is preserved. The real experiment remains unstarted and requires
+separate approval of the frozen plan.
+
 The [public Release](https://github.com/fukuda-yuki/sample2/releases/tag/catalog-pilot-sharing-20260922)
 contains a bounded subset of the existing technical pilot. Its four assets were
 downloaded through anonymous HTTPS into a different directory; all local and

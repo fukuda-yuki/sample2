@@ -57,6 +57,15 @@ public sealed class AppHost : IDisposable
         Port = FreePort();
     }
 
+    public void UseDatabase(string path)
+    {
+        if (Started) throw new InvalidOperationException("Stop the owned application before changing its test database.");
+        path = Path.GetFullPath(path);
+        if (!path.StartsWith(WorkDir + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException("Test database must remain in the scoring work directory.");
+        DatabasePath = path;
+    }
+
     public static int FreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

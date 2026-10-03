@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "kind": "research_repair_prospective_v3_evidence_index",
+  "code_component_commit": "3a0ed7e52c068299c073fec16f3bab2a325187b4",
+  "acceptance_ledger": {
+    "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-acceptance-20261003\\ledger.json",
+    "sha256": "04e1a3911fcf691c0e4b76aa7a5f260a2c490e9c9c86fc06802e4430265c50ab"
+  },
+  "integration_worktree": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003",
+  "branch": "codex/research-repair-integration-20261003",
+  "history_policy": "no-ff only, original checkout and old cohort preserved",
+  "issue_acceptance": {
+    "20": "partial: actual live parallel/public transport not run",
+    "21": "finite prospective machine chain accepted; human not_run; historical confound retained",
+    "22": "selected machine scope accepted; human not_run",
+    "23": "bounded recording/serializer controls accepted",
+    "24": "fixed v3 serial plan prepared; acquisition blocked by human and separate start authorization"
+  },
+  "new_study": {
+    "families": 2,
+    "nested_variants": 4,
+    "pairs": 64,
+    "assigned_slots": 128,
+    "concurrent_implementations": 1,
+    "dispatched_runs": 0,
+    "research_start_authorized": false
+  },
+  "evidence": {
+    "current_components": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-finalization-20261003\\current-components.json",
+      "sha256": "e51f2b23ba49801d59725511d26090a7ba60667a0f7391a79fc7c7f8b6605ac3"
+    },
+    "private_evaluation_binding": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\sqlite-v3-finalization\\joint-calibration-acceptance-v4.json",
+      "sha256": "a40703728a0202426e9804015f43732828a05396d129ab69940512d8b67851a6"
+    },
+    "new_ordinary_mock_serializers": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-serializer-mock-20261003\\final-witness.json",
+      "sha256": "acb3e0e765eeaacd158acd9aef5972a4e9071bea84ca023b9cd374e3ab3e8edd"
+    },
+    "new_eight_inputs": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\runs\\_v3Prep\\preparation-receipt.json",
+      "sha256": "562e5ed63fd7234fd8884d4fb13c8d74bf8e7cc737573c7bf372d37b87826cda"
+    },
+    "static_collection_fixture": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-execution-20261003\\artifacts\\collection-static-db-v2-20261003\\fixture\\receipt.json",
+      "sha256": "b29cdef01f9b9f6b0ea51e0ebe7a0a06d602d3cb1af71a563b22f22342a6699a"
+    },
+    "stopped_collection_hold": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-execution-20261003\\artifacts\\collection-static-db-v2-20261003\\hold-fix-receipt.json",
+      "sha256": "217779fa742dd8313961929ed770fa9b27aefe2ad4e04c74860d4159bafb405b"
+    },
+    "saved_receipt_manager_gap": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-execution-20261003\\artifacts\\collection-static-db-v2-20261003\\manager-gap-receipt.json",
+      "sha256": "46fbb942ce2f32f92673c26385fa3a376879c61a17c3ff71cf5d97d57ea87197"
+    },
+    "transport_dependency": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-execution-20261003\\artifacts\\collection-static-db-v2-20261003\\transport-dependency-witness.json",
+      "sha256": "1f2a6761d40f15acf167e7be19531481afc5d3a6fa4e665d3ac59925e545097a"
+    },
+    "outer_regressions_191": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-execution-20261003\\artifacts\\collection-static-db-v2-20261003\\outer-tests.log",
+      "sha256": "c869b3a683bfce242b93f65473269fecf8ba1ef48877e5657365e65ea6f10042"
+    },
+    "affected_machine_21": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-execution-20261003\\artifacts\\collection-static-db-v2-20261003\\hold-machine-tests.log",
+      "sha256": "0eb01fec8df2b42d48ba5b2dd6595753b5be884cb35cbb307f07be3d2b759fce"
+    },
+    "affected_pair_final_17": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-execution-20261003\\artifacts\\collection-static-db-v2-20261003\\manager-gap-pair-tests.log",
+      "sha256": "1f11a276e274ac4e95acb426bafebce98703d67b4cba2d6d97d8a0c4fa25b772"
+    },
+    "affected_research_final": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-finalization-20261003\\research-final-tests.log",
+      "sha256": "b1f49511d801b6b2a4f08d53939641aa210b806457691f26904539b13621dcfc"
+    },
+    "final_source_coverage": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-finalization-20261003\\final-source-coverage.json",
+      "sha256": "fd2e60f0c209feb34b0a9a2c4cce6007f1000fdddaabbfebe25da68e7e774a80"
+    },
+    "fresh_reference": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-tasks-20261003\\artifacts\\task-collection-followup-v1\\commit-binding.json",
+      "sha256": "754dfbae0212edbd5c50ae9dfb91d221edf708dfe9b4b75d7537bda1ae82af26"
+    },
+    "task_component_prior": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-tasks-20261003\\artifacts\\final-integrated-task-scope-v1\\compatibility-receipt.json",
+      "sha256": "9ca23e21d1e49c900151f515e3e0ca9996dd2dde6129f46ab91df1e7c48926e8"
+    },
+    "music_reference_workflows": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-tasks-20261003\\artifacts\\task-acceptance-v2\\workflow\\summary.json",
+      "sha256": "2a4a6d744545c6cbdb2ed1852f5673529e31e041de86dfbbbdc5d08086b6b2ac"
+    },
+    "education_reference_workflows": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-tasks-20261003\\artifacts\\education-acceptance-v1\\workflow-integrated-contract\\summary.json",
+      "sha256": "ead215274b4c3e4011dcf1defceae67a051ced90f0c619933e2488457758b644"
+    },
+    "music_missing_fields": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-tasks-20261003\\artifacts\\task-missing-email-fix-v1\\targeted\\targeted-receipt.json",
+      "sha256": "0215c3cffce73b023681456d50d2a5db285fa5966fb2b1f6c897e02883b41f2f"
+    },
+    "music_calibration_prior": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\eval21-v5-long-path\\joint-calibration-acceptance.json",
+      "sha256": "5b2e7b666a64e37085520d08933a1484877cb7db304c5e82fd7ed9ebb0ca1c55"
+    },
+    "music_routing_prior": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\eval21-v6-routing\\calibration-receipt.json",
+      "sha256": "ca8e8a180c267a10132265031f98cc7b55ca3bdba32dff5c4ac21081d029257e"
+    },
+    "education_calibration_prior": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\edu21-v4-httpfault\\joint-calibration-acceptance-v3.json",
+      "sha256": "c81d2adb24c8459f40a8d805bb24c5d38e11b6d5f808d8da02bb8c3696a92c0c"
+    },
+    "historical_live_campaign": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\runs\\_tl03a\\result.json",
+      "sha256": "53f77d26a5c862591dc41add5eac51b69110230f90363ab1d126ac099db5a11c"
+    },
+    "historical_owned_stop": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\runs\\_tl03a\\owned-stop-proof.json",
+      "sha256": "d99bb3bff3c894f7d705e810d57dd7e0cf23ee9e30b839463bbde90ec8428f28"
+    },
+    "historical_frozen_preload_classification": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\technical-evaluator-recovery-v2\\recovery-receipt.json",
+      "sha256": "ee7df3c982be8b09887694c2b8254038a0130b54b6136fe19f9492626b0500ca"
+    },
+    "historical_music_10_mock": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\runs\\_rm35\\result.json",
+      "sha256": "952537b2da8cd19f0b974bf64a248286435032afbc0f6a7a71ae3d542d02eeef"
+    },
+    "historical_education_serialization": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\runs\\_cuSer\\serialization-derivation-v1.json",
+      "sha256": "e98ed7f08c147abc52494a6556dd0373c7d55a4d53fe31a1035ac134e3050ae1"
+    },
+    "prospective_invariance": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-finalization-20261003\\protocol-scientific-invariance.json",
+      "sha256": "e053a68c11625daca4154a84c7f4271bd4ab363a9599f56586b35c8d7ab2fc0a"
+    },
+    "independent_ai_review": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-finalization-20261003\\independent-custody-review.json",
+      "sha256": "2292d353f0196d1c47d3650279d70ddc622a1b45bc9b0c585e9d7e5790996224"
+    },
+    "collection_hold_ai_review": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-finalization-20261003\\collection-hold-custody-review.json",
+      "sha256": "fd6b5d2eb41adb5f21c826a602ba06b54f3f3cb1513ca3f79e27ec19972f9833"
+    },
+    "owner_ai_review_original": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\artifacts\\research-owner-review-20261003\\research-lead-receipt.json",
+      "sha256": "4ec3c39c51aea03e036516341fb43f942787681318e0d98c19b7240eb98212fa"
+    },
+    "human_pending_packet": {
+      "path": "C:\\Users\\mwam0\\.copilot\\repos\\sample2\\work\\repair-integration-20261003\\artifacts\\source-info-v3-human-review-20261003\\packet-v2.json",
+      "sha256": "679a49fa228d9c66d11f92259094d95a7ac767d0b5456347f48f157747b32987"
+    }
+  },
+  "limits": [
+    "New independent database fixtures do not reconstruct or change historical submissions/verdicts.",
+    "Prior receipts retain their provenance; reuse is supported by exact dependency witnesses and affected tests.",
+    "AI review is not human confirmation.",
+    "Simulated public transport is not actual remote acceptance; every future next-pair gate remains mandatory."
+  ]
+}

@@ -34,6 +34,32 @@ def usage_from_native(native):
             'reasoning_tokens': out_details.get('reasoning_tokens')}
 
 
+def parse_sse(raw):
+    """Retain the last cumulative report even when the stream is interrupted."""
+    result = {'stream_done': False, 'usage': None, 'parse_errors': []}
+    for number, line in enumerate(raw.splitlines(), 1):
+        if not line.startswith(b'data:'):
+            continue
+        payload = line[5:].strip()
+        if payload == b'[DONE]':
+            result['stream_done'] = True
+            continue
+        try:
+            item = json.loads(payload)
+            if not isinstance(item, dict):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            result['parse_errors'].append(number)
+            continue
+        for source, dest in (('model', 'response_model_id'), ('id', 'provider_response_id')):
+            if item.get(source):
+                result[dest] = item[source]
+        if item.get('usage') is not None:
+            result['native_usage'] = item['usage']
+            result['usage'] = usage_from_native(item['usage'])
+    return result
+
+
 class SecretFilter:
     """Hold enough bytes to redact a credential split across transport chunks."""
     def __init__(self, secret):
@@ -159,31 +185,45 @@ class Handler(BaseHTTPRequestHandler):
         event = {'run_id': g.run_id, 'session_id': g.session_id, 'event_id': rid, 'request_id': rid,
                  'mode': 'request', 'includes_children': False, 'model_id': g.model,
                  'provider': 'opencode-go', 'started_at': now(), 'usage': None,
-                 'status': 'started', 'request_file': rid + '.request.json',
+                 'status': 'started', 'evidence_version': 3, 'send_evidence': 'known_no_send',
+                 'provider_acknowledged': False, 'request_file': rid + '.request.json',
                  'response_file': rid + '.response.sse',
                  'request_sha256': hashlib.sha256(raw).hexdigest()}
-        with (g.root / event['request_file']).open('xb') as original:
-            original.write(raw)
-            original.flush()
-            os.fsync(original.fileno())
-        g.record('started.jsonl', event)
+        try:
+            with (g.root / event['request_file']).open('xb') as original:
+                original.write(raw)
+                original.flush()
+                os.fsync(original.fileno())
+            g.record('started.jsonl', event)
+            original = (g.root / event['response_file']).open('xb')
+        except OSError:
+            # Storage failure before any transmission stops this gateway. Do not
+            # send a request whose identity/original could not be preserved.
+            g.failed.set()
+            self.send_error(507, 'Evidence storage unavailable')
+            return
         filt = SecretFilter(g.secret)
         response_bytes = bytearray()
         connection = None
         upstream_socket = None
         sent_headers = False
-        original = (g.root / event['response_file']).open('xb')
         try:
             cls = http.client.HTTPSConnection if g.tls else http.client.HTTPConnection
             connection = cls(g.upstream_host, g.upstream_port, timeout=g.upstream_timeout)
             connection.connect()
             upstream_socket = connection.sock
             g.track_socket(upstream_socket)
+            event['send_evidence'] = 'unknown'
+            g.record('transmission.jsonl', {**event, 'phase': 'send_intent', 'at': now()})
             connection.request('POST', '/zen/go/v1/chat/completions', raw, {
                 'Authorization': 'Bearer ' + g.secret, 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream', 'User-Agent': 'sample2-verification-machine/1',
                 'x-opencode-session': g.session_id})
+            event['send_evidence'] = 'observed_send'
+            event['transmitted_at'] = now()
+            g.record('transmission.jsonl', {**event, 'phase': 'local_send_returned'})
             response = connection.getresponse()
+            event['provider_acknowledged'] = True
             event['http_status'] = response.status
             if response.status != 200:
                 g.failed.set()
@@ -211,27 +251,8 @@ class Handler(BaseHTTPRequestHandler):
                         event['client_disconnected'] = True
                 if not chunk:
                     break
-            done = False
-            for line in bytes(response_bytes).splitlines():
-                if not line.startswith(b'data:'):
-                    continue
-                payload = line[5:].strip()
-                if payload == b'[DONE]':
-                    done = True
-                    continue
-                item = json.loads(payload)
-                if item.get('model'):
-                    event['response_model_id'] = item['model']
-                if item.get('id'):
-                    event['provider_response_id'] = item['id']
-                if item.get('usage') is not None:
-                    event['native_usage'] = item['usage']
-                    event['usage'] = usage_from_native(item['usage'])
-            event['stream_done'] = done
-            event['status'] = 'completed' if response.status == 200 and done else 'provider_error'
-            if event.get('response_model_id') != g.model:
-                event['policy_error'] = 'response_model_mismatch'
-                g.failed.set()
+            event.update(parse_sse(bytes(response_bytes)))
+            event['status'] = 'completed' if response.status == 200 and event['stream_done'] else 'provider_error'
         except Exception as exc:
             # Never log exception messages: upstream errors can include credentials.
             event['status'] = 'cancelled' if g.stopping.is_set() else 'transport_error'
@@ -256,6 +277,16 @@ class Handler(BaseHTTPRequestHandler):
             original.flush()
             os.fsync(original.fileno())
             original.close()
+            # Parsing also happens after cancellation/transport exceptions and
+            # after SecretFilter releases its final tail. DONE alone is not usage.
+            event.update(parse_sse(bytes(response_bytes)))
+            if event.get('response_model_id') != g.model:
+                event['policy_error'] = 'response_model_mismatch'
+                g.failed.set()
+            event['usage_complete'] = (event['status'] == 'completed' and not event['parse_errors']
+                and not event.get('policy_error') and bool(event.get('usage'))
+                and all(type(event['usage'].get(k)) is int and event['usage'][k] >= 0
+                        for k in ('input_tokens', 'output_tokens')))
             if filt.detected:
                 event['policy_error'] = 'credential_echo_redacted'
                 g.failed.set()

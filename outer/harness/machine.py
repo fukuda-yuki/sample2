@@ -1,6 +1,7 @@
 """Operator's ordinary end-to-end workflow. Failed attempts remain in the ledger."""
 from pathlib import Path
 import json
+import time
 import uuid
 
 from . import aggregate, evaluate, preserve, profiles, run, runtime, util
@@ -8,6 +9,28 @@ from . import aggregate, evaluate, preserve, profiles, run, runtime, util
 
 def fingerprint(value):
     return util.sha256_bytes(json.dumps(value, ensure_ascii=False, sort_keys=True).encode('utf-8'))
+
+
+def timed_stage(receipt, stage, operation, *, binding):
+    """Clock an owned local stage; persist identities and exception type only.
+
+    Callers retain the usual ownership lock. Duration includes the durable
+    start receipt and the operation, excludes writing the terminal receipt,
+    and is independent of a Run's implementation budget. Sharing callers can
+    use the same clock with their plan/cohort/pair/instance binding.
+    """
+    identity = {**binding, 'stage': stage, 'stage_instance': uuid.uuid4().hex}
+    started = time.perf_counter()
+    util.append_line(receipt, {**identity, 'event': 'stage_started', 'at': run.now()})
+    try:
+        result = operation()
+    except BaseException as exc:
+        util.append_line(receipt, {**identity, 'event': 'stage_failed', 'at': run.now(),
+            'duration_seconds': time.perf_counter() - started, 'error_type': type(exc).__name__})
+        raise
+    util.append_line(receipt, {**identity, 'event': 'stage_completed', 'at': run.now(),
+        'duration_seconds': time.perf_counter() - started})
+    return result
 
 
 def expected_conditions(repo, task, runtime_id, interventions):
@@ -24,6 +47,78 @@ def verify_conditions(root, expected, intervention):
     if any(actual[k] != expected[k] for k in actual) or (
         fingerprint(util.read_json(root/'profiles/intervention.json')) != expected['interventions'][intervention]):
         raise ValueError('Acceptance conditions changed after the batch plan; no model dispatched')
+
+
+def implement(repo, runs_dir, run_id):
+    """Implement and fix stopped originals now; no scorer/importer/archive here."""
+    root = Path(runs_dir) / run_id
+    try:
+        runtime.start(repo, runs_dir, run_id)
+    finally:
+        manifest = run.load_manifest(runs_dir, run_id)
+        collection_error = None
+        try:
+            if manifest.get('stop_confirmed') and not (root / 'snapshot.json').exists():
+                run.collect_run(runs_dir, run_id)
+        except BaseException as exc:
+            collection_error = type(exc).__name__
+            raise
+        finally:
+            manifest = run.load_manifest(runs_dir, run_id)
+            receipt = {'run_id': run_id, 'run_instance_id': manifest['run_instance_id'],
+                'stop_confirmed': manifest.get('stop_confirmed'), 'at': run.now(),
+                'submission_fixed': manifest.get('submission_fixed', False),
+                'collection_status': 'collection_fault' if collection_error else
+                    ('fixed' if manifest.get('submission_fixed') else 'not_fixed'),
+                'collection_error_type': collection_error,
+                'manifest_sha256': util.sha256_file(root / 'manifest.json'),
+                'raw': util.tree_hashes(root / 'usage/raw'),
+                'snapshot_sha256': util.sha256_file(root / 'snapshot.json') if (root / 'snapshot.json').exists() else None}
+            util.write_new_json(root / 'implementation-receipt.json', receipt)
+    return receipt
+
+
+def postprocess(repo, runs_dir, run_id, archive):
+    """Idempotent serial continuation. Existing scoring/import/archive stays put."""
+    root = Path(runs_dir) / run_id
+    manifest = run.load_manifest(runs_dir, run_id)
+    if not manifest.get('stop_confirmed'):
+        raise RuntimeError('Unconfirmed stop blocks heavy postprocessing')
+    implementation = root / 'implementation-receipt.json'
+    if implementation.exists():
+        saved = util.read_json(implementation)
+        if saved.get('collection_status') == 'collection_fault' or saved.get('collection_error_type'):
+            raise RuntimeError('Recorded collection fault blocks heavy postprocessing')
+    timing = root / 'postprocess-timing.jsonl'
+    binding = {**(manifest.get('assignment') or {}), 'run_id': run_id,
+               'run_instance_id': manifest['run_instance_id']}
+    scoring = evaluate.last_scoring(root)
+    if scoring is None:
+        # A started/incomplete scoring directory is uncertain, never rescore it
+        # automatically after a crash.
+        if evaluate.used_sequences(root):
+            raise RuntimeError('Interrupted scoring requires explicit reconciliation')
+        timed_stage(timing, 'scoring', lambda: evaluate.score_run(repo, runs_dir, run_id), binding=binding)
+    else:
+        util.append_line(timing, {**binding, 'stage': 'scoring', 'event': 'stage_reused',
+            'at': run.now(), 'duration_seconds': None, 'reason': 'existing_scoring_retained'})
+    from . import monitor
+    timed_stage(timing, 'monitor_import_including_build', lambda: monitor.link(repo, root), binding=binding)
+    reference_path = root / 'archive-reference.json'
+    if reference_path.exists():
+        reference = util.read_json(reference_path)
+        timed_stage(timing, 'archive_verify',
+            lambda: preserve.verify(archive, reference['package_id'], reference['sha256']), binding=binding)
+    else:
+        reference = timed_stage(timing, 'archive_pack_including_compression',
+            lambda: preserve.pack_run(archive, root, include=['evidence', 'workspace']), binding=binding)
+        util.write_new_json(reference_path, reference)
+    row = aggregate.row_for(runs_dir, run_id)
+    row['network_cleanup'] = manifest.get('network_cleanup')
+    row['archive'] = reference
+    row['postprocessing'] = {'receipt': str(timing.resolve()), 'receipt_sha256': util.sha256_file(timing),
+                            'stages': util.read_lines(timing)}
+    return row
 
 
 def execute(repo, runs_dir, task, intervention, attempt, runtime_id, archive, *, expected=None):

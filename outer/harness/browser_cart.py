@@ -12,14 +12,16 @@ import time
 import uuid
 import urllib.request
 
-from . import runtime, util, browser_cleanup, ownership
+from . import runtime, util, browser_cleanup, ownership, browser_prerequisite
 from .security import child_environment
 
 OBSERVED = 'agent_observed_C-015_C-016'
 
 
 def required(version):
-    return version == '1.2.0'
+    # Explicit contract versions: a new task must never inherit HTTP-only
+    # acceptance accidentally. Keep the historical 1.1.0 interpretation.
+    return version in ('1.2.0', '1.3.0')
 
 
 def coverage_complete(output):
@@ -185,6 +187,21 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
                 or condition['evaluation']['spec_sha256'] != spec_hash):
             raise ValueError('Browser target/baseline identity mismatch')
         baseline_bound = True
+        if version == '1.3.0' and browser_prerequisite.save_if_unpublished(
+                condition, frozen, baseline, published, assets, out, instance,
+                version=version, requirement_id='R-001', build_check='C-001',
+                coverage_field='browserCartCoverage'):
+            code = 0
+            intent['coverage'] = 'not_run_product_prerequisite'
+            return code
+        migration = util.read_json(assets/'requirements.json').get('migrationContract')
+        if migration:
+            import shutil
+            initial_database = (assets/migration['initialDatabase']).resolve()
+            if not initial_database.is_relative_to(assets.resolve()):
+                raise ValueError('Initial database escapes frozen evaluation assets')
+            shutil.copyfile(initial_database, state/'store.sqlite')
+            intent['initial_database_sha256'] = util.sha256_file(initial_database)
         util.reject_links(published)
         configs = list(published.glob('*.runtimeconfig.json'))
         if len(configs) != 1:
@@ -225,7 +242,9 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
         catalog = util.read_json(assets/'catalog.json')
         album = next(a for a in catalog['albums'] if a['albumId'] == 1)
         request = {'runInstanceId': instance, 'artifactSha256': artifact_hash, 'specSha256': spec_hash,
-                   'baseUrl': base_url, 'albumId': album['albumId'], 'price': album['price']}
+                   'baseUrl': base_url, 'albumId': album['albumId'], 'price': album['price'],
+                   'requireCartStatus': version == '1.3.0',
+                   'structuralPrecondition': version == '1.3.0'}
         util.write_new_json(review/'request.json', request)
         collector = repo/'inner/browser/cart-review.cjs'
         environment = child_environment({k: os.environ[k] for k in

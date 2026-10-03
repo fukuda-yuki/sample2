@@ -53,7 +53,8 @@ def source(repo, task):
     actual = command(['git', '-C', str(cache), 'rev-parse', 'FETCH_HEAD']).stdout.strip()
     if actual != revision:
         raise ValueError('Source commit mismatch')
-    data = subprocess.run(['git', '-C', str(cache), 'archive', '--format=tar', actual],
+    data = subprocess.run(['git', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf',
+                           '-C', str(cache), 'archive', '--format=tar', actual],
                           env=child_environment(), capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
         if any(m.issym() or m.islnk() or m.isdev() for m in archive.getmembers()):
@@ -61,6 +62,8 @@ def source(repo, task):
         dest.mkdir()
         archive.extractall(dest, filter='data')
     util.write_new_json(root / (revision + '.json'), {'source': url, 'commit': actual,
+                                                    'byte_basis': 'git_archive_without_autocrlf',
+                                                    'archive_configuration': {'core.autocrlf': False, 'core.eol': 'lf'},
                                                     'files': util.tree_hashes(dest)})
     return dest
 
@@ -354,15 +357,16 @@ def _start(repo, runs_dir, run_id):
     config = root / 'state' / 'opencode.json'
     util.write_new_json(config, opencode_config(condition))
     catalog = condition['intervention']['method'] == catalog_input.METHOD
+    stdin_prompt = condition['runtime'].get('prompt_transport') == 'stdin'
     gateway_args = ['create', '-i', '--name', state['gateway'], '--label', 'sample2.run=' + run_id,
                     '--label', 'sample2.instance=' + manifest['run_instance_id'],
                     '--network', private, '--network-alias', 'gateway', *sandbox_args(),
                     *mount(root / 'usage/raw', '/records'),
-                    *(mount(root / 'inputs', '/contract', True) if catalog else []), lock['images']['gateway'],
+                    *mount(root / 'inputs', '/contract', True), lock['images']['gateway'],
                     '--run-id', run_id, '--model', condition['runtime']['model_id'],
                     '--session-id', manifest.get('run_instance_id', run_id),
                     '--upstream-timeout', str(condition['runtime'].get('provider_timeout_seconds', 120))]
-    if catalog:
+    if catalog or stdin_prompt:
         gateway_args += ['--expected-prompt', '/contract/prompt.txt']
     manifest.update(started_at=run.now(), runner={'id': 'opencode', 'version': lock['opencode_version']},
                     synthetic=False, model_called=False)
@@ -415,7 +419,16 @@ def _start(repo, runs_dir, run_id):
                 at = args.index(lock['images']['worker'])
                 args = args[:at+1] + ['python3', '-c', catalog_input.WORKER_PREFLIGHT,
                                      'sample2/' + condition['runtime']['model_id']]
+            elif stdin_prompt:
+                at = args.index(lock['images']['worker'])
+                args = args[:at+1] + ['python3', '-c',
+                    "import os,sys; p=open(sys.argv[1],'rb'); os.dup2(p.fileno(),0); "
+                    "os.execvp('opencode',['opencode','run','--pure','--format','json','--title',sys.argv[2],'--model',sys.argv[3]])",
+                    condition['runtime'].get('input_mount', '/input') + '/prompt.txt', run_id,
+                    'sample2/' + condition['runtime']['model_id']]
             docker(*args)
+            state['worker_started_at'] = run.now()
+            util.write_json_atomic(root / 'runtime.json', state)
             with (root / 'evidence/agent.jsonl').open('xb') as log:
                 worker_process = subprocess.Popen(['docker', 'start', '-a', state['worker']],
                     env=child_environment(), stdout=log, stderr=subprocess.STDOUT)
@@ -462,21 +475,18 @@ def _start(repo, runs_dir, run_id):
         state['stopped_at'] = run.now()
         state['stop_confirmed'] = stopped
         util.write_json_atomic(root / 'runtime.json', state)
-        from .live_usage import journal
-        endings, _ = journal(root / 'usage/raw/events.jsonl')
-        observed_response = any(e.get('status') == 'completed' and not e.get('policy_error') for e in endings)
         manifest.update(ended_at=run.now(), duration_seconds=round(time.monotonic() - started, 3),
                         end_reason=reason if stopped else 'stop_unconfirmed', exit_code=exit_code,
-                        stop_confirmed=stopped, stop_method='container_exit', stop_evidence=state,
-                        model_called=(True if observed_response else
-                                      None if (root / 'usage/raw/started.jsonl').exists() else False))
+                        stop_confirmed=stopped, stop_method='container_exit', stop_evidence=state)
         run.save_manifest(runs_dir, run_id, manifest)
+        from .live_usage import update_manifest_evidence
+        update_manifest_evidence(root)
         # The measured interval ends above. Cleanup cannot change its outcome,
         # duration or usage, and runs even when subsequent normalization fails.
         manifest['network_cleanup'] = record_cleanup(root)
     from . import live_usage
     live_usage.collect(root)
-    return manifest
+    return run.load_manifest(runs_dir, run_id)
 
 
 def request_stop(root):
@@ -513,7 +523,10 @@ def request_stop(root):
                             stop_method='container_exit',
                             end_reason='operator_stop' if stopped else 'stop_unconfirmed')
             run.save_manifest(root.parent, root.name, manifest)
+            from . import live_usage
+            live_usage.update_manifest_evidence(root)
             record_cleanup(root)
+            live_usage.collect(root)
     except BlockingIOError:
         deadline = time.monotonic() + 55
         while time.monotonic() < deadline:
@@ -531,9 +544,19 @@ def request_stop(root):
 
 def scoring_command(condition, frozen, out, work, assets, version, sequence):
     name = 's2-score-' + uuid.uuid4().hex
+    business = []
+    migration = condition['evaluation'].get('migration_contract')
+    if migration:
+        import_input = migration.get('import_input', 'initial-store.sqlite')
+        if import_input not in ('initial-store.sqlite', 'legacy-school.sqlite'):
+            raise ValueError('Migration evaluation import input is not an allowed public database')
+        initial = Path(assets) / import_input
+        if not initial.is_file():
+            raise ValueError('Migration evaluation requires its frozen initial business database')
+        business = mount(initial, '/inputs/existing-business/' + import_input, True)
     cmd = ['docker', 'run', '--name', name, '--network', 'none', *sandbox_args(),
            *mount(frozen, '/artifact', True), *mount(assets, '/assets', True),
-           *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],
+           *business, *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],
            'dotnet', '/assets/evaluator/' + condition['evaluation']['assembly'], '--artifact', '/artifact',
            '--out', '/result', '--work', '/work', '--spec', '/assets/requirements.json',
            '--catalog', '/assets/catalog.json', '--evaluation-version', version, '--sequence', str(sequence)]

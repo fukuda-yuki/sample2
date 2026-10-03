@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "purpose": "technical paired execution acceptance only",
+  "cohort": "technical-pair-live-20261003",
+  "task": "MS1-CONT-A",
+  "runtime": "deepseek-migration-v1",
+  "order": [
+    {"pair": 1, "concurrency": 1, "attempt": 9001, "conditions": ["explore", "preload"]},
+    {"pair": 2, "concurrency": 2, "attempt": 9002, "conditions": ["explore", "preload"]}
+  ],
+  "limits": {
+    "maximum_dispatches": 4,
+    "run_seconds": 1800,
+    "provider_timeout_seconds": 600,
+    "maximum_accumulated_run_seconds": 7200,
+    "reported_observed_tokens_stop": 20000000,
+    "gateway_started_calls_stop": 600,
+    "no_retries_or_replacements": true
+  },
+  "stop_rules": ["provider fault", "storage fault", "identity conflict", "unconfirmed stop", "missing usage", "any safety limit"],
+  "product_failure": "retain as a valid quality observation; does not authorize replacement",
+  "adoption": {
+    "required": ["no identity/raw/recovery defects", "complete usage for every dispatched Run", "no observed load-related missingness", "paired total local elapsed time less than serial total local elapsed time"],
+    "quality_pass_required_for_speed": false,
+    "no_distribution_equivalence_claim": true,
+    "public_gateway_elapsed": "not_run unless actual external publication independently completed"
+  },
+  "timing": {
+    "run_implementation": "manifest started_at through ended_at; unchanged budget",
+    "pair_implementation_makespan": "earliest started_at through latest ended_at",
+    "local_pair_elapsed": "manager execute_pair entry through serial postprocessing return",
+    "postprocessing": "journal postprocess_start through corresponding result, each stage separately",
+    "public_gate": "separate; not added to observed local elapsed or represented as zero"
+  },
+  "scientific_boundary": "Never pool this cohort with either historical observations or future research. The serial scientific regime remains the default until technical acceptance and scientific adoption are separately recorded.",
+  "authorization": "Existing explicit user permission for necessary technical live validation using the Windows User OPENCODE_GO_API_KEY through the existing gateway-only path. No new research acquisition or old remaining slots are authorized."
+}

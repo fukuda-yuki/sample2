@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "task_id": "MS1-CONT-B",
+  "task_title": "Music Store existing-data continuity, semantic variant B",
+  "family_id": "music-store-continuity",
+  "semantic_variant": "B",
+  "collection_policy": "workspace-static-db-v2",
+  "task_input_adapter": "migration-v1",
+  "start_state": {
+    "kind": "migration-snapshot",
+    "source_repository": "chack411/MVC-Music-Store",
+    "source_branch": "net48",
+    "source_commit": "2967afb9d69488641df0d154e2ad5827a7820e71",
+    "asset_variant": "B",
+    "provenance_note": "Pinned public family plus explicitly synthetic researcher-authored operational overlay. Variants are not independent tasks."
+  },
+  "environment": {
+    "runtime": "dotnet",
+    "sdk": "8.0.425",
+    "network": "gateway-only",
+    "target_framework": "net8.0",
+    "packages": [
+      "Microsoft.EntityFrameworkCore.Sqlite/8.0.31",
+      "Microsoft.Data.Sqlite/8.0.31"
+    ]
+  },
+  "migration_request": "Modernize the supplied Music Store source from ASP.NET MVC 5 / .NET Framework 4.8 to a runnable .NET 8 web application. The target may use MVC or another compatible .NET web implementation. Preserve the storefront, genre navigation, album details, session cart, address checkout and order completion. Administration, login and external integrations are excluded.\n\nThe source and the existing-business directory together define this installation. Inspect the existing code, including its operational pricing policy, and the supplied SQLite snapshot. Preserve every existing identifier, catalog value, customer record, order header, order detail, relationship and retained cart. Existing historical order amounts are historical facts and must not be recalculated using today's prices. Apply the source-defined pricing policy to current displayed unit prices, cart totals and new order details. No variant-specific price or answer is specified by this request.\n\nUse Microsoft.NET.Sdk.Web, net8.0 or later, accept --urls, build with dotnet publish and respond to GET /. Do not reference or launch System.Web, a net4x project, or the old application's assemblies. Read ConnectionStrings:MusicStoreEntities (environment variable ConnectionStrings__MusicStoreEntities) and use the specified SQLite file. It can already contain the supplied installation snapshot. If the path is new, import /inputs/existing-business/initial-store.sqlite without replacing an existing database. Starting or restarting must not destroy or duplicate the preserved data. Monetary display uses a decimal point and two decimal places. The target schema keeps the supplied table and column names; extra columns/tables are allowed.\n\nGET / and /Store list the supplied genres. GET /Store/Browse?genre=NAME lists only that genre; missing genres and albums return 404. GET /Store/Details/ID shows its title, genre, artist and current price. GET /ShoppingCart/AddToCart/ID redirects to /ShoppingCart. Duplicate additions increase quantity within one line. POST /ShoppingCart/RemoveFromCart accepts form id, decrements one unit and removes an empty line; its JSON contains remaining itemCount. The actual page removal control must update the row, total and Cart (N) through ordinary application behavior; AJAX or navigation initiated by the application is allowed. The evaluator must not force a refresh or navigation to obtain the expected state. A session cannot remove another session's line.\n\nCart HTML exposes row-ID, item-count-ID, cart-total and cart-status; album links point to /Store/Details/ID. Attribute quote style and markup layout may vary. GET /Checkout/AddressAndPayment shows the address form. POST accepts FirstName, LastName, Address, City, State, PostalCode, Country, Phone, Email and PromoCode. Every address field is required and PromoCode FREE is case-insensitive. Invalid input redisplays the form with status 200 and does not change cart or saved orders. Valid checkout redirects to /Checkout/Complete/ORDER, persists quantity and the current unit price, and empties only the purchasing cart. The completion page has a unique order-number element containing its integer OrderId; another session receives 403 or 404. Existing archived customers remain unchanged; new anonymous orders need not create a customer.\n\nThe cart is isolated by session. Catalog and all existing Orders/OrderDetails/Customers/retained Carts survive process restart unchanged. New Orders.OrderId and OrderDetails.OrderDetailId do not collide with old identifiers. Orders.Total equals the sum of persisted Quantity * UnitPrice. No source reuse percentage, exact visual imitation, HTML ordering, authentication, performance, concurrency or deployment criterion is required.\n",
+  "input_policy": {
+    "allowlist": [
+      "legacy-source",
+      "existing-business"
+    ],
+    "denied": [
+      "inner/",
+      "docs/",
+      "research/",
+      "evaluation-assets/",
+      "migration-oracle.json"
+    ],
+    "note": "Read-only legacy source and raw business assets in both conditions; private expectations never enter implementation inputs."
+  },
+  "evaluation": {
+    "evaluation_version": "1.3.0",
+    "spec_path": "inner/spec/requirements-cont-B-1.3.0.json",
+    "catalog_path": "artifacts/migration-assets-v2/MS1-CONT-B/evaluation/catalog.json",
+    "spec_sha256": "30d0476b4f47b77e74622c4ea0d1257f5af4c3772c2f33c7aba15a8a7e5e2d9e",
+    "project": "MusicStore.Evaluator/MusicStore.Evaluator.csproj",
+    "assembly": "MusicStore.Evaluator.dll",
+    "migration_contract": {
+      "initial_database": "initial-store.sqlite",
+      "oracle": "migration-oracle.json"
+    },
+    "extra_assets": {
+      "artifacts/migration-assets-v2/MS1-CONT-B/evaluation/initial-store.sqlite": "initial-store.sqlite",
+      "artifacts/migration-assets-v2/MS1-CONT-B/evaluation/migration-oracle.json": "migration-oracle.json"
+    }
+  },
+  "context_files": [
+    "INSTALLATION-NOTE.txt",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/SourcePricingPolicy.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Models/ShoppingCart.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Controllers/StoreController.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Controllers/ShoppingCartController.cs",
+    "MvcMusicStore-Completed/MvcMusicStore/Controllers/CheckoutController.cs",
+    "OperationalData/existing-data.json"
+  ],
+  "explanation": "The old code and raw business snapshot define current pricing, cart quantity and historic orders. Inspect their relationships; preserve old records and apply the current source rule only to new operations.",
+  "human_review": "not_run",
+  "membership": "calibration_and_exploratory_development",
+  "held_out": false
+}

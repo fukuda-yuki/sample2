@@ -70,7 +70,13 @@ public static class Program
         var text=string.Concat(paths.Select(p=>p.Replace('\\','/')+" "+HashFile(Path.Combine(root,p))+"\n"));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
     }
-    static void Check(int id,bool pass,string detail)=>results[$"E-{id:000}"]=(pass?"pass":"fail",detail);
+    static void Check(int id,bool pass,string detail)
+    {
+        var key=$"E-{id:000}";
+        if(pass&&results[key].judgement=="fail")return;
+        results[key]=(pass?"pass":"fail",detail);
+        File.AppendAllText(Path.Combine(evidence,"observed-checks.jsonl"),JsonSerializer.Serialize(new{checkId=key,judgement=results[key].judgement,observation=detail})+"\n");
+    }
     static SqliteConnection Database(string path)
     {
         var c=new SqliteConnection(new SqliteConnectionStringBuilder{DataSource=path,Mode=SqliteOpenMode.ReadOnly,Pooling=false}.ToString());c.Open();return c;
@@ -235,15 +241,20 @@ public static class Program
         Check(3,imported,"Actual initial missing-path raw schema import: "+initial);
         if(!imported)return;
         using var web=new Web(host.BaseUrl);
-        var home=web.Get("/");var list=web.Get("/Student");
-        var students=oracle["tables"]["Students"]["rows"].AsArray();var ids=students.Select(s=>long.Parse(S(s,"ID"))).ToHashSet();
+        var home=web.Get("/");
         var links=new HtmlParser().ParseDocument(home.Body).QuerySelectorAll("a[href]").Select(a=>a.GetAttribute("href")).ToList();
-        var search=web.Get("/Student?SearchString="+Uri.EscapeDataString(S(oracle["workflow"]["search"],"query")));
+        var homeOk=home.Status==200&&links.Contains("/Student")&&links.Contains("/Course");
+        if(!homeOk)Check(4,false,"Home response/navigation failed before subsequent observations.");
+        var list=web.Get("/Student");
+        var students=oracle["tables"]["Students"]["rows"].AsArray();var ids=students.Select(s=>long.Parse(S(s,"ID"))).ToHashSet();
         var expectedSearch=oracle["workflow"]["search"]["student_ids"].AsArray().Select(x=>long.Parse(x.ToString())).ToHashSet();
         var listDoc=new HtmlParser().ParseDocument(list.Body);
         var ordinaryLinks=ids.All(id=>listDoc.GetElementById("student-"+id)?.QuerySelectorAll("a[href]").Select(a=>a.GetAttribute("href")).Contains("/Student/Details/"+id)==true
             &&listDoc.GetElementById("student-"+id)?.QuerySelectorAll("a[href]").Select(a=>a.GetAttribute("href")).Contains("/Student/Edit/"+id)==true);
-        Check(4,home.Status==200&&links.Contains("/Student")&&links.Contains("/Course")&&list.Status==200&&Ids(list.Body,"student-").SetEquals(ids)&&ordinaryLinks
+        var listOk=list.Status==200&&Ids(list.Body,"student-").SetEquals(ids)&&ordinaryLinks;
+        if(!listOk)Check(4,false,"Student list/links failed before search observation.");
+        var search=web.Get("/Student?SearchString="+Uri.EscapeDataString(S(oracle["workflow"]["search"],"query")));
+        Check(4,homeOk&&listOk
             &&search.Status==200&&Ids(search.Body,"student-").SetEquals(expectedSearch),"Home/list/search student identifiers and routes.");
         var detailsOk=true;var notes=new List<string>();
         foreach(var s in students)
@@ -259,41 +270,63 @@ public static class Program
                 var row=doc.GetElementById("enrollment-"+eid);var course=oracle["tables"]["Courses"]["rows"].AsArray().Single(c=>S(c,"CourseID")==S(e,"CourseID"));
                 ok&=Marker(d.Body,"grade-"+eid)==grade&&row!=null&&row.TextContent.Contains(S(course,"Title"))&&row.QuerySelectorAll("a[href]").Any(a=>a.GetAttribute("href")=="/Course/Details/"+S(e,"CourseID"));
             }
+            if(!ok)Check(5,false,"Observed student detail/join/grade failure; ID="+id+"; subsequent observations pending.");
             detailsOk&=ok;notes.Add(id+"="+ok);
         }
         detailsOk&=web.Get("/Student/Details/99999999").Status==404;
         Check(5,detailsOk,"Original student details, FullName, joins, grade enum and null semantics: "+string.Join(",",notes));
         var courses=oracle["tables"]["Courses"]["rows"].AsArray();var courseList=web.Get("/Course");var coursesOk=courseList.Status==200&&Ids(courseList.Body,"course-").SetEquals(courses.Select(c=>long.Parse(S(c,"CourseID"))));
+        if(!coursesOk)Check(6,false,"Course list failed before subsequent detail observations.");
         foreach(var c in courses)
         {
             var d=web.Get("/Course/Details/"+S(c,"CourseID"));var department=oracle["tables"]["Departments"]["rows"].AsArray().Single(x=>S(x,"DepartmentID")==S(c,"DepartmentID"));
-            coursesOk&=d.Status==200&&Marker(d.Body,"course-id")==S(c,"CourseID")&&Marker(d.Body,"course-credits")==S(c,"Credits")&&Marker(d.Body,"department-name")==S(department,"Name")&&d.Body.Contains(WebUtility.HtmlEncode(S(c,"Title")));
+            var courseOk=d.Status==200&&Marker(d.Body,"course-id")==S(c,"CourseID")&&Marker(d.Body,"course-credits")==S(c,"Credits")&&Marker(d.Body,"department-name")==S(department,"Name")&&d.Body.Contains(WebUtility.HtmlEncode(S(c,"Title")));
+            if(!courseOk)Check(6,false,"Observed course detail failure; ID="+S(c,"CourseID")+"; subsequent observations pending.");
+            coursesOk&=courseOk;
         }
         coursesOk&=web.Get("/Course/Details/99999999").Status==404;Check(6,coursesOk,"Externally assigned course IDs, title, credits and department relationships.");
-        var create=Fields(oracle["workflow"]["create"]["fields"]);var beforeCreateCount=StudentCount(host.DatabasePath);var form=web.Get("/Student/Create");var posted=web.Post("/Student/Create",Form(form.Body,create));
+        var create=Fields(oracle["workflow"]["create"]["fields"]);var beforeCreateCount=StudentCount(host.DatabasePath);var form=web.Get("/Student/Create");
+        if(form.Status!=200||!HasForm(form.Body))Check(7,false,"Create form failed before submitting a valid student.");
+        var posted=web.Post("/Student/Create",Form(form.Body,create));
+        if(posted.Status is not(302 or 303))Check(7,false,"Valid Create failed to redirect before database observation.");
         var newId=CreatedId(host.DatabasePath,create);var created=Student(host.DatabasePath,newId);
         Check(7,form.Status==200&&HasForm(form.Body)&&posted.Status is 302 or 303&&posted.Location=="/Student/Details/"+newId&&newId>0&&!ids.Contains(newId)&&StudentCount(host.DatabasePath)==beforeCreateCount+1&&StudentMatches(created,create)&&RowsMatch(host.DatabasePath,out _),"One new student stored without old-ID collision; ID="+newId);
         var invalidCreateOk=true;var initialSnapshot=Snapshot(host.DatabasePath);
         foreach(var invalid in Invalids(create))
         {
-            var g=web.Get("/Student/Create");var r=web.Post("/Student/Create",Form(g.Body,invalid));invalidCreateOk&=r.Status==200&&HasForm(r.Body)&&Snapshot(host.DatabasePath)==initialSnapshot;
+            var g=web.Get("/Student/Create");var r=web.Post("/Student/Create",Form(g.Body,invalid));
+            var formOk=r.Status==200&&HasForm(r.Body);
+            if(!formOk)Check(8,false,"Observed invalid Create response accepted or lacked ordinary form; subsequent observations pending.");
+            var unchanged=Snapshot(host.DatabasePath)==initialSnapshot;
+            if(!unchanged)Check(8,false,"Observed invalid Create mutation; subsequent observations pending.");
+            invalidCreateOk&=formOk&&unchanged;
         }
         Check(8,invalidCreateOk,"Nine missing/whitespace/51-char/calendar-invalid create cases preserve all tables.");
         if(newId<=0)return;
         var edit=Fields(oracle["workflow"]["edit"]["fields"]);edit["ID"]=newId.ToString();var beforeEditCount=StudentCount(host.DatabasePath);var beforeEditRelated=Snapshot(host.DatabasePath,false);
-        var editForm=web.Get("/Student/Edit/"+newId);var saved=web.Post("/Student/Edit/"+newId,Form(editForm.Body,edit));var edited=Student(host.DatabasePath,newId);
+        var editForm=web.Get("/Student/Edit/"+newId);
+        if(editForm.Status!=200||!HasForm(editForm.Body))Check(9,false,"Edit form failed before submitting valid values.");
+        var saved=web.Post("/Student/Edit/"+newId,Form(editForm.Body,edit));
+        if(saved.Status is not(302 or 303))Check(9,false,"Valid Edit failed to redirect before database observation.");
+        var edited=Student(host.DatabasePath,newId);
         Check(9,editForm.Status==200&&HasForm(editForm.Body)&&saved.Status is 302 or 303&&saved.Location=="/Student/Details/"+newId&&StudentMatches(edited,edit)
             &&StudentCount(host.DatabasePath)==beforeEditCount&&Snapshot(host.DatabasePath,false)==beforeEditRelated&&RowsMatch(host.DatabasePath,out _)&&web.Get("/Student/Edit/99999999").Status==404,"Selected new student edit without altering originals/joins; ID="+newId);
         var invalidEditOk=true;var editedSnapshot=Snapshot(host.DatabasePath);
         foreach(var invalid in Invalids(edit))
         {
-            var g=web.Get("/Student/Edit/"+newId);var r=web.Post("/Student/Edit/"+newId,Form(g.Body,invalid));invalidEditOk&=r.Status==200&&HasForm(r.Body)&&Snapshot(host.DatabasePath)==editedSnapshot;
+            var g=web.Get("/Student/Edit/"+newId);var r=web.Post("/Student/Edit/"+newId,Form(g.Body,invalid));
+            var formOk=r.Status==200&&HasForm(r.Body);
+            if(!formOk)Check(10,false,"Observed invalid Edit response accepted or lacked ordinary form; subsequent observations pending.");
+            var unchanged=Snapshot(host.DatabasePath)==editedSnapshot;
+            if(!unchanged)Check(10,false,"Observed invalid Edit mutation; subsequent observations pending.");
+            invalidEditOk&=formOk&&unchanged;
         }
         Check(10,invalidEditOk,"Nine missing/whitespace/51-char/calendar-invalid edit cases preserve all tables.");
         var preStopSnapshot=Snapshot(host.DatabasePath);
         var firstPid=host.AppProcessId;host.Stop();var firstStopped=host.ProcessExited;host.Start();var restarted=host.WaitReady(TimeSpan.FromSeconds(30));
         var restartIdentity=firstStopped&&host.AppProcessId!=firstPid;
         File.WriteAllText(Path.Combine(evidence,"restart.json"),JsonSerializer.Serialize(new{firstPid,firstStopConfirmed=firstStopped,restartedPid=host.AppProcessId,sameDatabasePath=host.DatabasePath},Json));
+        if(!restarted.Ready||!restartIdentity)Check(11,false,"Observed restart readiness/process identity failure before reading persistence.");
         Check(11,restarted.Ready&&restartIdentity&&Snapshot(host.DatabasePath)==preStopSnapshot&&RowsMatch(host.DatabasePath,out _),"Restart retains the actual complete pre-stop database without duplication; independent invalid-input failures remain E-008/E-010; first stop="+firstStopped+", distinct PID="+restartIdentity);
         host.Stop();
     }

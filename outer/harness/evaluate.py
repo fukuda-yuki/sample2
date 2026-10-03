@@ -296,7 +296,23 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
             # Keep legacy HTTP output as evidence, never adopt it as research quality.
             exit_code = 2
     produced = temporary / 'evaluation.json'
-    if timed_out or not produced.is_file():
+    if (browser_required and not produced.is_file() and (timed_out or exit_code != 0)
+            and (http_out / 'evaluation.json').is_file() and (http_out / 'results.jsonl').is_file()):
+        baseline = util.read_json(http_out / 'evaluation.json')
+        if (not check_mismatches(baseline, condition, version, frozen, independent_hash, spec, spec_sha256)
+                and _reported_evaluator_sha256(http_out) == evaluator_sha256):
+            # An observer failure before browser collection must retain already
+            # confirmed, bound product failures; it never creates numeric quality.
+            fallback = {**baseline, 'quality': None, 'researchStatus': 'incomplete',
+                        'browserReviewCoverage': 'not_run_evaluator_fault',
+                        'browserCartCoverage': 'not_run_evaluator_fault',
+                        'reviewRunInstanceId': manifest.get('run_instance_id'),
+                        'baselineEvaluationSha256': util.sha256_file(http_out / 'evaluation.json'),
+                        'baselineResultsSha256': util.sha256_file(http_out / 'results.jsonl'),
+                        'evaluatorFaults': baseline.get('evaluatorFaults') or ['HTTP evaluator exited before browser collection']}
+            util.write_new_json(produced, fallback)
+            shutil.copyfile(http_out / 'evaluator-manifest.json', temporary / 'evaluator-manifest.json')
+    if (timed_out and not browser_required) or not produced.is_file():
         target = evaluations / ('fault-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
         record = _base_record(run_id, sequence, version, exit_code, independent_hash,
                               spec_sha256, 'evaluator_fault', None, [], command,
@@ -322,7 +338,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                           spec_sha256, state, output, mismatches, command,
                           evaluator_sha256=evaluator_sha256,
                           evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
-                          timeout_seconds=timeout, work_dir=str(work_dir),
+                          timed_out=timed_out, timeout_seconds=timeout, work_dir=str(work_dir),
                           artifact_sha256_frozen=frozen_hash)
     record['evaluation_sha256'] = util.sha256_file(produced)
     record['operation_status'] = ('cleanup_failed' if browser_required

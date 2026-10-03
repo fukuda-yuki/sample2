@@ -4,6 +4,7 @@
   "task_title": "Contoso enrollment existing-data migration, semantic variant C",
   "family_id": "contoso-enrollment",
   "semantic_variant": "C",
+  "collection_policy": "workspace-static-db-v2",
   "task_input_adapter": "migration-v1",
   "start_state": {
     "kind": "migration-snapshot",

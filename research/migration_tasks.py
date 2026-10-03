@@ -277,6 +277,7 @@ def materialize_reference(repo, name, destination, fixed_variant=None, quote_sty
     template = Path(repo) / 'inner/tasks' / FAMILY / 'reference/MusicStore.Continuity'
     shutil.copytree(template, destination / 'MusicStore.Continuity', ignore=shutil.ignore_patterns('bin', 'obj'))
     project = destination / 'MusicStore.Continuity'
+    (project / 'Data').mkdir(exist_ok=True)
     rule_variant = fixed_variant or name
     (project / 'SourcePricingPolicy.cs').write_text(pricing_source(variant(repo, rule_variant)['pricing_rate'],
                                               namespace='MusicStore.Minimal'), encoding='utf-8')

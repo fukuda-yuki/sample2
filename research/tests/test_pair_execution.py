@@ -194,5 +194,38 @@ class PairExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Recorded postprocess fault'):
             pair.record_pair_gate(self.batch,1,proof)
 
+    def test_stop_reconciliation_binds_final_raw_and_retains_original_receipt(self):
+        def implement(repo,batch,rid):
+            receipt=self.implement(repo,batch,rid)
+            if rid=='A':
+                raw=batch/rid/'usage/raw'; raw.mkdir(parents=True)
+                (raw/'response.sse').write_bytes(b'partial')
+                receipt.update(stop_confirmed=False,raw=util.tree_hashes(raw))
+                util.write_json_atomic(batch/rid/'implementation-receipt.json',receipt)
+                m=util.read_json(batch/rid/'manifest.json'); m['stop_confirmed']=False
+                util.write_json_atomic(batch/rid/'manifest.json',m)
+            return receipt
+        self.assertEqual(self.execute(implement=implement)['reason'],'implementation_fault')
+        original=self.batch/'A/implementation-receipt.json'; original_hash=util.sha256_file(original)
+        def stop(root):
+            (root/'usage/raw/response.sse').write_bytes(b'final stopped stream')
+            m=util.read_json(root/'manifest.json'); m['stop_confirmed']=True
+            util.write_json_atomic(root/'manifest.json',m)
+        def collect(batch,rid): util.write_new_json(batch/rid/'snapshot.json',{'artifact_state':'fixed'})
+        with patch.object(pair.run,'collect_run',collect):
+            result=pair.recover_pair(self.plan,self.batch,repo=self.root,stop=stop,postprocess=self.postprocess)
+        self.assertEqual(result['reason'],'pair_publication_restore_cleanup_required')
+        current=pair.state(self.batch/'_control/pair-journal.jsonl')
+        receipt=current['implementations']['A']['receipt']
+        self.assertEqual(receipt['raw'],util.tree_hashes(self.batch/'A/usage/raw'))
+        self.assertEqual(receipt['manifest_sha256'],util.sha256_file(self.batch/'A/manifest.json'))
+        self.assertEqual(receipt['snapshot_sha256'],util.sha256_file(self.batch/'A/snapshot.json'))
+        self.assertEqual(receipt['reconciles_implementation_receipt']['sha256'],original_hash)
+        self.assertEqual(util.sha256_file(original),original_hash)
+        self.assertFalse(util.read_json(original)['stop_confirmed'])
+        util.write_json_atomic(original,{**util.read_json(original),'stop_confirmed':True})
+        with self.assertRaisesRegex(ValueError,'original receipt changed'):
+            pair.state(self.batch/'_control/pair-journal.jsonl')
+
 
 if __name__ == '__main__': unittest.main()

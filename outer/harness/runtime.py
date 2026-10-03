@@ -53,7 +53,8 @@ def source(repo, task):
     actual = command(['git', '-C', str(cache), 'rev-parse', 'FETCH_HEAD']).stdout.strip()
     if actual != revision:
         raise ValueError('Source commit mismatch')
-    data = subprocess.run(['git', '-C', str(cache), 'archive', '--format=tar', actual],
+    data = subprocess.run(['git', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf',
+                           '-C', str(cache), 'archive', '--format=tar', actual],
                           env=child_environment(), capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
         if any(m.issym() or m.islnk() or m.isdev() for m in archive.getmembers()):
@@ -61,6 +62,8 @@ def source(repo, task):
         dest.mkdir()
         archive.extractall(dest, filter='data')
     util.write_new_json(root / (revision + '.json'), {'source': url, 'commit': actual,
+                                                    'byte_basis': 'git_archive_without_autocrlf',
+                                                    'archive_configuration': {'core.autocrlf': False, 'core.eol': 'lf'},
                                                     'files': util.tree_hashes(dest)})
     return dest
 
@@ -541,12 +544,16 @@ def request_stop(root):
 
 def scoring_command(condition, frozen, out, work, assets, version, sequence):
     name = 's2-score-' + uuid.uuid4().hex
-    initial = Path(assets) / 'initial-store.sqlite'
     business = []
-    if condition['evaluation'].get('migration_contract'):
+    migration = condition['evaluation'].get('migration_contract')
+    if migration:
+        import_input = migration.get('import_input', 'initial-store.sqlite')
+        if import_input not in ('initial-store.sqlite', 'legacy-school.sqlite'):
+            raise ValueError('Migration evaluation import input is not an allowed public database')
+        initial = Path(assets) / import_input
         if not initial.is_file():
             raise ValueError('Migration evaluation requires its frozen initial business database')
-        business = mount(initial, '/inputs/existing-business/initial-store.sqlite', True)
+        business = mount(initial, '/inputs/existing-business/' + import_input, True)
     cmd = ['docker', 'run', '--name', name, '--network', 'none', *sandbox_args(),
            *mount(frozen, '/artifact', True), *mount(assets, '/assets', True),
            *business, *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],

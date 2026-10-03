@@ -90,6 +90,10 @@ def state(journal):
             elif receipt.get('receipt') != event.get('receipt') or any(receipt.get('binding',{}).get(k) != dispatch[rid].get(k)
                     for k in ('run_id','run_instance_id','pair','slot','plan_sha256','cohort','runtime')):
                 raise ValueError('Implementation receipt binding changed')
+            baseline = (receipt.get('receipt') or {}).get('reconciles_implementation_receipt')
+            if baseline and (not Path(baseline['path']).is_file()
+                    or util.sha256_file(baseline['path']) != baseline['sha256']):
+                raise ValueError('Stop reconciliation original receipt changed')
         elif kind == 'pair_gate':
             pair = event['pair']
             assigned = [r for r, d in dispatch.items() if d['pair'] == pair]
@@ -336,7 +340,11 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
                 receipt = util.read_json(receipt_path)
                 if not receipt.get('stop_confirmed'):
                     receipt = {**receipt, 'stop_confirmed': True, 'recovered': True,
-                        'manifest_sha256': util.sha256_file(root / 'manifest.json')}
+                        'manifest_sha256': util.sha256_file(root / 'manifest.json'),
+                        'raw': util.tree_hashes(root / 'usage/raw'),
+                        'snapshot_sha256': util.sha256_file(root / 'snapshot.json'),
+                        'reconciles_implementation_receipt': {'path': str(receipt_path.resolve()),
+                            'sha256': util.sha256_file(receipt_path)}}
                     util.write_new_json(root / ('stop-reconciliation-' + uuid.uuid4().hex + '.json'), receipt)
                 _record_implementation(journal, binding, receipt, batch, 'stop_reconciled' if previous else 'implemented')
             if rid not in current['results'] and (root / 'postprocess-receipt.json').exists():

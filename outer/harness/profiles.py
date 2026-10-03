@@ -74,6 +74,16 @@ def prepare_prompt(condition, source, catalog=None):
               'Environment: .NET SDK 8; target net8.0. EF Core SQLite 8.0.31 and '
               'Microsoft.Data.Sqlite 8.0.31 are available offline. No Internet access. '
               'Use /tmp for scratch databases.\n\n' + request)
+    if util.resolve_collection_policy(condition.get('collection_policy')) == util.STATIC_DB_COLLECTION_POLICY:
+        common += ('\n\nSubmission collection contract (workspace-static-db-v2): '
+            '/workspace contains the final project and its submitted static data assets. '
+            'Regular .sqlite, .sqlite3 and .db files there are retained byte-for-byte with the project. '
+            'Use /tmp for mutable application test databases and scratch databases; do not leave them '
+            'in the submitted project. Close submitted static databases before finishing, and ensure '
+            'their WAL, SHM and rollback-journal sidecars have been resolved by your application. '
+            'Collection holds if a submitted database has a nonempty sidecar; the collector never '
+            'checkpoints or changes a database. Generated bin, obj, .git, .vs, node_modules, testresults, '
+            '.user files and database sidecars are excluded from the submission.')
     common = common.replace('/input/legacy-source',
                             condition['runtime'].get('input_mount', '/input') + '/legacy-source')
     if condition['intervention']['method'] == catalog_input.METHOD:

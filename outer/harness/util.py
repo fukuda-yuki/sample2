@@ -8,10 +8,14 @@ import os
 import uuid
 from pathlib import Path
 
-# Collection excludes. Must be a superset of the evaluator's exclusions
-# (bin, obj, .git) or the artifact hash the evaluator computes will differ.
+# Collection excludes. Frozen artifact identity separately follows the SDK.
 EXCLUDED_DIRECTORIES = ('bin', 'obj', '.git', '.vs', 'node_modules', 'testresults')
 EXCLUDED_SUFFIXES = ('.sqlite', '.sqlite3', '.db', '.db-shm', '.db-wal', '.user')
+ARTIFACT_EXCLUDED_DIRECTORIES = ('bin', 'obj', '.git')
+LEGACY_COLLECTION_POLICY = 'legacy-v1'
+STATIC_DB_COLLECTION_POLICY = 'workspace-static-db-v2'
+DATABASE_SUFFIXES = ('.sqlite', '.sqlite3', '.db')
+DATABASE_SIDECARS = ('-wal', '-shm', '-journal')
 
 # Text files whose line endings and BOM are fixed at collection time.
 # The evaluation ID depends on the artifact bytes, so the bytes must not
@@ -94,9 +98,9 @@ def artifact_files(root):
     '/' and '\\' (digits, ':', uppercase letters, '['), so the backslash form
     is what gets sorted here too.
 
-    The evaluator's own exclusions are directories only. EXCLUDED_SUFFIXES is
-    applied here as well because collection drops those files from frozen/:
-    the frozen directory never holds them, so the two hashes still agree.
+    Frozen identity counts every regular file except bin/obj/.git, exactly as
+    both SDK evaluators do. Workspace collection selection is a separate API.
+    Existing frozen trees without excluded database files keep their hashes.
     """
     root = Path(root)
     reject_links(root)
@@ -105,7 +109,7 @@ def artifact_files(root):
         if not path.is_file():
             continue
         relative = path.relative_to(root)
-        if is_excluded(relative.parts) or path.suffix.lower() in EXCLUDED_SUFFIXES:
+        if any(part.lower() in ARTIFACT_EXCLUDED_DIRECTORIES for part in relative.parts):
             continue
         files.append(str(relative))
     return sorted(files, key=lambda name: name.replace('/', '\\').encode('utf-16-be'))
@@ -118,6 +122,13 @@ def reject_links(root):
             raise ValueError('Links are not allowed in collected artifacts')
 
 
+def _files_hash(root, files):
+    builder = []
+    for relative in files:
+        builder.extend((relative.replace('\\', '/'), ' ', sha256_file(Path(root) / relative), '\n'))
+    return sha256_bytes(''.join(builder).encode('utf-8'))
+
+
 def artifact_hash(root):
     """Byte identity of an artifact directory.
 
@@ -128,13 +139,63 @@ def artifact_hash(root):
     root = Path(root)
     if not root.is_dir():
         raise FileNotFoundError(root)
-    builder = []
-    for relative in artifact_files(root):
-        builder.append(relative.replace('\\', '/'))
-        builder.append(' ')
-        builder.append(sha256_file(root / relative))
-        builder.append('\n')
-    return sha256_bytes(''.join(builder).encode('utf-8'))
+    return _files_hash(root, artifact_files(root))
+
+
+def resolve_collection_policy(policy=None):
+    policy = LEGACY_COLLECTION_POLICY if policy is None else policy
+    if policy not in (LEGACY_COLLECTION_POLICY, STATIC_DB_COLLECTION_POLICY):
+        raise ValueError('Unknown submission collection policy')
+    return policy
+
+
+def collection_contract(policy=None):
+    policy = resolve_collection_policy(policy)
+    return {'version': 2 if policy == STATIC_DB_COLLECTION_POLICY else 1,
+        'policy': policy, 'excluded_directories': list(EXCLUDED_DIRECTORIES),
+        'database_assets_retained': policy == STATIC_DB_COLLECTION_POLICY,
+        'nonempty_database_sidecars': 'hold_without_checkpoint' if policy == STATIC_DB_COLLECTION_POLICY else 'legacy_suffix_selection',
+        'frozen_identity': 'all_regular_files_except_bin_obj_git'}
+
+
+def _database_sidecar(path):
+    name = path.name.lower()
+    return any(name.endswith(suffix + sidecar) for suffix in DATABASE_SUFFIXES for sidecar in DATABASE_SIDECARS)
+
+
+def _collection_excluded(path, policy):
+    if policy == LEGACY_COLLECTION_POLICY:
+        return path.suffix.lower() in EXCLUDED_SUFFIXES
+    return path.suffix.lower() == '.user' or _database_sidecar(path)
+
+
+def collection_files(root, *, policy=None):
+    """Select workspace submission bytes, never alter or checkpoint databases."""
+    policy = resolve_collection_policy(policy)
+    root = Path(root)
+    reject_links(root)
+    if not root.is_dir():
+        raise FileNotFoundError(root)
+    candidates = [p for p in root.rglob('*') if p.is_file()
+        and not is_excluded(p.relative_to(root).parts)]
+    if policy == STATIC_DB_COLLECTION_POLICY:
+        by_name = {p.relative_to(root).as_posix().lower(): p for p in candidates}
+        for path in candidates:
+            if path.suffix.lower() not in DATABASE_SUFFIXES:
+                continue
+            for ending in DATABASE_SIDECARS:
+                sidecar = by_name.get(path.relative_to(root).as_posix().lower() + ending)
+                if sidecar is not None and sidecar.stat().st_size:
+                    raise ValueError('Unsealed submitted database: ' + path.relative_to(root).as_posix()
+                        + '; nonempty sidecar ' + sidecar.relative_to(root).as_posix()
+                        + '; collection held without checkpoint')
+    names = [str(p.relative_to(root)) for p in candidates if not _collection_excluded(p, policy)]
+    return sorted(names, key=lambda name: name.replace('/', '\\').encode('utf-16-be'))
+
+
+def collection_hash(root, *, policy=None):
+    """Hash exactly the selected workspace files before text normalization."""
+    return _files_hash(root, collection_files(root, policy=policy))
 
 
 def normalize_text(data):
@@ -149,17 +210,19 @@ def normalize_text(data):
     return data, kinds
 
 
-def collect(workspace, frozen, *, normalize=True):
+def collect(workspace, frozen, *, normalize=True, policy=None):
     """Copy workspace to frozen, excluding generated files and fixing text bytes."""
+    policy = resolve_collection_policy(policy)
     workspace, frozen = Path(workspace), Path(frozen)
     reject_links(workspace)
     if frozen.exists():
         raise FileExistsError(frozen)
     if not workspace.is_dir():
         raise FileNotFoundError(workspace)
+    selected = set(collection_files(workspace, policy=policy))
     frozen.mkdir(parents=True)
     collected, fixed, normalized = {}, {}, []
-    excluded = []
+    excluded, excluded_evidence = [], {}
     for path in sorted(workspace.rglob('*'), key=lambda p: str(p.relative_to(workspace))):
         relative = path.relative_to(workspace)
         if is_excluded(relative.parts):
@@ -170,8 +233,11 @@ def collect(workspace, frozen, *, normalize=True):
             continue
         if not path.is_file():
             raise ValueError('Special files are not collectable: ' + name)
-        if path.suffix.lower() in EXCLUDED_SUFFIXES:
+        if str(relative) not in selected:
             excluded.append(name)
+            if policy == STATIC_DB_COLLECTION_POLICY:
+                excluded_evidence[name] = {'sha256': sha256_file(path), 'bytes': path.stat().st_size,
+                    'reason': 'database_sidecar_not_submitted' if _database_sidecar(path) else 'user_configuration'}
             continue
         data = path.read_bytes()
         collected[name] = {'sha256': sha256_bytes(data), 'bytes': len(data)}
@@ -187,7 +253,12 @@ def collect(workspace, frozen, *, normalize=True):
     return {'collected': collected, 'frozen': fixed, 'normalized': normalized,
             'excluded_files': excluded,
             'excluded_directories': list(EXCLUDED_DIRECTORIES),
-            'excluded_suffixes': list(EXCLUDED_SUFFIXES)}
+            'excluded_suffixes': list(EXCLUDED_SUFFIXES) if policy == LEGACY_COLLECTION_POLICY
+                else ['.user', *[suffix + sidecar for suffix in DATABASE_SUFFIXES for sidecar in DATABASE_SIDECARS]],
+            'collection_policy': policy, 'collection_contract': collection_contract(policy),
+            'excluded_file_evidence': excluded_evidence,
+            'database_assets': {name: entry for name, entry in fixed.items()
+                if Path(name).suffix.lower() in DATABASE_SUFFIXES}}
 
 
 def tree_hashes(root):

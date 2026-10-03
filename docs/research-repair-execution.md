@@ -304,3 +304,43 @@ New source acquisition invokes Git archive with invocation-local
 and leaves existing caches unchanged. The finite control uses a local Git
 fixture whose cache is deliberately configured for CRLF, then verifies the
 production archive retains the committed LF bytes without persistent settings.
+
+## Prospective static database collection contract
+
+Future task profiles explicitly opt in with
+`collection_policy="workspace-static-db-v2"`. An absent policy or `legacy-v1`
+keeps the previous workspace selection, including its database suffix exclusion.
+Existing workspaces, frozen products, snapshots, scoring history and raw live
+campaign evidence are not rebuilt or changed by this repair. In particular,
+the saved Preload publish failure is retained as the earlier collection-contract
+confound, rather than retrospectively repaired into a different submitted product.
+
+The v2 public common prompt is identical across arms: `/workspace` holds the
+final project and submitted static data assets; mutable test/runtime and scratch
+databases belong outside the submitted project, using `/tmp` during implementation.
+Regular `.sqlite`, `.sqlite3` and `.db` files in that submitted tree are retained
+byte-for-byte. No input-hash match, MSBuild declaration parsing, preferred layout
+or special model-written manifest restricts compatible implementations. Generated
+directories and `.user` files remain excluded. A database with a nonempty WAL,
+SHM or rollback-journal sidecar holds collection before `frozen/` is created;
+the collector does not checkpoint, repair or modify database bytes. Empty or
+orphan sidecars are excluded with their path, byte count, hash and reason recorded.
+
+`collection_hash(workspace, policy=...)` identifies the selected pre-normalization
+workspace bytes. `artifact_hash(frozen)` independently follows both SDK evaluators:
+every regular file except those below `bin`, `obj` or `.git`. The old frozen trees
+that contained no dropped database files keep the same identity. Newly retained
+database bytes participate in SDK/outer identity and any later change is detected.
+The assigned condition hash and manifest policy must agree before collection.
+The snapshot records `collection_policy`, `collection_contract`, `database_assets`
+and the ordinary collected/frozen inventories. No marker file is added to the
+submitted artifact. Normal private preservation/restoration retains those bytes.
+
+The public sharing ZIP remains an explicit partial evidence slice, with database
+omissions and original hashes recorded; it does not claim full evaluator replay.
+Independent no-model controls cover v2 byte preservation, legacy selection/hash,
+unresolved sidecar holds, generated files, policy/condition tampering, archive
+roundtrip and equal arm prompts. Actual SDK scoring of the new independent
+static-database fixture and the final new-prompt serializer proof are separately
+bound acceptance items. They do not authorize model retries or alteration of the
+stopped two-of-four campaign.

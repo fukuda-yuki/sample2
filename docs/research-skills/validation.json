@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "active_entrypoints": 6,
+  "imported_files": 43,
+  "local_links_checked": 14,
+  "protected_experiment_files_unchanged": 22,
+  "checks": "file hashes, pinned sources, licenses, local links, scope, documentation-only subset, Docker exclusions",
+  "limits": "Static audit only. Does not prove automatic discovery, activation, scientific effectiveness, or live worker isolation.",
+  "errors": [],
+  "verified_on_jst": "2026-10-03",
+  "baseline_commit": "3dba038bced6c0a525098245a3f66d162f1b15bf",
+  "upstream_original_comparison": "43/43 byte-identical",
+  "baseline_experiment_comparison": "22/22 byte-identical to HEAD",
+  "session_catalog_check": {
+    "tool": "skills.list executor",
+    "result": "empty list; automatic recognition not confirmed"
+  },
+  "model_docker_evaluator_or_sampling_executed": false
+}

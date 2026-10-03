@@ -1,6 +1,11 @@
 # MS1 exploratory analysis
 
 This directory contains research code, not an alternative agent/evaluator.
+For interpretation of acquired results and evidence-based next-stage decisions,
+follow [AGENTS.md](../AGENTS.md) and the
+[analysis-only skills guide](../docs/research-skills/README.md).
+Acquisition, monitoring, recovery, collection and sharing do not activate these
+skills. Keep them out of the measured agent's inputs and workspace.
 The [execution preparation](../docs/ms1-catalog-execution-ready.md) now provides
 the 320-pair frozen execution plan, durable start/stop/recovery, and a bounded
 per-pair publication/restore handoff. Experiment start still requires a separate

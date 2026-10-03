@@ -1,4 +1,6 @@
 .git
+.agents
+AGENTS.md
 runs
 artifacts
 tmp

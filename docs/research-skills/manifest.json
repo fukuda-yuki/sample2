@@ -1,0 +1,429 @@
+{
+  "schema_version": 1,
+  "installed_on_jst": "2026-10-03",
+  "scope": "post-acquisition-analysis-and-interpretation-only",
+  "global_install": false,
+  "sampling_activation": false,
+  "bundles": [
+    {
+      "id": "scientific-critical-thinking",
+      "repository": "https://github.com/K-Dense-AI/claude-scientific-skills",
+      "commit": "154988403bb5a18e9d3c0ce4e6d5e2e4b184a298",
+      "license": "MIT",
+      "source_directory": "skills/scientific-critical-thinking",
+      "files": [
+        {
+          "source_path": "skills/scientific-critical-thinking/SKILL.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/UPSTREAM.md",
+          "sha256": "563af70571b7dcd6a96bf2e303bedfdcba623b4e9f082d58f04aacbc961fdae4"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/common_biases.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/common_biases.md",
+          "sha256": "641e8e8e6dfadac1643ea8691b7d3e4e58cf013f134cd42c71301878096a5a39"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/core_capabilities.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/core_capabilities.md",
+          "sha256": "0f337b96aa2d7453433a17824368fbd0638b9469d4f90a5fd23f4167c9dee180"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/evidence_hierarchy.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/evidence_hierarchy.md",
+          "sha256": "534fbe991ecfb2d162f755004dc528118ce74a78862917c2911595a522d76e6c"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/experimental_design.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/experimental_design.md",
+          "sha256": "eca7e42025393984c07676f3d4bc354d217e5604dc2209c76215d31953a7c74c"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/logical_fallacies.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/logical_fallacies.md",
+          "sha256": "becfc5bfac7b831dca67cc442cd0fcb42d8eea527a6fc2921c1b704e592ff593"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/review_sources.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/review_sources.md",
+          "sha256": "71e75106f36f3e69b28959ad1fec503ccdb21b7f5361ab230173e4812accbf62"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/scientific_method.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/scientific_method.md",
+          "sha256": "5aa925b97c7a916f819dafc8b42a9c24e4bd3eb2836594e724f1e7f9ae75ea0f"
+        },
+        {
+          "source_path": "skills/scientific-critical-thinking/references/statistical_pitfalls.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/references/statistical_pitfalls.md",
+          "sha256": "0c43204a0a81110cfeb7c982fa4caa89f274bdcebf096e09e5adfccf31241cb9"
+        },
+        {
+          "source_path": "LICENSE.md",
+          "local_path": ".agents/skills/scientific-critical-thinking/LICENSE.txt",
+          "sha256": "09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1"
+        }
+      ],
+      "omitted": [
+        "scripts/",
+        "references/tool_reference.md",
+        "references/security_validation.md"
+      ],
+      "adaptation": "SKILL.md is a repository-scoped entrypoint; UPSTREAM.md preserves the original guidance. No bundled CLI or external service installed."
+    },
+    {
+      "id": "hypothesis-generation",
+      "repository": "https://github.com/K-Dense-AI/claude-scientific-skills",
+      "commit": "154988403bb5a18e9d3c0ce4e6d5e2e4b184a298",
+      "license": "MIT",
+      "source_directory": "skills/hypothesis-generation",
+      "files": [
+        {
+          "source_path": "skills/hypothesis-generation/SKILL.md",
+          "local_path": ".agents/skills/hypothesis-generation/UPSTREAM.md",
+          "sha256": "5bccec0437d96d61821ec2095e7e32b61e8634cd8c02f11f42da953121e92719"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/causal_inference_and_claims.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/causal_inference_and_claims.md",
+          "sha256": "0162cd131dd12c6235a3b78c033c685abd80e98d5f40f9fb297b4d8104f85122"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/concepts_and_workflow.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/concepts_and_workflow.md",
+          "sha256": "a86a8f464fb555212e79bf13e307f3c129e9c853069856eb3c93c3c8a60bb7fc"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/ethics_safety_and_ai.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/ethics_safety_and_ai.md",
+          "sha256": "81d5691cd46d646ead2db50635bdcc07755e5f738b040c2ad707ac3b0eda034d"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/experimental_design_patterns.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/experimental_design_patterns.md",
+          "sha256": "83c0c75c7b1edadc92e4ae23607624277c19955fc6a71ee0313b6efc51e4e939"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/hypothesis_quality_criteria.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/hypothesis_quality_criteria.md",
+          "sha256": "12698b549f77a6ee64807b959093f39628fe3d47aa9a00a9b235681bf0b09269"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/literature_search_strategies.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/literature_search_strategies.md",
+          "sha256": "2a34fa0645f854093aea2d867059bae563c795f1935ba4b9c6d494bdc389fdcb"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/preregistration_and_open_science.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/preregistration_and_open_science.md",
+          "sha256": "33788e3cd4eeb62e80e9fb952e3bfb532320d373e7b00ed7c0a75b4200ccdbf4"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/references/source_ledger.md",
+          "local_path": ".agents/skills/hypothesis-generation/references/source_ledger.md",
+          "sha256": "b0281b810134599210f905f967267f0b44638676f673fca7528275f8e5042e55"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/evidence_ledger_template.csv",
+          "local_path": ".agents/skills/hypothesis-generation/assets/evidence_ledger_template.csv",
+          "sha256": "1ec5cc4ada96e05041c67865bcdfd3bb0a4f7cc92f24ca1ce7a826028a41d3de"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/falsification_controls_template.json",
+          "local_path": ".agents/skills/hypothesis-generation/assets/falsification_controls_template.json",
+          "sha256": "beea4e2be3b5abdad1014934a7c2fe1f9f00f07b3270119cfeb8134a94603e26"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/hypothesis_record_template.json",
+          "local_path": ".agents/skills/hypothesis-generation/assets/hypothesis_record_template.json",
+          "sha256": "73f080a6696c415f228b38100bb7b0f6bc89ad2c7997bf50d62b585b0bc8fe0c"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/operationalization_template.json",
+          "local_path": ".agents/skills/hypothesis-generation/assets/operationalization_template.json",
+          "sha256": "36ecdbd91c022554e60db646b548f5694d8409277a5b15fdf309d86f8c1e3070"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/prediction_rival_matrix_template.csv",
+          "local_path": ".agents/skills/hypothesis-generation/assets/prediction_rival_matrix_template.csv",
+          "sha256": "ccf6cb53c048a9f4d60788a8ec73c5d683ec549dab7df95b30282f6c0963653a"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/preregistration_scaffold_template.md",
+          "local_path": ".agents/skills/hypothesis-generation/assets/preregistration_scaffold_template.md",
+          "sha256": "fa577c7413435054ed927a9a925abc2f3a99373e55431eb6407425670276d87b"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/search_boundary_template.json",
+          "local_path": ".agents/skills/hypothesis-generation/assets/search_boundary_template.json",
+          "sha256": "b885d4e252c0df7010d8fca3dab7e3fef49e9f386b7a1b15240531ce374bf6ec"
+        },
+        {
+          "source_path": "skills/hypothesis-generation/assets/source_ledger.csv",
+          "local_path": ".agents/skills/hypothesis-generation/assets/source_ledger.csv",
+          "sha256": "9543f313b9cffec9bd2cf39376edca86d39c10635b447fa7689147931d8c4813"
+        },
+        {
+          "source_path": "LICENSE.md",
+          "local_path": ".agents/skills/hypothesis-generation/LICENSE.txt",
+          "sha256": "09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1"
+        }
+      ],
+      "omitted": [
+        "scripts/",
+        "references/tool_reference.md",
+        "references/security_validation.md"
+      ],
+      "adaptation": "SKILL.md is a repository-scoped entrypoint; UPSTREAM.md preserves the original guidance. No bundled CLI or external service installed."
+    },
+    {
+      "id": "scientific-brainstorming",
+      "repository": "https://github.com/K-Dense-AI/claude-scientific-skills",
+      "commit": "154988403bb5a18e9d3c0ce4e6d5e2e4b184a298",
+      "license": "MIT",
+      "source_directory": "skills/scientific-brainstorming",
+      "files": [
+        {
+          "source_path": "skills/scientific-brainstorming/SKILL.md",
+          "local_path": ".agents/skills/scientific-brainstorming/UPSTREAM.md",
+          "sha256": "06f73b71556356a7f488c369b9445d7943543a3f14d159b2168fd3f621d6f8a9"
+        },
+        {
+          "source_path": "skills/scientific-brainstorming/references/brainstorming_methods.md",
+          "local_path": ".agents/skills/scientific-brainstorming/references/brainstorming_methods.md",
+          "sha256": "2c3749f38c4a9ba0f310b04679b870cbf603d923aa30b82dd92720a7d2977632"
+        },
+        {
+          "source_path": "skills/scientific-brainstorming/references/facilitation_workflows.md",
+          "local_path": ".agents/skills/scientific-brainstorming/references/facilitation_workflows.md",
+          "sha256": "bfb2acc43472f4649b10f2c3db02180fa9c86636f375f82d8bc36b28075a5ccc"
+        },
+        {
+          "source_path": "skills/scientific-brainstorming/references/idea_evaluation.md",
+          "local_path": ".agents/skills/scientific-brainstorming/references/idea_evaluation.md",
+          "sha256": "5a5fcb319cdcc151a9acd17e0e501d270e55f7a9fb6a829c87c43af5b5705d14"
+        },
+        {
+          "source_path": "skills/scientific-brainstorming/references/responsible_ai.md",
+          "local_path": ".agents/skills/scientific-brainstorming/references/responsible_ai.md",
+          "sha256": "d5b61b2555b72914d1e2cfb6e84496ce80fc2d24a3001c9eefa04cca336b9830"
+        },
+        {
+          "source_path": "skills/scientific-brainstorming/references/sources.md",
+          "local_path": ".agents/skills/scientific-brainstorming/references/sources.md",
+          "sha256": "ab4ab107ea4f94b21ce85aec6e63d3701e56a546c4840ccfd8dab5f2cdd52210"
+        },
+        {
+          "source_path": "LICENSE.md",
+          "local_path": ".agents/skills/scientific-brainstorming/LICENSE.txt",
+          "sha256": "09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1"
+        }
+      ],
+      "omitted": [
+        "scripts/",
+        "references/tool_reference.md",
+        "references/security_validation.md"
+      ],
+      "adaptation": "SKILL.md is a repository-scoped entrypoint; UPSTREAM.md preserves the original guidance. No bundled CLI or external service installed."
+    },
+    {
+      "id": "creative-thinking-for-research",
+      "repository": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
+      "commit": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
+      "license": "MIT",
+      "source_directory": "21-research-ideation/creative-thinking-for-research",
+      "files": [
+        {
+          "source_path": "21-research-ideation/creative-thinking-for-research/SKILL.md",
+          "local_path": ".agents/skills/creative-thinking-for-research/UPSTREAM.md",
+          "sha256": "ec111f9236d7f9d72c895cebbf0f534ac93f4249172607559ad4bf92aefc5310"
+        },
+        {
+          "source_path": "LICENSE",
+          "local_path": ".agents/skills/creative-thinking-for-research/LICENSE.txt",
+          "sha256": "80b5899a9ab121a2d4aae63724f0c11defba7f23da487086932bb9abfb0f2a00"
+        }
+      ],
+      "omitted": [
+        "scripts/",
+        "references/tool_reference.md",
+        "references/security_validation.md"
+      ],
+      "adaptation": "SKILL.md is a repository-scoped entrypoint; UPSTREAM.md preserves the original guidance. No bundled CLI or external service installed."
+    },
+    {
+      "id": "brainstorming-research-ideas",
+      "repository": "https://github.com/Orchestra-Research/AI-Research-SKILLs",
+      "commit": "773a52944ba4747a18bd4ae9ade53fff041adcbc",
+      "license": "MIT",
+      "source_directory": "21-research-ideation/brainstorming-research-ideas",
+      "files": [
+        {
+          "source_path": "21-research-ideation/brainstorming-research-ideas/SKILL.md",
+          "local_path": ".agents/skills/brainstorming-research-ideas/UPSTREAM.md",
+          "sha256": "8422a1a6dc0a88d05f02b9fbe0f8c2ae06a77024856d18125efa13d19d855d46"
+        },
+        {
+          "source_path": "LICENSE",
+          "local_path": ".agents/skills/brainstorming-research-ideas/LICENSE.txt",
+          "sha256": "80b5899a9ab121a2d4aae63724f0c11defba7f23da487086932bb9abfb0f2a00"
+        }
+      ],
+      "omitted": [
+        "scripts/",
+        "references/tool_reference.md",
+        "references/security_validation.md"
+      ],
+      "adaptation": "SKILL.md is a repository-scoped entrypoint; UPSTREAM.md preserves the original guidance. No bundled CLI or external service installed."
+    },
+    {
+      "id": "acm-sigsoft-empirical-standards",
+      "repository": "https://github.com/acmsigsoft/EmpiricalStandards",
+      "commit": "554118c6b60580aeba4cbe1222fbe12df5e62171",
+      "license": "CC0-1.0",
+      "files": [
+        {
+          "source_path": "docs/standards/GeneralStandard.md",
+          "local_path": ".agents/skills/research-analysis/references/sigsoft/GeneralStandard.md",
+          "sha256": "f36d203118e22524ddee8a21e427c1191a017fd8f2cb470d3ecc3b4fc613a71f"
+        },
+        {
+          "source_path": "docs/standards/Benchmarking.md",
+          "local_path": ".agents/skills/research-analysis/references/sigsoft/Benchmarking.md",
+          "sha256": "ce374ceed42e34a880309de40d5ab331fe90e6ebfe9ba599ba84f8211c4903d7"
+        },
+        {
+          "source_path": "docs/standards/EngineeringResearch.md",
+          "local_path": ".agents/skills/research-analysis/references/sigsoft/EngineeringResearch.md",
+          "sha256": "6c8f200c266eeef4c6daf6407eec8b15beed599f6ca82871d006d50b20478e14"
+        },
+        {
+          "source_path": "LICENSE",
+          "local_path": ".agents/skills/research-analysis/references/sigsoft/LICENSE.txt",
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+        }
+      ]
+    }
+  ],
+  "local_entrypoints": [
+    {
+      "name": "brainstorming-research-ideas",
+      "local_path": ".agents/skills/brainstorming-research-ideas/SKILL.md",
+      "sha256": "66a9770db538931ad6e1a5224bc244e646b643ceaed88fc56e99dae2bbd5addb"
+    },
+    {
+      "name": "creative-thinking-for-research",
+      "local_path": ".agents/skills/creative-thinking-for-research/SKILL.md",
+      "sha256": "9c7045ea38c219d2a46c26391b17bb2aa7f5e820877b8d01a3a98688a8623a6c"
+    },
+    {
+      "name": "hypothesis-generation",
+      "local_path": ".agents/skills/hypothesis-generation/SKILL.md",
+      "sha256": "00c07eaf2006cb314fe5b18e857b38d00646e5bdbbc00dd9f27567e2cc4d20bc"
+    },
+    {
+      "name": "research-analysis",
+      "local_path": ".agents/skills/research-analysis/SKILL.md",
+      "sha256": "690cb8697ee0d4e92f4769138ef43fd5930181c44e55471ff30ef4a512b583cf"
+    },
+    {
+      "name": "scientific-brainstorming",
+      "local_path": ".agents/skills/scientific-brainstorming/SKILL.md",
+      "sha256": "419e0b1fc9bee12982807532a73ba6d2ce5ac7ce3ab314f62166af067cf04a52"
+    },
+    {
+      "name": "scientific-critical-thinking",
+      "local_path": ".agents/skills/scientific-critical-thinking/SKILL.md",
+      "sha256": "8061ccbcb5a2262a1bb7c4f06ffab60f983f8059910ecb2fb873c394ffe993f0"
+    }
+  ],
+  "protected_experiment_files": [
+    {
+      "local_path": "outer/runtime/Dockerfile",
+      "sha256": "03faf84705632ab5a2685ccf590fe598774ddf033a07a0c9ce739b7c557b97ef"
+    },
+    {
+      "local_path": "outer/harness/runtime.py",
+      "sha256": "4e57876bdc787d282b832437d7a18ae59a235fe6843d028627809a2b4acda3d6"
+    },
+    {
+      "local_path": "outer/harness/catalog_input.py",
+      "sha256": "3d78ec7814dc78bf61bd19a249602dddd22e6681652c99ef911840ed62e4e98c"
+    },
+    {
+      "local_path": "outer/profiles/interventions/catalog-compact.json",
+      "sha256": "c242500faa92863f9dcb862784f92cba8562ddd38f78cb8f630a8c2e8744bb0c"
+    },
+    {
+      "local_path": "outer/profiles/interventions/catalog-expanded.json",
+      "sha256": "e56762a83b18373d849d3cd8566c110093a01cc6884375912dccc8d526a8fa4c"
+    },
+    {
+      "local_path": "outer/profiles/interventions/explained.json",
+      "sha256": "07d40119f4c2d5f06f1e4161bbdf1cda4d71d5628783af094a5c24933a534b0b"
+    },
+    {
+      "local_path": "outer/profiles/interventions/explore.json",
+      "sha256": "bc55e5f00bbbd99f2e59cac0e3464688d82c8497393a984364f07c66584e9184"
+    },
+    {
+      "local_path": "outer/profiles/interventions/preload.json",
+      "sha256": "14b3cac19920985e5f73103228384847c9a302a6bd72e8c84fa8e9492a22c840"
+    },
+    {
+      "local_path": "outer/profiles/runtimes/deepseek-catalog-v1.json",
+      "sha256": "8e67d3e224a0d12377a3a07032a00d2d4fe8fb5f65b9ce67dad0530f4b73defd"
+    },
+    {
+      "local_path": "outer/profiles/runtimes/deepseek.json",
+      "sha256": "b95c34f5573e2ed5f19a1d0fc9e4e3463978dd70af8809757842480e8fa53584"
+    },
+    {
+      "local_path": "outer/profiles/tasks/MS1-001.json",
+      "sha256": "4a80a5efcf38f2f4a3b10790793903b38a6db0f5b82b6c968a902fe908f821c1"
+    },
+    {
+      "local_path": "outer/conditions/MS1-001/condition.json",
+      "sha256": "9a56d71bdd9c459ed1f1cb75f63cb553db2821594c583b05fc4829012439b400"
+    },
+    {
+      "local_path": "research/protocols/ms1-001-exploration-20260919-resume-v1.json",
+      "sha256": "c9e4644d21e008024e6bfc6d5af762f96c65c9f5b894ce57ccc6b496a00ec459"
+    },
+    {
+      "local_path": "research/protocols/ms1-001-exploration-20260919.json",
+      "sha256": "6ed7562001069ef7ed36d81563c1218893eda0e6a8c043c3b595bdffa7ec7d5c"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-comparison-v2-execution-20260922-r2.json",
+      "sha256": "14622f31c510607c8999026fe2fa308630ce6bb528bcfeb6667b3d46c349ea9b"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-comparison-v2-execution-20260922.json",
+      "sha256": "28f6863a2e4f73b8c397e48cb019e258772f9f6dec43f7b822b2682cb183763e"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-comparison-v2-execution-20260923-r3.json",
+      "sha256": "8bbe1301bf4cb5d81baa0688c5c643300fb1a463c82f213082a09d605bff9ca6"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-comparison-v2.json",
+      "sha256": "e4d6d4b918d2b4ce85d8285ebe0d412ee2a5d429f43bb7d0e590f5e65e95df3d"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-confirmatory-v1.json",
+      "sha256": "107a1d29eab4db98700c3327cbbcc343aa80c067d6f75d3fd174166734a9cbd5"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-date-revision-20260923.json",
+      "sha256": "a97e4c3a8c338e23251782a336d1d4926ad03b62bfd574081908f840877c3694"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-resource-allocation-20260921.json",
+      "sha256": "d6423fb0ef1a271bd3494349ce4d3af3ea41ae1658475b841952170442ec8190"
+    },
+    {
+      "local_path": "research/protocols/ms1-catalog-technical-pilot-20260920.json",
+      "sha256": "04c8cec02766cd73d504ea05fa0626b57ce03d0878f714818f544ecca414fc22"
+    }
+  ]
+}

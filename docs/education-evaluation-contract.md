@@ -61,3 +61,22 @@ hashes. Authentication, instructors/administration, course/grade editing,
 deletion, pagination/sorting, concurrency/performance and external integrations
 are explicitly excluded. Numeric results describe these finite fixtures and
 the two controlled families only.
+
+The first integrated nine-case calibration at `artifacts/edu21-v1` matched
+every predeclared verdict/state expectation. A subsequent targeted calibration
+at `artifacts/edu21-v2-restart` preserved a mismatch: the restart baseline was
+still sampled before invalid Edit requests. E-011 now captures the actual full
+database immediately before the owned stop, while E-008/E-010 retain invalid
+input failures. Expectations were not adjusted to the observed result.
+
+Independent review also found that a later HTTP observer fault could erase an
+already observed failure while checks were accumulated in local variables.
+Each independent failure is now sticky, recorded immediately, and retained in
+`observed-checks.jsonl`. Bound HTTP output from a nonzero evaluator exit is
+preserved by ordinary scoring with numeric quality suppressed and coverage
+incomplete. Two outer regression cases distinguish a bound known critical
+failure from output claiming another artifact. The final declared subset has
+normal C/D, invalid names (E-008/E-010 only), and an incorrect first-student grade
+followed by a later HTTP timeout (E-005 remains critical, observer fault remains
+incomplete). Other previously measured cases may be retained only with explicit
+code/data dependency witnesses; they are not described as all running one DLL.

@@ -90,13 +90,17 @@ def main():
     task = ledger.get('taskId', 'MS1-001')
     spec_hash = util.sha256_file(options['spec'])
     reported_path = str(artifact.resolve())
-    if mode == 'fault':
+    if mode in ('fault', 'fault-after-critical', 'fault-after-critical-unbound'):
+        known = mode != 'fault'
+        if mode == 'fault-after-critical-unbound': artifact_hash = 'f' * 64
         output = {'evaluationId': '{}-{}-{}-{:03d}'.format(task, (artifact_hash or '000000000000')[:12], version, sequence),
                   'taskId': task, 'taskTitle': 'stub', 'evaluationVersion': version,
                   'specVersion': 'stub', 'specSha256': spec_hash,
                   'artifactPath': reported_path, 'artifactSha256': artifact_hash,
                   'sourceRepository': 'stub', 'sourceCommit': 'stub',
-                  'verdict': 'error', 'quality': None,
+                  'verdict': 'fail_critical' if known else 'error', 'quality': None,
+                  'criticalFailed': ['R-010'] if known else [],
+                  'requirements': [{'id': 'R-010', 'judgement': 'fail'}] if known else [],
                   'evaluatorFaults': ['stub fault'],
                   'requirementCount': 29, 'passedCount': 0, 'failedCount': 0,
                   'blockedCount': 0, 'errorCount': 0}

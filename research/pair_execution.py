@@ -328,6 +328,25 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
             if manifest['run_instance_id'] != binding['run_instance_id']:
                 raise ValueError('Recovery instance mismatch')
             previous = current['implementations'].get(rid)
+            saved_path = root / 'implementation-receipt.json'
+            if not previous and saved_path.exists():
+                saved_hash = util.sha256_file(saved_path)
+                saved = util.read_json(saved_path)
+                if saved.get('run_id') != rid or saved.get('run_instance_id') != binding['run_instance_id']:
+                    raise ValueError('Saved implementation receipt instance mismatch')
+                if saved.get('stop_confirmed') is True and (saved.get('collection_status') == 'collection_fault'
+                        or saved.get('collection_error_type')):
+                    snapshot = root / 'snapshot.json'
+                    snapshot_hash = util.sha256_file(snapshot) if snapshot.exists() else None
+                    if (saved.get('manifest_sha256') != util.sha256_file(root / 'manifest.json')
+                            or saved.get('raw') != util.tree_hashes(root / 'usage/raw')
+                            or saved.get('snapshot_sha256') != snapshot_hash
+                            or util.sha256_file(saved_path) != saved_hash):
+                        raise ValueError('Saved stopped collection receipt hashes changed')
+                    recovered = {**saved, 'recovered': True,
+                        'reconciles_implementation_receipt': {'path': str(saved_path.resolve()), 'sha256': saved_hash}}
+                    _record_implementation(journal, binding, recovered, batch)
+                    previous = state(journal)['implementations'][rid]
             if not previous or previous['receipt'].get('stop_confirmed') is not True:
                 if not (root / 'runtime.json').exists() and not manifest.get('started_at'):
                     # runtime.json is durably written before container allocation.

@@ -1,8 +1,10 @@
 """Recovery must prove ownership/absence and never re-run an evaluation."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
+import shutil
 import unittest
 from contextlib import redirect_stdout
 import io
@@ -54,6 +56,21 @@ class BrowserCleanupTests(unittest.TestCase):
     def clean(self):
         with patch.object(runtime, 'docker', self.docker):
             return browser_cleanup.cleanup(self.root)
+
+    @unittest.skipUnless(os.name == 'nt', 'Win32 long-path receipt regression')
+    def test_cleanup_receipts_in_long_run_directory(self):
+        base = self.root
+        deep = base/('run-' + 'a'*60)/('evaluation-' + 'b'*60)/('attempt-' + 'c'*60)
+        actual = browser_cleanup._local_path(deep)
+        actual.mkdir(parents=True)
+        self.assertTrue(str(deep.resolve()).startswith(str(base.resolve())))
+        self.addCleanup(shutil.rmtree, browser_cleanup._local_path(base/('run-' + 'a'*60)))
+        shutil.copyfile(base/'browser-resources.json',actual/'browser-resources.json')
+        self.root = deep
+        receipt = self.clean()
+        self.assertTrue(receipt['confirmed'])
+        self.assertTrue(browser_cleanup.latest(deep)['confirmed'])
+        self.assertTrue(any(len(str(p)) > 260 for p in actual.rglob('*-intent.json')))
 
     def test_container_and_network_failures_are_retryable_without_observation(self):
         for kind in ('container', 'network'):

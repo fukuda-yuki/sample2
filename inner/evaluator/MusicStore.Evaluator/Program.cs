@@ -115,7 +115,7 @@ public static class Program
             try
             {
                 browserReview = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash,
-                    specHash, options.ReviewRunInstanceId, catalog);
+                    specHash, options.ReviewRunInstanceId, catalog, ledger.SpecVersion == "1.3.0");
                 File.Copy(options.BrowserCartEvidence, Path.Combine(evidenceDir, "browser-cart-receipt.json"));
             }
             catch (Exception ex)
@@ -364,7 +364,7 @@ public static class Program
 
     private static void WriteEvidence(RunState state, string evidenceDir)
     {
-        foreach (var name in new[] { "browse", "redirect", "cart", "order", "other", "invalid", "isolation-a", "isolation-b", "restart" })
+        foreach (var name in new[] { "browse", "redirect", "cart", "order", "other", "invalid", "invalid-missing", "invalid-fields", "isolation-a", "isolation-b", "restart" })
         {
             var transcript = state.Transcript(name);
             if (!string.IsNullOrWhiteSpace(transcript))

@@ -6,7 +6,7 @@ historical `1.1.0` and `1.2.0` records, contracts, products and ZIPs retain thei
 original meaning and bytes; no historical cohort is rescored by this repair.
 
 The public contract and independent source/task authority are owned by Issue
-#22. The versioned ledgers map all 30 normative requirements to 31 implemented
+#22. The versioned ledgers map all 31 normative requirements to 33 implemented
 checks, expected outcomes, source/public authority and explicit coverage. The
 initial operational SQLite database and independent Decimal oracle are private
 evaluation assets; neither is a substitute for source inspection in the public
@@ -18,7 +18,7 @@ mandatory in ordinary `score_run`, composition and aggregation. Uniform `8.99`
 price assertions are replaced with source-defined effective per-unit prices;
 historical order unit prices remain unchanged. Added critical `R-030`/`C-031`
 observes every frozen initial row/column at startup and after restart, plus the
-stored quantities, prices and totals for three representative checkout orders.
+stored quantities, prices and totals for three representative checkout orders, and the same executable importing the snapshot on a missing database path. All nine missing-address cases and mixed-case promo acceptance are observed. Added critical R-031/C-032 checks cross-session removal integrity; the browser checks include the visible cart summary.
 Initial oracle/database disagreement is an evaluator fault; lost product rows,
 changed historical amounts or incorrect new-order details are product failures.
 Confirmed startup failures survive a later restart or collector fault.
@@ -34,7 +34,7 @@ The finite case manifest must be fixed before execution: raw-SQL/minimal and
 EF/MVC allowed implementations, independently prepared variant-B calibration
 controls, historical-row deletion, missing JavaScript update, unsupported UI,
 collector unavailability with a prior critical product failure, and injected
-cleanup-receipt failure after actual owned cleanup. Calibration controls are
+cleanup-receipt failure after actual owned cleanup. Three extra targeted cases reject missing initial-data import, a stale browser cart summary and foreign-session removal, corresponding to newly exposed public-contract gaps. Calibration controls are
 withheld from evaluator implementation, not a held-out research application.
 Do not change expectations after observing results. Repairs require new
 versioned receipts, preserving the failed receipt.
@@ -55,4 +55,4 @@ payment, StoreManager CRUD or migration-quality noninferiority claim. An
 unsupported control yields incomplete coverage, not a manufactured failure or
 pass. Operational cleanup status is separate from already saved product quality.
 
-Receipt results and the final exact-chain identity are appended after execution.
+The initial deep-directory calibration found a required SQLite content file removed by normal collection and a Win32 long-path cleanup receipt failure; failed receipts are retained. The reference package now tolerates absent output SQLite and imports the legitimate read-only input. Cleanup uses Win32 extended paths and has a regression check exceeding 260 characters. Receipt results and the final exact-chain identity are appended after execution.

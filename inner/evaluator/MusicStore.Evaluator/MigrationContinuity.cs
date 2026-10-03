@@ -98,6 +98,16 @@ public sealed class MigrationContinuity
             Order(db, state.Order?.OrderId, workflow.GetProperty("checkout"), "checkout");
             Order(db, state.Order?.SecondOrderId, workflow.GetProperty("second"), "second");
             Order(db, state.Restart?.OrderIdAfter, workflow.GetProperty("restart"), "restart");
+            db.Close();
+            var existing = state.Host.DatabasePath;
+            state.Host.Stop();
+            state.Host.UseDatabase(Path.Combine(state.Host.WorkDir, "fresh-store.sqlite"));
+            state.Host.Start();
+            var (ready, detail) = state.Host.WaitReady(TimeSpan.FromSeconds(60));
+            if (!ready) failures.Add("fresh_import: application did not start: " + detail);
+            else Preserved(state.Host.DatabasePath, "fresh_import");
+            state.Host.Stop();
+            state.Host.UseDatabase(existing);
             Judgement = failures.Count == 0 ? MusicStore.Evaluator.Judgement.Pass : MusicStore.Evaluator.Judgement.Fail;
         }
         catch (SqliteException ex)

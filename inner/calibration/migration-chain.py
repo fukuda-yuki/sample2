@@ -83,6 +83,7 @@ def main():
         condition = {'schema_version':2,'task_id':task,'task_title':task,
             'condition_id':'CAL','agent':None,'input_policy':{'allowlist':[],'denied':[]},
             'evaluation':{'evaluation_version':'1.3.0','assembly':'MusicStore.Evaluator.dll',
+                'migration_contract':{'initial_database':'initial-store.sqlite','oracle':'migration-oracle.json'},
                 'spec_path':'evaluation-assets/requirements.json','catalog_path':'evaluation-assets/catalog.json',
                 'spec_sha256':util.sha256_file(spec),'evaluator_sha256':evaluator_hash,
                 'evaluator_build':{'source_path':'inner/evaluator/MusicStore.Evaluator',

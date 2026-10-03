@@ -43,7 +43,30 @@ public static class Checks
             ["C-029"] = C029,
             ["C-030"] = C030,
             ["C-031"] = C031,
+            ["C-032"] = C032,
+            ["C-033"] = C033,
         };
+
+    private static CheckResult C033(RunState state)
+    {
+        var pre = Precondition(state, "R-024", "C-033", "Omit each required address field individually");
+        if (pre != null) return pre;
+        if (!state.InvalidCheckout.Ok) return Fault(state, "R-024", "C-033", "Missing address fields", state.InvalidCheckout);
+        return Verdict(state, "R-024", "C-033", "Omit each required address field individually",
+            state.InvalidCheckout.AllMissingAddressFieldsPreserved,
+            string.Join("\n", state.InvalidCheckout.MissingAddressObservations), state.Transcript("invalid-fields"));
+    }
+
+    private static CheckResult C032(RunState state)
+    {
+        var pre = Precondition(state, "R-031", "C-032", "Another session attempts removal of an owned cart line");
+        if (pre != null) return pre;
+        if (!state.Isolation.Ok) return Fault(state, "R-031", "C-032", "Foreign cart removal", state.Isolation);
+        return Verdict(state, "R-031", "C-032", "Another session attempts removal of an owned cart line",
+            state.Isolation.ForeignRemovalPreserved, "Foreign removal preserves both session carts: "
+            + state.Isolation.ForeignRemovalPreserved,
+            state.Transcript("isolation-a") + "\n" + state.Transcript("isolation-b"));
+    }
 
     private static CheckResult C031(RunState state)
     {

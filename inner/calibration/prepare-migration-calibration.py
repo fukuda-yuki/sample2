@@ -43,7 +43,18 @@ document.querySelectorAll('button[data-id]').forEach(button => {
 </script>
 '''
     view.write_bytes(text.replace('\r\n','\n').encode('utf-8'))
-    for name in ('history-delete-A','broken-ui-A','unsupported-control-A'):
+    program = out/'mvc-A/MusicStore.Web/Program.cs'
+    text = program.read_text(encoding='utf-8').replace('var app = builder.Build();','''
+var database = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString).DataSource;
+if (!File.Exists(database))
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(database)));
+    File.Copy("/inputs/existing-business/initial-store.sqlite", database, overwrite: false);
+}
+var app = builder.Build();
+''')
+    program.write_bytes(text.replace('\r\n','\n').encode('utf-8'))
+    for name in ('history-delete-A','broken-ui-A','unsupported-control-A','missing-import-A','stale-summary-A','foreign-removal-A'):
         shutil.copytree(out/'minimal-A',out/name)
     program = out/'history-delete-A/MusicStore.Continuity/Program.cs'
     text = program.read_text(encoding='utf-8').replace('app.UseSession();','''
@@ -61,6 +72,15 @@ app.UseSession();
     pages.write_bytes(pages.read_text(encoding='utf-8').replace("link.addEventListener('click'", "link.addEventListener('obsolete-click'").replace('\r\n','\n').encode('utf-8'))
     pages = out/'unsupported-control-A/MusicStore.Continuity/Pages.cs'
     pages.write_bytes(pages.read_text(encoding='utf-8').replace('RemoveLink','AdjustWidget').replace('Remove from cart','Adjust').replace('\r\n','\n').encode('utf-8'))
+    program = out/'missing-import-A/MusicStore.Continuity/Program.cs'
+    program.write_bytes(program.read_text(encoding='utf-8').replace('if (File.Exists(snapshot))',
+        'if (false && File.Exists(snapshot))').replace('\r\n','\n').encode('utf-8'))
+    pages = out/'stale-summary-A/MusicStore.Continuity/Pages.cs'
+    pages.write_bytes(pages.read_text(encoding='utf-8').replace("document.getElementById('cart-status').textContent =",
+        'window.calibrationUnusedCartStatus =').replace('\r\n','\n').encode('utf-8'))
+    store = out/'foreign-removal-A/MusicStore.Continuity/Store.cs'
+    store.write_bytes(store.read_text(encoding='utf-8').replace('RecordId = $id AND CartId = $cartId',
+        'RecordId = $id').replace('\r\n','\n').encode('utf-8'))
     def case(name,variant,artifact,verdict,state='scored',operation='complete',fault=None):
         return {'name':name,'variant':variant,'artifact_path':str(out/artifact),
             'expected':{'verdict':verdict,'scoring_state':state,'operation_status':operation,
@@ -74,6 +94,9 @@ app.UseSession();
         case('critical-history-delete-A','A','history-delete-A','fail_critical'),
         case('defect-browser-update-A','A','broken-ui-A','fail'),
         case('unsupported-control-A','A','unsupported-control-A','blocked','evaluation_incomplete','evaluation_incomplete'),
+        case('critical-missing-import-A','A','missing-import-A','fail_critical'),
+        case('defect-stale-cart-summary-A','A','stale-summary-A','fail'),
+        case('critical-foreign-removal-A','A','foreign-removal-A','fail_critical'),
         case('collector-fault-known-failure-A','A','history-delete-A','fail_critical','evaluator_fault','evaluation_incomplete','collector_unavailable'),
         case('cleanup-fault-known-failure-A','A','history-delete-A','fail_critical','scored','cleanup_failed','cleanup_receipt_failure'),
     ]

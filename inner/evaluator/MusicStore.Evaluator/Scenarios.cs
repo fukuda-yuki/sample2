@@ -203,6 +203,8 @@ public sealed class RestartResult : ScenarioResult
 
 public sealed class InvalidCheckoutResult : ScenarioResult
 {
+    public bool AllMissingAddressFieldsPreserved { get; set; }
+    public List<string> MissingAddressObservations { get; } = new();
     public OrderStore.Snapshot OrdersBefore { get; set; }
     public OrderStore.Snapshot OrdersAfterWrongPromo { get; set; }
     public OrderStore.Snapshot OrdersBeforeMissing { get; set; }
@@ -235,6 +237,8 @@ public sealed class IsolationResult : ScenarioResult
     public List<Html.CartLine> LinesInSessionB { get; set; } = new List<Html.CartLine>();
 
     public decimal? TotalInSessionB { get; set; }
+
+    public bool ForeignRemovalPreserved { get; set; }
 }
 
 public sealed class StaticResult : ScenarioResult
@@ -430,7 +434,8 @@ public static class Scenarios
         }
 
         session.Get("/ShoppingCart/AddToCart/2");
-        result.SecondCheckoutPost = session.PostForm("/Checkout/AddressAndPayment", OrderFields("FREE"));
+        result.SecondCheckoutPost = session.PostForm("/Checkout/AddressAndPayment",
+            OrderFields(state.EvaluationVersion == "1.3.0" ? "fReE" : "FREE"));
         result.SecondOrderId = ParseOrderId(result.SecondCheckoutPost.Location);
 
         return result;
@@ -511,6 +516,26 @@ public static class Scenarios
         result.LinesAfterMissingField = Html.CartLines(result.CartAfterMissingField.Body);
         if (state.ExplicitOrderContract) result.OrdersAfterMissing = OrderStore.ReadIds(state.Host.DatabasePath);
 
+        if (state.EvaluationVersion == "1.3.0")
+        {
+            var addressSession = state.Session("invalid-fields");
+            addressSession.Get("/ShoppingCart/AddToCart/1");
+            var originalCart = addressSession.Get("/ShoppingCart");
+            var originalOrders = OrderStore.ReadIds(state.Host.DatabasePath);
+            result.AllMissingAddressFieldsPreserved = true;
+            foreach (var field in new[] { "FirstName", "LastName", "Address", "City", "State", "PostalCode", "Country", "Phone", "Email" })
+            {
+                var data = OrderFields("FREE").ToDictionary(x => x.Key, x => x.Value); data[field] = "";
+                var response = addressSession.PostForm("/Checkout/AddressAndPayment", data);
+                var cart = addressSession.Get("/ShoppingCart");
+                var orders = OrderStore.ReadIds(state.Host.DatabasePath);
+                var accepted = response.Status == 200 && Html.HasCheckoutForm(response.Body)
+                    && Html.SameCart(originalCart.Body, cart.Body) && originalOrders.SameAs(orders);
+                result.MissingAddressObservations.Add(field + ": invalid input preserves cart/orders and form=" + accepted);
+                result.AllMissingAddressFieldsPreserved &= accepted;
+            }
+        }
+
         return result;
     });
 
@@ -529,6 +554,16 @@ public static class Scenarios
         var cartB = sessionB.Get("/ShoppingCart");
         result.LinesInSessionB = Html.CartLines(cartB.Body);
         result.TotalInSessionB = Html.Money(cartB.Body);
+
+        if (state.EvaluationVersion == "1.3.0" && result.LinesInSessionA.Count == 1)
+        {
+            sessionB.PostForm("/ShoppingCart/RemoveFromCart", new Dictionary<string,string>
+            { ["id"] = result.LinesInSessionA[0].RecordId.ToString(CultureInfo.InvariantCulture) });
+            var afterA = sessionA.Get("/ShoppingCart");
+            var afterB = sessionB.Get("/ShoppingCart");
+            result.ForeignRemovalPreserved = Html.SameCart(cartA.Body, afterA.Body)
+                && Html.SameCart(cartB.Body, afterB.Body);
+        }
 
         return result;
     });

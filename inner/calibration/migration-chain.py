@@ -51,6 +51,8 @@ def main():
         'evaluator_files':util.tree_hashes(bundle),'runtime_images':lock['images'],
         'browser_pin_sha256':util.sha256_file(args.browser_pin),
         'case_manifest_sha256':util.sha256_file(args.cases),
+        'scheduled_case_count':len(cases),
+        'stop_rule':'Stop remaining cases on an unexpected evaluator or cleanup infrastructure fault; retain all receipts.',
         'chain_files':{str(p.relative_to(repo)).replace('\\','/'):util.sha256_file(p) for p in
             [repo/'outer/harness/evaluate.py',repo/'outer/harness/browser_cart.py',
              repo/'outer/harness/browser_cleanup.py',repo/'outer/harness/aggregate.py',
@@ -118,7 +120,7 @@ def main():
                 # Actual owned cleanup happens first, then inject the declared receipt fault.
                 injected = {**observed,'confirmed':False,'status':'injected_cleanup_receipt_failure',
                             'fault_injection':True,'actual_owned_cleanup_confirmed':observed['confirmed']}
-                target = Path(a[0])/'browser-cleanup-attempts'
+                target = browser_cleanup._local_path(a[0])/'browser-cleanup-attempts'
                 util.write_new_json(target/('injected-'+uuid.uuid4().hex+'-result.json'),injected)
                 util.append_line(target/'index.jsonl',injected)
                 return injected
@@ -143,7 +145,11 @@ def main():
         receipt['cases'].append(saved)
         util.write_new_json(out/(case['name']+'.json'),saved)
         print(case['name']+': '+json.dumps(actual)+' matched='+str(not failures),flush=True)
-    receipt['matched'] = all(c['matched'] for c in receipt['cases'])
+        if not fault and (record['scoring_state'] == 'evaluator_fault'
+                          or record.get('operation_status') == 'cleanup_failed'):
+            receipt['stop_reason'] = 'Unexpected infrastructure fault in ' + case['name']
+            break
+    receipt['matched'] = len(receipt['cases']) == len(cases) and all(c['matched'] for c in receipt['cases'])
     util.write_new_json(out/'calibration-receipt.json',receipt)
     return 0 if receipt['matched'] else 1
 

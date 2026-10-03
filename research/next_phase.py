@@ -110,7 +110,8 @@ def acceptance_scopes(pins):
         name.startswith(('inner/evaluator/', 'inner/browser/'))
         or (name.startswith('inner/spec/') and ('1.3.0' in name or 'education' in name))
         or name in ('outer/harness/evaluate.py', 'outer/harness/browser_cart.py',
-            'outer/harness/browser_cleanup.py', 'outer/harness/aggregate.py', 'outer/harness/education_browser.py')}
+            'outer/harness/browser_cleanup.py', 'outer/harness/aggregate.py',
+            'outer/harness/browser_review.py', 'outer/harness/education_browser.py')}
     execution = {name: digest for name, digest in pins.items() if
         name.startswith('outer/runtime/') or name in tuple('outer/harness/' + n + '.py' for n in
             ('runtime', 'run', 'usage', 'live_usage', 'gateway', 'machine', 'profiles', 'security', 'ownership', 'util'))

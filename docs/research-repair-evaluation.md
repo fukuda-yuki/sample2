@@ -56,3 +56,26 @@ unsupported control yields incomplete coverage, not a manufactured failure or
 pass. Operational cleanup status is separate from already saved product quality.
 
 The initial deep-directory calibration found a required SQLite content file removed by normal collection and a Win32 long-path cleanup receipt failure; failed receipts are retained. The reference package now tolerates absent output SQLite and imports the legitimate read-only input. Cleanup uses Win32 extended paths and has a regression check exceeding 260 characters. Receipt results and the final exact-chain identity are appended after execution.
+
+The integrated 12-case ordinary-chain receipt is
+`artifacts/eval21-v4/calibration-receipt.json` in the integration worktree, frozen
+at commit `35e4ab9464d79cc472abaacf01c086aab19b69df`. It used the prepared SDK
+8.0.425 evaluator image `sha256:4928e799628bb8f158c7e086a3b1afa5ecb2e87c5f214ff1f43bd8ce7870b3a8`
+and DLL SHA-256 `feee89fd318d86a06998f4db7fb9077f3949c25b553aaf3c801a677f479c3bf0`.
+Eleven cases matched their independently frozen expectations. The wrong-pricing
+B control retained critical failures R-013/R-030 but classified the browser
+price mismatch as a removal precondition failure, making coverage incomplete.
+This receipt is retained as a failed calibration; its expectation is unchanged.
+
+The resulting repair applies only to 1.3.0: a single known album, expected
+quantity and readable total establish that a supported control can be clicked.
+A readable wrong total is judged against the independent price after the real
+action. Structural ambiguity, unsupported controls and incomplete interaction
+remain unknown. Historical 1.2.0 preconditions retain their original meaning.
+Final verification is limited to the three allowed controls (minimal A, MVC A,
+minimal B), wrong-pricing B, unsupported A and the known-failure collector fault.
+The unchanged import/history/isolation/update/cleanup code and their v4 receipts
+are retained; they are not regenerated merely to change receipt identity.
+The final receipt also binds all controller source files, the runtime lock,
+calibration driver and candidate register, in addition to the executable and
+per-case assets. Human review remains `not_run`.

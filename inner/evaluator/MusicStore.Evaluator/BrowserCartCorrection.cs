@@ -33,7 +33,8 @@ public static class BrowserCartCorrection
         BrowserCartReview browser = null;
         var faults = new List<string>();
         try { browser = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash, specHash,
-            options.ReviewRunInstanceId, catalog, ledger.SpecVersion == "1.3.0"); }
+            options.ReviewRunInstanceId, catalog, ledger.SpecVersion == "1.3.0",
+            ledger.SpecVersion == "1.3.0"); }
         catch (Exception ex) { faults.Add("Browser evidence: " + ex.Message); }
         if (browser != null) faults.AddRange(browser.Faults);
         foreach (var result in results.Where(r => r.CheckId is "C-015" or "C-016"))

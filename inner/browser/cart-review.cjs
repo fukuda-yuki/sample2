@@ -12,7 +12,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const write = (name, value) => fs.writeFileSync(path.join(out, name), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 const ref = name => ({ path: name, sha256: sha(fs.readFileSync(path.join(out, name))) });
 const conditions = {
-  collectorVersion: '1.2.0', collectorSha256: sha(fs.readFileSync(__filename)),
+  collectorVersion: '1.2.1', collectorSha256: sha(fs.readFileSync(__filename)),
   playwrightVersion: require('playwright/package.json').version, nodeVersion: process.version,
   browser: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
   locale: 'en-US', timezoneId: 'UTC', actionTimeoutMs: 5000, navigationTimeoutMs: 15000,
@@ -20,6 +20,7 @@ const conditions = {
   sessionPolicy: 'fresh browser context per check; independently populate 2 and 1',
   networkPolicy: 'normal browser subresource loading; no request-routing overrides; external script identity recorded',
   observation: 'visible cart DOM and PNG in the clicked page; no post-click navigation or reload',
+  preconditionPolicy: input.structuralPrecondition ? 'known album/quantity and readable total; prices judged after action' : 'expected cart total',
 };
 
 // Read-only projection excludes rows hidden by the application's own UI updates.
@@ -49,6 +50,14 @@ function matches(state, quantity) {
     && (!input.requireCartStatus || state.cartStatus.length === 1 && state.cartStatus[0] === 'Cart (' + quantity + ')')
     && (quantity === 0 ? state.rows.length === 0 : state.rows.length === 1
       && state.rows[0].count === String(quantity) && state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId);
+}
+function populated(state, quantity) {
+  if (!input.structuralPrecondition) return matches(state, quantity);
+  // A readable wrong price is a product defect, not inability to perform a
+  // supported removal. Keep the independently expected price for judgement.
+  return state.totals.length === 1 && /^-?\d+\.\d{2}$/.test(state.totals[0])
+    && state.rows.length === 1 && state.rows[0].count === String(quantity)
+    && state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId;
 }
 async function capture(page, tabId, name) {
   const state = await observe(page);
@@ -119,7 +128,7 @@ async function capture(page, tabId, name) {
         const before = await capture(page, tabId, checkId + '-before');
         await Promise.all(resourceReads);
         if (externalScriptFaults.length) throw new Error(checkId + ': external script observation incomplete: ' + JSON.stringify(externalScriptFaults));
-        if (!matches(before.state, count)) {
+        if (!populated(before.state, count)) {
           const knownQuantity = before.state.rows.length === 1 && /^\d+$/.test(before.state.rows[0].count)
             && before.state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId;
           await unperformed(before, 'not-run-precondition', count === 2 && knownQuantity

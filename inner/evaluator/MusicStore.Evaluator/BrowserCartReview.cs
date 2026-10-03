@@ -53,7 +53,8 @@ public sealed class BrowserCartReview
     public Result For(string checkId) => results[checkId];
 
     public static BrowserCartReview Load(string path, string artifactHash, string specHash,
-        string runInstanceId, Catalog catalog, bool requireCartStatus = false)
+        string runInstanceId, Catalog catalog, bool requireCartStatus = false,
+        bool structuralPrecondition = false)
     {
         var receipt = JsonSerializer.Deserialize<Receipt>(File.ReadAllText(path),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -124,7 +125,8 @@ public sealed class BrowserCartReview
                 continue;
             }
             if (album == null || lines[0].Count != countBefore
-                || !WellFormedCart(beforeHtml) || Html.Money(beforeHtml) != countBefore * album.Price)
+                || !WellFormedCart(beforeHtml) || !Html.Money(beforeHtml).HasValue
+                || !structuralPrecondition && Html.Money(beforeHtml) != countBefore * album.Price)
                 throw new InvalidDataException("Browser removal lacks its populated precondition.");
 
             if (removal.Action == "not-run-unsupported")

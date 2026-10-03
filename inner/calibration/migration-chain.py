@@ -60,13 +60,18 @@ def main():
     receipt['evaluator_source_files'] = {p.relative_to(repo).as_posix():util.sha256_file(p)
         for p in (repo/'inner/evaluator/MusicStore.Evaluator').glob('*')
         if p.suffix in ('.cs','.csproj')}
+    receipt['controller_files'] = {p.relative_to(repo).as_posix():util.sha256_file(p)
+        for p in (repo/'outer/harness').glob('*.py')}
+    receipt['runtime_lock_sha256'] = util.sha256_file(args.runtime_lock)
+    receipt['calibration_driver_sha256'] = util.sha256_file(Path(__file__))
+    shutil.copyfile(args.runtime_lock, out/'runtime-lock.json')
     receipt['linked_contract_files'] = {}
     receipt['linked_contract_scope'] = 'Upstream authority/input binding; model serialization is separately validated by Issue #23.'
     if args.contract_root:
         contract_root = args.contract_root.resolve()
         relatives = ['research/tasks/music-store-continuity/public-request.txt',
             'research/tasks/music-store-continuity/variants.json',
-            'research/tasks/music-store-continuity/task-register.json',
+            'research/tasks/candidate-register.json',
             'research/migration_tasks.py',
             'outer/profiles/tasks/MS1-CONT-A.json','outer/profiles/tasks/MS1-CONT-B.json']
         for relative in relatives:

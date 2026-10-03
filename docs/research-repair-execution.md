@@ -138,7 +138,7 @@ remains `not_run`, so local speed/safety results cannot complete all of #20.
 Prepare exact code/runtime/input/evaluator and mock hashes without dispatch:
 
 ```powershell
-python outer/verify/technical-pair-live.py --mode prepare --repo <integrated-repo> --out <new-technical-cohort> --mock-receipt <mock-result.json>
+python outer/verify/technical-pair-live.py --mode prepare --repo <integrated-repo> --out <new-technical-cohort> --mock-receipt <mock-result.json> --browser-probe <verified-browser-probe.json>
 ```
 
 The corresponding `--mode execute` is exclusively the predeclared technical
@@ -247,3 +247,18 @@ the actual normal gate receipts; a clock cannot satisfy that gate.
 Stop reconciliation preserves the original unconfirmed implementation receipt
 and creates a new final raw/manifest/snapshot hash binding, referencing the
 original receipt by path and SHA256. The reader rejects a changed baseline.
+
+The subsequent technical CLI requires a verified browser probe before cohort
+allocation, captures its dependency/Node/browser/collector hashes in the plan,
+and checks them again before dispatch. Only serial postprocessing activates the
+validated browser paths and pinned Node using
+`catalog_environment.activated(record, repo)`; the previous process environment
+is restored on success or failure. The generic child environment remains
+restricted. This correction does not authorize reopening the failed campaign,
+resending either assigned instance or adding replacement model trials.
+
+New source acquisition invokes Git archive with invocation-local
+`core.autocrlf=false` and `core.eol=lf`, records that byte basis/configuration,
+and leaves existing caches unchanged. The finite control uses a local Git
+fixture whose cache is deliberately configured for CRLF, then verifies the
+production archive retains the committed LF bytes without persistent settings.

@@ -10,7 +10,14 @@ import time
 IMPORT_REPO=Path(sys.argv[sys.argv.index('--repo')+1]) if '--repo' in sys.argv else Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(IMPORT_REPO.resolve()))
 from outer.harness import live_usage, machine, profiles, runtime, util
-from research import pair_execution
+from research import catalog_environment, pair_execution
+
+
+def pinned_postprocess(browser_record):
+    def postprocess(repo, batch, run_id, archive):
+        with catalog_environment.activated(browser_record, repo):
+            return machine.postprocess(repo, batch, run_id, archive)
+    return postprocess
 
 
 def measurement(root,cases,elapsed):
@@ -43,6 +50,7 @@ def main():
     p.add_argument('--repo',type=Path,default=Path(__file__).resolve().parents[2])
     p.add_argument('--out',type=Path,required=True)
     p.add_argument('--mock-receipt',type=Path,required=True)
+    p.add_argument('--browser-probe',type=Path,required=True)
     p.add_argument('--mode',choices=('prepare','execute'),default='prepare')
     a=p.parse_args(); repo=a.repo.resolve(); batch=a.out.resolve()
     template=repo/'research/protocols/technical-pair-live-20261003.json'
@@ -53,6 +61,9 @@ def main():
     actual=[r for r in mock['results'] if r['case'] in ('actual-explore','actual-preload')]
     if len(actual)!=2 or not all(r.get('ordinary_opencode_worker') for r in actual):
         raise ValueError('Both actual-worker arm serialization receipts are required')
+    # Fail before allocating a technical cohort or starting a model when the
+    # ordinary scorer cannot receive its exact verified host dependencies.
+    browser=catalog_environment.capture(a.browser_probe,repo)
     task,runtime_id=selected['task'],selected['runtime']
     expected=machine.expected_conditions(repo,task,runtime_id,('explore','preload'))
     lock=util.read_json(profiles.runtime_root(repo,task,profiles.read(repo,'runtimes',runtime_id))/'lock.json')
@@ -61,6 +72,7 @@ def main():
     if a.mode=='prepare':
         batch.mkdir(parents=True,exist_ok=False)
         plan={**selected,'prepared_lock_sha256':machine.fingerprint(lock),'conditions':expected,
+            'browser':browser,
             'template_sha256':util.sha256_file(template),'mock_receipt':str(a.mock_receipt.resolve()),
             'mock_receipt_sha256':util.sha256_file(a.mock_receipt),
             'source_commit':runtime.command(['git','rev-parse','HEAD'],cwd=repo).stdout.strip(),
@@ -69,7 +81,7 @@ def main():
         print(json.dumps({'prepared':True,'plan':str(batch/'plan.json'),'plan_sha256':util.sha256_file(batch/'plan.json'),
                           'model_dispatched':False})); return 0
     plan=util.read_json(batch/'plan.json')
-    if (plan['conditions']!=expected or plan['prepared_lock_sha256']!=machine.fingerprint(lock)
+    if (plan.get('browser')!=browser or plan['conditions']!=expected or plan['prepared_lock_sha256']!=machine.fingerprint(lock)
             or plan['controller_files']!=runtime.controller_files(repo)
             or plan['mock_receipt_sha256']!=util.sha256_file(a.mock_receipt)
             or plan['template_sha256']!=util.sha256_file(template)):
@@ -152,7 +164,8 @@ def main():
             block_cases=[{**c,'pair':1,'slot':i} for i,c in enumerate(cases,1)]
             start=time.monotonic()
             result=pair_execution.execute_pair(descriptor,block_cases,pair_batch,repo=repo,
-                concurrency=order['concurrency'],prepare=prepare_in_block)
+                concurrency=order['concurrency'],prepare=prepare_in_block,
+                postprocess=pinned_postprocess(plan['browser']))
             measured=measurement(pair_batch,block_cases,time.monotonic()-start)
             receipt={'regime':'serial' if order['concurrency']==1 else 'paired','result':result,'measurement':measured}
             util.write_new_json(batch/f"result-block-{order['pair']}.json",receipt); results.append(receipt)

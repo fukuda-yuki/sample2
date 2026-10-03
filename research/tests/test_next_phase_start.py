@@ -21,8 +21,8 @@ class ProspectiveStartTests(unittest.TestCase):
         self.assertEqual(len({c['run_id'] for p in assigned for c in p['cases']}), 128)
         for task in plan['task_ids']:
             selected = [p for p in assigned if p['task'] == task]
-            self.assertEqual(len(selected), 32)
-            self.assertEqual(sum(p['cases'][0]['condition'] == 'preload' for p in selected), 16)
+            self.assertEqual(len(selected), 16)
+            self.assertEqual(sum(p['cases'][0]['condition'] == 'preload' for p in selected), 8)
         self.assertEqual(assigned, next_phase.assignments(plan))
 
     def test_old_protocol_or_paired_regime_cannot_enter_new_controller(self):

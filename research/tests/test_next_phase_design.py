@@ -87,6 +87,19 @@ class NextPhaseMeasurementTests(unittest.TestCase):
         r['intervention_id'] = 'preload'
         with self.assertRaises(ValueError): self.summarize(p, a, [r])
 
+    def test_incomplete_known_failure_still_requires_frozen_evaluator(self):
+        p, a, row = self.fixture()
+        r = row('A', 'explore', 100, verdict='fail_critical')
+        r['scoring']['state'] = 'evaluation_incomplete'
+        r['scoring']['evaluator_sha256'] = 'old'
+        with self.assertRaises(ValueError): self.summarize(p, a, [r])
+
+    def test_dispatched_unknown_is_distinct_from_undispatched(self):
+        p, a, row = self.fixture()
+        result = self.summarize(p, a, [])
+        self.assertEqual(result['strata'][0]['arms']['explore']['states'],
+            {'dispatched_no_terminal_result': 1})
+
     def test_wrong_instance_technical_cohort_and_old_evaluator_are_rejected(self):
         p, a, row = self.fixture()
         r = row('A', 'explore', 100)

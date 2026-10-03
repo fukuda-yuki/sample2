@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import shutil
 
-from outer.harness import util
+from outer.harness import profiles, util
 from research import catalog_delivery, catalog_share, next_phase, pair_execution
 
 
@@ -64,17 +64,22 @@ def stage(repo, bundle_path, number, destination):
                 manifest['excluded'].append({'path': name, **originals[rid][relative], 'reason': reason})
             else:
                 copy(source, name, originals[rid][relative]['sha256'])
+    task_profile = profiles.read(repo, 'tasks', pair['task'])
+    family = bundle['plan'].get('task_hierarchy', {}).get(pair['task'], {}).get('family', 'music-store-continuity')
+    public_request = 'research/tasks/' + family + '/public-request.txt'
     for name in ('research/__init__.py', 'research/catalog_allocation_review.py', 'research/catalog_share.py',
             'research/sql/catalog_otel_requests.sql', next_phase.PLAN,
-            'research/tasks/candidate-register.json', 'research/tasks/music-store-continuity/public-request.txt',
-            'inner/spec/requirements-cont-A-1.3.0.json', 'inner/spec/requirements-cont-B-1.3.0.json'):
+            'research/tasks/candidate-register.json', public_request, task_profile['evaluation']['spec_path']):
         copy(repo / name, name)
     copy(repo / 'research/sharing/CONTINUITY-README.md', 'README.md')
     copy(repo / 'research/sharing/THIRD-PARTY-NOTICES.md', 'THIRD-PARTY-NOTICES.md')
     for name in ('MS-PL.txt', 'OpenCode-MIT.txt'):
         copy(repo / 'research/sharing/LICENSES' / name, 'LICENSES/' + name)
-    source_readme = repo / 'artifacts/migration-assets-v2' / pair['task'] / 'inputs/legacy-source/readme.txt'
-    if source_readme.is_file(): copy(source_readme, 'UPSTREAM-readme.txt')
+    namespace = 'migration-assets-v2' if family == 'music-store-continuity' else 'education-assets-v1'
+    source_root = repo / 'artifacts' / namespace / pair['task'] / 'inputs/legacy-source'
+    for name in ('readme.txt', 'README.md', 'LICENSE', 'LICENSE.txt'):
+        attribution = source_root / name
+        if attribution.is_file(): copy(attribution, 'UPSTREAM/' + name)
     portable = public / 'STUDY.json'
     util.write_new_json(portable, {'plan': bundle['plan'], 'assignments': bundle['assignments'],
         'source_commit': bundle['source_commit'], 'original_bundle_sha256': util.sha256_file(bundle_path),

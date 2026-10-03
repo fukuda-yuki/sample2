@@ -5,7 +5,9 @@ MusicStore continuity study. Both arms, failures, partial usage and unassessed
 outcomes remain included. The two semantic variants belong to one source family;
 they are not independent applications. `STUDY.json` retains the complete plan,
 128 assignments, source commit and original local bundle hash. This slice is
-not the complete research corpus or proof of quality maintenance.
+not the complete research corpus or proof of quality maintenance. The later two-family
+protocol also includes ContosoUniversity enrollment tasks; a pair belongs to one
+named family and never counts its variants as independent source applications.
 
 `MANIFEST.json` lists original and public hashes, exclusions and transformations.
 Local home paths are replaced only as explicitly recorded. Request/response

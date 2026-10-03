@@ -19,7 +19,7 @@ from outer.harness.security import child_environment
 from research import next_phase_design
 
 REPO = Path(__file__).resolve().parents[1]
-PLAN = 'research/protocols/continuity-initial-information-20261003-v1.json'
+PLAN = 'research/protocols/source-information-two-families-20261003-v2.json'
 PREREQUISITES = ('evaluation_chain', 'selected_task_scope', 'independent_task_set',
                  'execution_evidence', 'serialized_intervention')
 
@@ -43,13 +43,16 @@ def inside(repo, value, prefix=None):
 
 
 def validate_plan(plan):
-    if (plan.get('plan_id') != 'continuity-initial-information-20261003-v1'
-            or plan.get('task_ids') != ['MS1-CONT-A', 'MS1-CONT-B']
+    old = plan.get('plan_id') == 'continuity-initial-information-20261003-v1'
+    tasks = ['MS1-CONT-A', 'MS1-CONT-B'] if old else ['MS1-CONT-A', 'MS1-CONT-B', 'CU1-ENR-C', 'CU1-ENR-D']
+    if (plan.get('plan_id') not in ('continuity-initial-information-20261003-v1',
+            'source-information-two-families-20261003-v2')
+            or plan.get('task_ids') != tasks
             or plan.get('arms') != ['explore', 'preload']
-            or plan.get('variant_weights') != [0.5, 0.5]
+            or plan.get('variant_weights') != ([0.5, 0.5] if old else [0.25] * 4)
             or plan.get('allocation', {}).get('pairs') != 64
             or plan['allocation'].get('runs') != 128
-            or plan['allocation'].get('repetitions_per_variant') != 32
+            or plan['allocation'].get('repetitions_per_variant') != (32 if old else 16)
             or plan.get('regime', {}).get('pair_concurrency') != 1
             or plan.get('quality_loss_margin') is not None
             or plan.get('research_start_authorized') is not False):
@@ -57,12 +60,18 @@ def validate_plan(plan):
     return plan
 
 
+def evaluation_version(plan, task):
+    return plan['settings'].get('evaluator_version_by_task', {}).get(task,
+        plan['settings'].get('evaluator_version'))
+
+
 def assignments(plan):
     validate_plan(plan)
     rng = random.Random(plan['allocation']['randomization_seed'])
     ordered = []
     for task in plan['task_ids']:
-        orders = [['explore', 'preload']] * 16 + [['preload', 'explore']] * 16
+        half = plan['allocation']['repetitions_per_variant'] // 2
+        orders = [['explore', 'preload']] * half + [['preload', 'explore']] * half
         rng.shuffle(orders)
         ordered.extend((task, order) for order in orders)
     rng.shuffle(ordered)
@@ -73,7 +82,10 @@ def assignments(plan):
         cases = [{'slot': index * 2 + position, 'block': pair, 'pair': pair,
             'position': position, 'task': task, 'condition': arm, 'attempt': attempt,
             'run_id': f'{task}-{arm}-{attempt:03d}'} for position, arm in enumerate(order, 1)]
-        result.append({'pair': pair, 'task': task, 'analysis_session': index // 4 + 1, 'cases': cases})
+        result.append({'pair': pair, 'task': task,
+            'source_family': plan.get('task_hierarchy', {}).get(task, {}).get('family'),
+            'task_membership': plan.get('task_hierarchy', {}).get(task, {}).get('membership'),
+            'analysis_session': index // 4 + 1, 'cases': cases})
     return result
 
 
@@ -89,14 +101,16 @@ def verify_reference(record):
 def acceptance_scopes(pins):
     """Required byte scopes; a receipt cannot choose away a changed dependency."""
     task_files = {name: digest for name, digest in pins.items() if
-        name.startswith(('inner/tasks/', 'outer/profiles/tasks/MS1-CONT', 'research/tasks/'))
-        or name in ('outer/harness/migration_input.py', 'research/migration_tasks.py', 'research/verify_migration_tasks.py')}
-    task_assets = {name: digest for name, digest in pins.items() if name.startswith('artifacts/migration-assets-')}
+        name.startswith(('inner/tasks/', 'outer/profiles/tasks/MS1-CONT', 'outer/profiles/tasks/CU1-ENR', 'research/tasks/'))
+        or name in ('outer/harness/migration_input.py', 'research/migration_tasks.py', 'research/verify_migration_tasks.py',
+            'research/education_tasks.py', 'research/verify_education_tasks.py')}
+    task_assets = {name: digest for name, digest in pins.items() if name.startswith(
+        ('artifacts/migration-assets-', 'artifacts/education-assets-'))}
     evaluation = {name: digest for name, digest in pins.items() if
         name.startswith(('inner/evaluator/', 'inner/browser/'))
-        or (name.startswith('inner/spec/') and '1.3.0' in name)
+        or (name.startswith('inner/spec/') and ('1.3.0' in name or 'education' in name))
         or name in ('outer/harness/evaluate.py', 'outer/harness/browser_cart.py',
-            'outer/harness/browser_cleanup.py', 'outer/harness/aggregate.py')}
+            'outer/harness/browser_cleanup.py', 'outer/harness/aggregate.py', 'outer/harness/education_browser.py')}
     execution = {name: digest for name, digest in pins.items() if
         name.startswith('outer/runtime/') or name in tuple('outer/harness/' + n + '.py' for n in
             ('runtime', 'run', 'usage', 'live_usage', 'gateway', 'machine', 'profiles', 'security', 'ownership', 'util'))
@@ -107,7 +121,8 @@ def acceptance_scopes(pins):
     serializer = {name: digest for name, digest in pins.items() if
         name.startswith(('outer/runtime/', 'outer/profiles/interventions/'))
         or name in ('outer/harness/profiles.py', 'outer/harness/migration_input.py',
-            'outer/profiles/runtimes/deepseek-migration-v1.json', 'outer/harness/gateway.py')}
+            'outer/profiles/runtimes/deepseek-migration-v1.json',
+            'outer/profiles/runtimes/deepseek-research-v2.json', 'outer/harness/gateway.py')}
     return {'evaluation_chain': {**evaluation, **task_assets,
             **{n:h for n,h in task_files.items() if n.startswith(('outer/profiles/tasks/', 'research/tasks/'))}},
         'selected_task_scope': {**task_files, **task_assets},
@@ -196,7 +211,7 @@ def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
                         ('model_context_tokens','model_context_tokens'), ('model_output_tokens','model_output_tokens'),
                         ('compaction','compaction'), ('subagents','subagents')]:
                     if rt.get(key) != settings[target]: failures.append('runtime_setting_mismatch:' + key)
-                if condition['evaluation']['evaluation_version'] != settings['evaluator_version']:
+                if condition['evaluation']['evaluation_version'] != evaluation_version(plan, task):
                     failures.append('evaluation_version_mismatch:' + task)
                 if condition['environment']['sdk'] != settings['dotnet_sdk']:
                     failures.append('sdk_version_mismatch:' + task)
@@ -211,11 +226,13 @@ def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
         'source_commit': git(repo, 'rev-parse', 'HEAD'), 'source_clean': not bool(git(repo, 'status', '--porcelain')),
         'repo': str(repo), 'plan': plan, 'plan_reference': reference(repo / PLAN),
         'assignments': assignments(plan), 'runtime_id': runtime_id,
-        'cohort': 'runs/continuity-v1', 'pinned_files': pins,
+        'cohort': 'runs/source-info-v2', 'pinned_files': pins,
         'runtime_locks': chain, 'acceptance_ledger': ledger, 'acceptance_scopes': acceptance_scopes(pins),
         'acceptance_ledger_reference': reference(ledger_path), 'browser': browser,
         'python': {'path': str(Path(sys.executable).resolve()), 'sha256': util.sha256_file(sys.executable),
-            'version': platform.python_version()}, 'precision': next_phase_design.calculate(),
+        'version': platform.python_version()}, 'precision': next_phase_design.calculate(
+            plan['allocation']['pairs'], len(plan['task_ids']), plan['allocation']['repetitions_per_variant'],
+            plan['independent_source_family_count']),
         'preparation_failures': failures, 'model_called': False, 'credential_read': False}
     util.write_new_json(destination / 'bundle.json', bundle)
     result = check(repo, destination / 'bundle.json', environment=False)
@@ -228,6 +245,10 @@ def check(repo, bundle_path, *, environment=True):
     bundle = util.read_json(bundle_path)
     validate_plan(bundle['plan'])
     reasons = list(bundle.get('preparation_failures', []))
+    if bundle['plan']['plan_id'] == 'continuity-initial-information-20261003-v1':
+        reasons.append('historical_one_family_candidate_not_authorized_for_acquisition')
+    if bundle['runtime_id'] != bundle['plan']['settings'].get('runtime_profile', bundle['runtime_id']):
+        reasons.append('research_runtime_profile_mismatch')
     if bundle.get('kind') != 'continuity_prospective_bundle': raise ValueError('Not a new study bundle')
     if bundle['assignments'] != assignments(bundle['plan']): reasons.append('assignment_identity_changed')
     if git(repo, 'rev-parse', 'HEAD') != bundle['source_commit']: reasons.append('final_source_commit_changed')

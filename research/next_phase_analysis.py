@@ -68,7 +68,9 @@ def summarize(plan, assignments, rows, *, bindings, plan_sha256, cohort, measure
                 or any(binding.get(k) != case.get(k) for k in ('task', 'condition', 'run_id', 'pair', 'slot'))):
             raise ValueError('Result is not bound to this research dispatch/input instance')
         scoring = row.get('scoring', {})
-        if scoring.get('state') == 'scored' and (scoring.get('evaluation_version') != measurement['evaluation_version']
+        expected_version = measurement['evaluation_version']
+        if isinstance(expected_version, dict): expected_version = expected_version[case['task']]
+        if (scoring.get('state') == 'scored' or quality_value(row) is not None) and (scoring.get('evaluation_version') != expected_version
                 or scoring.get('evaluator_sha256') != measurement['evaluator_sha256'][case['task']]):
             raise ValueError('Result uses another measurement chain')
         by_id[rid] = row
@@ -92,7 +94,8 @@ def summarize(plan, assignments, rows, *, bindings, plan_sha256, cohort, measure
                 'usage_complete': len(known), 'usage_missing': ts.count(None),
                 'complete_run_token_mean_secondary': statistics.mean(known) if known else None,
                 'all_assigned_token_mean': statistics.mean(known) if len(known) == len(ts) else None,
-                'states': dict(Counter((by_id.get(c['run_id']) or {}).get('execution', {}).get('state', 'undispatched') for c in cases))}
+                'states': dict(Counter((by_id.get(c['run_id']) or {}).get('execution', {}).get('state',
+                    'dispatched_no_terminal_result' if c['run_id'] in bindings else 'undispatched') for c in cases))}
         differences, lower, upper, token_diffs = [], [], [], []
         for pair in pairs:
             values = {c['condition']: by_id.get(c['run_id']) for c in pair['cases']}
@@ -139,10 +142,33 @@ def summarize(plan, assignments, rows, *, bindings, plan_sha256, cohort, measure
     quality_center = aggregate_bounds[0] if all(full_quality) else None
     quality_radius = math.sqrt(2 * math.log(40) * sum(s['variant_weight'] ** 2 / s['assigned_pairs'] for s in strata))
     tokens_identified = None not in full_token_means
+    family_results = []
+    hierarchy = plan.get('task_hierarchy', {})
+    families = list(dict.fromkeys(hierarchy.get(task, {}).get('family') for task in plan['task_ids']))
+    for family in families:
+        if family is None: continue
+        indexes = [i for i, task in enumerate(plan['task_ids']) if hierarchy[task]['family'] == family]
+        weight = sum(plan['variant_weights'][i] for i in indexes)
+        weights = [plan['variant_weights'][i] / weight for i in indexes]
+        q_known = all(full_quality[i] for i in indexes)
+        t_known = all(full_token_means[i] is not None for i in indexes)
+        bounds = [sum(w * strata[i]['quality_difference_identification_bounds'][k]
+            for w, i in zip(weights, indexes)) for k in (0, 1)]
+        family_results.append({'family': family, 'fixed_family_weight': weight,
+            'assigned_pairs': sum(strata[i]['assigned_pairs'] for i in indexes),
+            'quality_difference_identification_bounds': bounds,
+            'all_assigned_quality_difference': bounds[0] if q_known else None,
+            'quality_normal_session_sensitivity': interval_sensitivity(
+                [quality_differences[i] for i in indexes], weights, binary=True) if q_known else None,
+            'all_assigned_token_difference': sum(w * full_token_means[i] for w, i in zip(weights, indexes)) if t_known else None,
+            'token_normal_session_sensitivity': interval_sensitivity(
+                [complete_token_differences[i] for i in indexes], weights) if t_known else None,
+            'between_application_population_inference': False})
     return {'schema_version': 1, 'plan_id': plan['plan_id'], 'assigned_slots': len(expected),
         'plan_sha256': plan_sha256, 'cohort': cohort, 'dispatch_count': len(bindings),
         'observed_results': len(by_id), 'undispatched_or_no_result': len(expected) - len(by_id),
-        'strata': strata, 'all_assigned_quality_difference_identification_bounds': aggregate_bounds,
+        'strata': strata, 'fixed_family_results': family_results,
+        'all_assigned_quality_difference_identification_bounds': aggregate_bounds,
         'all_assigned_quality_difference': quality_center,
         'all_assigned_quality_iid_hoeffding_ci95': [max(-1, quality_center - quality_radius), min(1, quality_center + quality_radius)] if quality_center is not None else None,
         'all_assigned_quality_normal_session_sensitivity': interval_sensitivity(quality_differences, plan['variant_weights'], binary=True) if all(full_quality) else None,
@@ -193,7 +219,7 @@ def collect(bundle, bundle_path, repo):
     """Read normal dispatch/original/derived records; no unbound row import."""
     from outer.harness import aggregate, profiles
     from research import pair_execution
-    from research.next_phase import inside
+    from research.next_phase import inside, evaluation_version
     batch = inside(repo, bundle['cohort'], 'runs')
     state = pair_execution.state(batch / '_control/pair-journal.jsonl')
     digest = util.sha256_file(bundle_path)
@@ -210,7 +236,7 @@ def collect(bundle, bundle_path, repo):
                 or manifest.get('assignment', {}).get('plan_sha256') != digest
                 or manifest['condition_sha256'] != binding['condition_sha256']
                 or manifest['prompt_sha256'] != binding['input_sha256']
-                or condition['evaluation']['evaluation_version'] != bundle['plan']['settings']['evaluator_version']
+                or condition['evaluation']['evaluation_version'] != evaluation_version(bundle['plan'], binding['task'])
                 or condition['evaluation']['evaluator_sha256'] != bundle['runtime_locks'][binding['task']]['evaluator_sha256']):
             raise ValueError('Frozen input/evaluator/instance identity mismatch')
         for kind, name in [('task', binding['task']), ('runtime', bundle['runtime_id']), ('intervention', binding['condition'])]:
@@ -224,7 +250,7 @@ def collect(bundle, bundle_path, repo):
         if rid in state['results']:
             rows.append(terminal_row(root, binding, state['results'][rid],
                 state['implementations'][rid], aggregate.row_for(batch, rid)))
-    measurement = {'evaluation_version': bundle['plan']['settings']['evaluator_version'],
+    measurement = {'evaluation_version': {task: evaluation_version(bundle['plan'], task) for task in bundle['plan']['task_ids']},
         'evaluator_sha256': {task: lock['evaluator_sha256'] for task, lock in bundle['runtime_locks'].items()}}
     return summarize(bundle['plan'], bundle['assignments'], rows, bindings=state['dispatch'],
         plan_sha256=digest, cohort=bundle['cohort'], measurement=measurement)

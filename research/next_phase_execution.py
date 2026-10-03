@@ -38,7 +38,9 @@ def guarded_implementation(repo, batch, run_id):
 
 def execution_plan(bundle, bundle_path):
     return {'plan_sha256': util.sha256_file(bundle_path), 'cohort': bundle['cohort'],
-        'runtime': bundle['runtime_id']}
+        'runtime': bundle['runtime_id'],
+        'pair_concurrency': bundle['plan']['regime']['pair_concurrency'],
+        'require_fixed_instances': bundle['plan']['plan_id'] == next_phase.V5_ID}
 
 
 def browser_postprocess(bundle):
@@ -70,6 +72,11 @@ def execute(repo, bundle_path, approval_path):
     for binding in current['dispatch'].values():
         if binding['plan_sha256'] != plan['plan_sha256'] or binding['cohort'] != plan['cohort']:
             raise ValueError('Existing acquisition belongs to a different bundle')
+    expected = {c['run_id']: c for p in bundle['assignments'] for c in p['cases']}
+    if plan['require_fixed_instances'] and any(
+            rid not in expected or binding['run_instance_id'] != expected[rid]['run_instance_id']
+            for rid, binding in current['reserved'].items()):
+        raise ValueError('Durable instance differs from frozen assignment')
     for pair in bundle['assignments']:
         number = pair['pair']
         if number in current['gates']:
@@ -83,14 +90,17 @@ def execute(repo, bundle_path, approval_path):
         launch = batch / '_control/launch-receipt.json'
         record = {'bundle_sha256': plan['plan_sha256'], 'source_commit': bundle['source_commit'],
             'approval': next_phase.reference(approval_path), 'cohort': plan['cohort'],
-            'started_at': next_phase.now(), 'pair_concurrency': 1}
+            'started_at': next_phase.now(), 'pair_concurrency': plan['pair_concurrency']}
         if launch.exists():
             saved = util.read_json(launch)
             if saved['bundle_sha256'] != record['bundle_sha256']:
                 raise ValueError('Launch receipt differs from approved bundle')
+            if saved['pair_concurrency'] != record['pair_concurrency']:
+                raise ValueError('Launch concurrency differs from frozen protocol')
         else:
             util.write_new_json(launch, record)
-        return pair_execution.execute_pair(plan, pair['cases'], batch, repo=repo, concurrency=1,
+        return pair_execution.execute_pair(plan, pair['cases'], batch, repo=repo,
+            concurrency=plan['pair_concurrency'],
             implement=guarded_implementation, postprocess=browser_postprocess(bundle))
     return {'status': 'complete', 'assigned_slots': bundle['plan']['allocation']['runs'],
         'model_dispatched': False, 'all_pair_gates_complete': True}
@@ -125,6 +135,10 @@ def resume(repo, bundle_path, approval_path):
     def verify(plan, binding):
         receipt = next_phase.check(repo, bundle_path)
         if not receipt['scientific_and_technical_ready']: raise ValueError('Frozen preflight failed before resume')
+        if plan['require_fixed_instances']:
+            expected = {c['run_id']: c for p in bundle['assignments'] for c in p['cases']}
+            if binding['run_instance_id'] != expected[binding['run_id']]['run_instance_id']:
+                raise ValueError('Unsent instance differs from frozen assignment')
         root = batch / binding['run_id']
         profiles.validate_run(root)
         manifest = util.read_json(root / 'manifest.json')
@@ -132,4 +146,4 @@ def resume(repo, bundle_path, approval_path):
             raise ValueError('Reserved unsent input changed')
     return pair_execution.resume_pair(execution_plan(bundle, bundle_path), batch, authorization,
         repo=repo, verify=verify, implement=guarded_implementation,
-        postprocess=browser_postprocess(bundle))
+        postprocess=browser_postprocess(bundle), concurrency=bundle['plan']['regime']['pair_concurrency'])

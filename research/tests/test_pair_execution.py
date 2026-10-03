@@ -1,5 +1,6 @@
 """One manager, real durable receipts, bounded injected implementation workers."""
 from concurrent.futures import Future
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import tempfile
@@ -57,6 +58,66 @@ class PairExecutionTests(unittest.TestCase):
 
     def test_serial_regression(self):
         self.execute(concurrency=1); self.assertEqual(self.peak,1); self.assertEqual(self.stopped,['A','B'])
+
+    def test_admission_after_prepare_rejects_before_first_dispatch(self):
+        @contextmanager
+        def admit(binding):
+            raise RuntimeError('Synthetic monitor stop during preparation')
+            yield
+        with self.assertRaises(RuntimeError): self.execute(admit=admit)
+        self.assertEqual(len(pair.state(self.batch/'_control/pair-journal.jsonl')['dispatch']),0)
+        self.assertFalse(self.stopped)
+
+    def test_serial_second_peer_is_not_dispatched_after_stop_latch(self):
+        @contextmanager
+        def admit(binding):
+            if binding['run_id']=='B': raise RuntimeError('Synthetic stop after first peer')
+            yield
+        with self.assertRaises(RuntimeError): self.execute(concurrency=1,admit=admit)
+        self.assertEqual(set(pair.state(self.batch/'_control/pair-journal.jsonl')['dispatch']),{'A'})
+        self.assertEqual(self.stopped,['A']); self.assertFalse(self.heavy)
+
+    def test_fixed_instances_are_used_and_missing_or_duplicate_rejected_before_prepare(self):
+        self.plan.update(require_fixed_instances=True,pair_concurrency=2)
+        with self.assertRaises(ValueError): self.execute()
+        self.assertFalse(self.batch.exists())
+        for i,case in enumerate(self.cases,1): case['run_instance_id']=str(i)*32
+        self.execute()
+        current=pair.state(self.batch/'_control/pair-journal.jsonl')
+        self.assertEqual({r:d['run_instance_id'] for r,d in current['dispatch'].items()},
+            {'A':'1'*32,'B':'2'*32})
+
+    def test_two_unsent_reservations_resume_concurrently_without_new_instances(self):
+        self.plan.update(require_fixed_instances=True,pair_concurrency=2)
+        assignments=[]
+        for i,case in enumerate(self.cases,1):
+            binding={**case,**{k:self.plan[k] for k in ('cohort','plan_sha256','runtime')},
+                'run_instance_id':str(i)*32}
+            manifest=self.prepare(binding)
+            binding.update(input_sha256=manifest['prompt_sha256'],condition_sha256=None)
+            assignments.append(binding)
+        journal=self.batch/'_control/pair-journal.jsonl'
+        pair.append(journal,{'kind':'pair_reserved','pair':1,'concurrency':2,'assignments':assignments})
+        auth={'authorized':True,'approved_by':'user','authorization_reference':'synthetic fixture only',
+            'plan_sha256':self.plan['plan_sha256'],'journal_sha256':util.sha256_file(journal),
+            'run_instances':{d['run_id']:d['run_instance_id'] for d in assignments}}
+        verified=[]
+        def implement(repo,batch,rid):
+            self.assertEqual(verified,['A','B'])
+            return self.implement(repo,batch,rid)
+        with self.assertRaises(ValueError):
+            pair.resume_pair(self.plan,self.batch,auth,repo=self.root,verify=lambda *a:None,concurrency=1)
+        self.assertEqual(len(pair.state(journal)['dispatch']),0)
+        result=pair.resume_pair(self.plan,self.batch,auth,repo=self.root,concurrency=2,
+            verify=lambda plan,binding:verified.append(binding['run_id']),
+            implement=implement,postprocess=self.postprocess)
+        self.assertEqual(result['reason'],'pair_publication_restore_cleanup_required')
+        self.assertEqual(self.peak,2)
+        current=pair.state(journal)
+        self.assertEqual({r:d['run_instance_id'] for r,d in current['dispatch'].items()},auth['run_instances'])
+        self.assertEqual(pair.resume_pair(self.plan,self.batch,auth,repo=self.root,concurrency=2,
+            verify=lambda *a:self.fail('No reverify for already-sent slots'),
+            implement=lambda *a:self.fail('No redispatch'))['reason'],'no_reconciled_unsent_slot')
 
     def test_collection_sidecar_hold_preserves_confirmed_raw_and_blocks_recovery_resume(self):
         import sqlite3

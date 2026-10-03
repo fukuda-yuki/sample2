@@ -51,6 +51,12 @@ def summarize(plan, assignments, rows, *, bindings, plan_sha256, cohort, measure
     expected = {case['run_id']: case for pair in assignments for case in pair['cases']}
     if len(expected) != plan['allocation']['runs']:
         raise ValueError('Missing or duplicate assigned slot')
+    for rid, binding in bindings.items():
+        if rid not in expected:
+            raise ValueError('Unassigned dispatch cannot enter the denominator')
+        if ('run_instance_id' in expected[rid]
+                and binding.get('run_instance_id') != expected[rid]['run_instance_id']):
+            raise ValueError('Dispatch differs from the preassigned instance')
     by_id = {}
     for row in rows:
         rid = row.get('run_id')
@@ -166,6 +172,8 @@ def summarize(plan, assignments, rows, *, bindings, plan_sha256, cohort, measure
             'between_application_population_inference': False})
     return {'schema_version': 1, 'plan_id': plan['plan_id'], 'assigned_slots': len(expected),
         'plan_sha256': plan_sha256, 'cohort': cohort, 'dispatch_count': len(bindings),
+        'dispatch_count_definition': 'Durable manager dispatch intents; not a count of actual gateway transmissions.',
+        'execution_regime': plan.get('regime'), 'estimand': plan.get('claim'),
         'observed_results': len(by_id), 'undispatched_or_no_result': len(expected) - len(by_id),
         'strata': strata, 'fixed_family_results': family_results,
         'all_assigned_quality_difference_identification_bounds': aggregate_bounds,
@@ -261,8 +269,55 @@ def collect(bundle, bundle_path, repo):
                 state['implementations'][rid], aggregate.row_for(batch, rid)))
     measurement = {'evaluation_version': {task: evaluation_version(bundle['plan'], task) for task in bundle['plan']['task_ids']},
         'evaluator_sha256': {task: lock['evaluator_sha256'] for task, lock in bundle['runtime_locks'].items()}}
-    return summarize(bundle['plan'], bundle['assignments'], rows, bindings=state['dispatch'],
+    summary=summarize(bundle['plan'], bundle['assignments'], rows, bindings=state['dispatch'],
         plan_sha256=digest, cohort=bundle['cohort'], measurement=measurement)
+    summary['acquisition_facts']=slot_facts(bundle,bundle_path,repo,state,rows)
+    return summary
+
+
+def slot_facts(bundle,bundle_path,repo,state,rows):
+    """All-assigned factual index; send evidence and manager intent stay distinct."""
+    from outer.harness import live_usage
+    from research import next_phase
+    batch=next_phase.inside(repo,bundle['cohort'],'runs')
+    digest=util.sha256_file(bundle_path); by_id={r['run_id']:r for r in rows}; facts=[]
+    expected={c['run_id']:c for p in bundle['assignments'] for c in p['cases']}
+    if len(expected)!=bundle['plan']['allocation']['runs'] or set(state['dispatch'])-set(expected):
+        raise ValueError('All assigned facts require exact slots without extra dispatches')
+    for pair in bundle['assignments']:
+        for case in pair['cases']:
+            rid=case['run_id']; root=batch/rid; binding=state['dispatch'].get(rid); row=by_id.get(rid,{})
+            if binding and (binding['plan_sha256']!=digest or binding['cohort']!=bundle['cohort']
+                    or case.get('run_instance_id',binding['run_instance_id'])!=binding['run_instance_id']):
+                raise ValueError('Slot fact belongs to another bundle or instance')
+            manifest_path=root/'manifest.json'
+            manifest=util.read_json(manifest_path) if manifest_path.exists() else {}
+            if manifest and (manifest['run_id']!=rid or case.get('run_instance_id',manifest['run_instance_id'])!=manifest['run_instance_id']):
+                raise ValueError('Manifest fact belongs to another assigned identity')
+            evidence=live_usage.execution_evidence(root) if manifest else {'send_evidence':'unknown' if binding else 'known_no_send','issues':[]}
+            if not binding and evidence['send_evidence']!='known_no_send':
+                raise ValueError('Unmanaged transmission or uncertain assigned original')
+            terminal=bool(manifest.get('ended_at') and manifest.get('stop_confirmed') is True)
+            observed=evidence['send_evidence']=='observed_send'
+            acquisition=('normal' if terminal and observed and manifest.get('end_reason')=='completed' else
+                'failed' if terminal and observed else 'incomplete' if binding else 'undispatched')
+            gate=state['gates'].get(case['pair'])
+            facts.append({**case,'source_family':pair.get('source_family'),'task_membership':pair.get('task_membership'),
+                'original_location':str(root),'original_sha256':util.tree_hashes(root) if root.exists() else {},
+                'manager_dispatch_recorded':bool(binding),'gateway_execution_evidence':evidence,
+                'actual_gateway_send_observed':evidence['send_evidence']=='observed_send',
+                'acquisition_state':acquisition,'end_reason':manifest.get('end_reason'),
+                'stop_confirmed':manifest.get('stop_confirmed'),'evaluation':row.get('scoring'),
+                'quality':row.get('quality'),'usage':row.get('usage'),
+                'pair_gate':gate if gate else {'state':'pending'}})
+    counts=Counter(f['acquisition_state'] for f in facts)
+    return {'kind':'all_assigned_acquisition_fact_index','bundle_reference':next_phase.reference(bundle_path),
+        'assigned_pairs':len(bundle['assignments']),'assigned_slots':len(facts),
+        'actual_gateway_sent_runs':sum(f['actual_gateway_send_observed'] for f in facts),
+        'unknown_send_runs':sum(f['gateway_execution_evidence']['send_evidence']=='unknown' for f in facts),
+        'manager_dispatch_count':len(state['dispatch']),'normal_runs':counts['normal'],'failed_runs':counts['failed'],
+        'incomplete_runs':counts['incomplete'],'undispatched_runs':counts['undispatched'],
+        'completed_pair_gates':len(state['gates']),'rows':facts}
 
 
 def main():

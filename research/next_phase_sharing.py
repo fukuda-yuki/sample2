@@ -38,7 +38,8 @@ def release_prefix(bundle_path, bundle):
         raise ValueError('Technical sharing fixture must remain outside research cohorts')
     if not technical and bundle.get('kind') != 'continuity_prospective_bundle':
         raise ValueError('Sharing requires a frozen research bundle or explicit technical fixture')
-    prefix = 'technical-continuity' if technical else 'source-info-v2'
+    prefix = ('technical-continuity' if technical else
+        'source-info-v5-100p2' if bundle.get('plan', {}).get('plan_id') == next_phase.V5_ID else 'source-info-v2')
     return prefix + '-' + util.sha256_file(bundle_path)[:12] + '-pair-'
 
 
@@ -92,7 +93,7 @@ def stage(repo, bundle_path, number, destination):
     family = bundle['plan'].get('task_hierarchy', {}).get(pair['task'], {}).get('family', 'music-store-continuity')
     public_request = 'research/tasks/' + family + '/public-request.txt'
     for name in ('research/__init__.py', 'research/catalog_allocation_review.py', 'research/catalog_share.py',
-            'research/sql/catalog_otel_requests.sql', next_phase.PLAN,
+            'research/sql/catalog_otel_requests.sql', next_phase.protocol_path(bundle['plan']),
             'research/tasks/candidate-register.json', public_request, task_profile['evaluation']['spec_path']):
         copy(repo / name, name)
     copy(repo / 'research/sharing/CONTINUITY-README.md', 'README.md')
@@ -146,12 +147,28 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
         clocked(workspace, bundle_path, number, bundle, bindings, 'before_upload_offline_extract',
             lambda: catalog_delivery.offline_extract(workspace / 'public', original_extraction))
     prefix = release_prefix(bundle_path, bundle)
+    actual_transport = transfer is None and fetch is catalog_delivery.download
     if transfer is None:
         transfer = lambda package, tag, commit: catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
     urls = clocked(workspace, bundle_path, number, bundle, bindings, 'publication_and_remote_hash_check',
         lambda: transfer(workspace / 'package', prefix + f'{number:03d}', bundle['source_commit']))
     publication = {'remote_assets_verified': True, 'urls': urls, 'package_sha256': asset['sha256'],
         'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number}
+    if bundle['plan']['plan_id'] == next_phase.V5_ID:
+        # v5 live acceptance cannot use the injectable local rehearsal path.
+        publication['transport_mode'] = ('github-release-anonymous-download-v1'
+            if actual_transport else 'injected-transport')
+        if actual_transport:
+            remote_path = workspace / 'actual-remote-readback.json'
+            if not remote_path.exists():
+                remote = catalog_delivery.release(prefix + f'{number:03d}')
+                if not remote or remote.get('draft'):
+                    raise ValueError('Actual v5 release readback missing')
+                util.write_new_json(remote_path, {'tag_name': remote['tag_name'],
+                    'release_id': remote['id'], 'html_url': remote['html_url'],
+                    'assets': [{k: row[k] for k in ('id', 'name', 'size', 'digest', 'browser_download_url')}
+                        for row in remote['assets']]})
+            publication['actual_remote_readback'] = next_phase.reference(remote_path)
     publication_path = workspace / 'publication-receipt.json'
     if publication_path.exists():
         if util.read_json(publication_path) != publication: raise ValueError('Retained remote receipt differs')
@@ -171,14 +188,16 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     # Save the verified identities and retained evidence before deleting any
     # public/transfer copy. A crash after cleanup must not require these copies
     # or another upload, download, evaluator, or model dispatch.
+    evidence_paths = [publication_path, roundtrip_path, original_extraction, trip_root / 'extraction.json']
+    if publication.get('actual_remote_readback'):
+        evidence_paths.append(Path(publication['actual_remote_readback']['path']))
     util.write_new_json(finalization, {'pair': number,
         'plan_sha256': util.sha256_file(bundle_path), 'cohort': bundle['cohort'],
         'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
         'review_sha256': util.sha256_file(review), 'attempt': attempt,
         'original_inventory': manifest['original_inventory'],
         'package_sha256': asset['sha256'], 'roundtrip_receipt': str(roundtrip_path),
-        'evidence_files': {str(p): util.sha256_file(p) for p in
-            (publication_path, roundtrip_path, original_extraction, trip_root / 'extraction.json')}})
+        'evidence_files': {str(p): util.sha256_file(p) for p in evidence_paths}})
     return finish(repo, bundle_path, number, workspace, review, finalization)
 
 

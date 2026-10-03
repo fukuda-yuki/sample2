@@ -312,7 +312,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                         'evaluatorFaults': baseline.get('evaluatorFaults') or ['HTTP evaluator exited before browser collection']}
             util.write_new_json(produced, fallback)
             shutil.copyfile(http_out / 'evaluator-manifest.json', temporary / 'evaluator-manifest.json')
-    if timed_out or not produced.is_file():
+    if (timed_out and not browser_required) or not produced.is_file():
         target = evaluations / ('fault-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
         record = _base_record(run_id, sequence, version, exit_code, independent_hash,
                               spec_sha256, 'evaluator_fault', None, [], command,
@@ -338,7 +338,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                           spec_sha256, state, output, mismatches, command,
                           evaluator_sha256=evaluator_sha256,
                           evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
-                          timeout_seconds=timeout, work_dir=str(work_dir),
+                          timed_out=timed_out, timeout_seconds=timeout, work_dir=str(work_dir),
                           artifact_sha256_frozen=frozen_hash)
     record['evaluation_sha256'] = util.sha256_file(produced)
     record['operation_status'] = ('cleanup_failed' if browser_required

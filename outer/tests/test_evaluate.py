@@ -77,6 +77,16 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
         self.assertEqual('evaluator_fault', record['scoring_state'])
         self.assertIsNone(record['verdict'])
 
+    def test_timed_out_http_observer_retains_bound_failure_and_output_hash(self):
+        record = self.score('fault-after-critical-timeout', evaluation_version='1.3.0', timeout=1)
+        self.assertEqual('evaluator_fault', record['scoring_state'])
+        self.assertTrue(record['evaluator_timed_out'])
+        self.assertEqual('fail_critical', record['verdict'])
+        self.assertIsNone(record['quality'])
+        self.assertFalse(record['adopted'])
+        self.assertEqual(util.sha256_file(self.run_dir/record['directory']/'evaluation.json'), record['evaluation_sha256'])
+        self.assertEqual('fail_critical', aggregate.row_for(self.runs, self.manifest['run_id'])['verdict'])
+
 
     def test_new_migration_contract_http_only_cannot_be_adopted(self):
         condition = util.read_json(self.run_dir / 'condition.json')

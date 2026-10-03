@@ -90,7 +90,7 @@ def main():
     task = ledger.get('taskId', 'MS1-001')
     spec_hash = util.sha256_file(options['spec'])
     reported_path = str(artifact.resolve())
-    if mode in ('fault', 'fault-after-critical', 'fault-after-critical-unbound'):
+    if mode in ('fault', 'fault-after-critical', 'fault-after-critical-unbound', 'fault-after-critical-timeout'):
         known = mode != 'fault'
         if mode == 'fault-after-critical-unbound': artifact_hash = 'f' * 64
         output = {'evaluationId': '{}-{}-{}-{:03d}'.format(task, (artifact_hash or '000000000000')[:12], version, sequence),
@@ -108,6 +108,8 @@ def main():
         (out / 'results.jsonl').write_text('', encoding='utf-8')
         write_manifest(out, version, artifact_hash, claimed_build)
         sys.stderr.write('stub: evaluator fault\n')
+        if mode == 'fault-after-critical-timeout':
+            time.sleep(10)
         return 2
     if mode == 'mismatch-task':
         task = 'WRONG-TASK'

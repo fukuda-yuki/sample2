@@ -27,6 +27,8 @@ def main():
     parser.add_argument('--contract-root', type=Path,
                         help='Task owner checkout with public request/profiles for upstream authority binding')
     parser.add_argument('--education', action='store_true', help='Run the independent education-1.0.0 contract')
+    parser.add_argument('--collection-policy', choices=['workspace-static-db-v2'],
+                        help='Explicit future submission contract; absent preserves historical collection')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     repo, out = args.repo.resolve(), args.out.resolve()
@@ -66,6 +68,7 @@ def main():
             task_locks[task] = (path, selected)
     runs = out/'runs'
     receipt = {'schema_version':1,'scope':'technical evaluator calibration; no research/model runs',
+        'collection_policy':args.collection_policy,
         'source_commit':source_commit,'evaluator_sha256':evaluator_hash,
         'evaluator_files':util.tree_hashes(bundle),'runtime_images':lock['images'],
         'browser_pin_sha256':util.sha256_file(args.browser_pin),
@@ -133,6 +136,8 @@ def main():
                     'source_commit':source_commit,'command':'prebuilt immutable calibration bundle',
                     'sdk_version':selected_lock['versions']['dotnet'],'sha256_origin':str(bundle),'clean_worktree':clean}},
             'runtime_lock':copy.deepcopy(selected_lock)}
+        if args.collection_policy:
+            condition['collection_policy'] = args.collection_policy
         if task_locks:
             condition['evaluation']['evaluator_build'] = copy.deepcopy(selected_lock['evaluator_build'])
         manifest = run.create_run(repo,runs,task,'CAL',index,{},resolved_condition=condition)
@@ -183,6 +188,8 @@ def main():
         saved = {'name':case['name'],'run_id':manifest['run_id'],'variant':variant,
             'expected':case['expected'],'actual':actual,'matched':not failures,'mismatch_keys':failures,
             'artifact_sha256':run.read_snapshot(root)['artifact_sha256'],
+            'collection_policy':run.read_snapshot(root).get('collection_policy'),
+            'database_assets':run.read_snapshot(root).get('database_assets'),
             'spec_sha256':util.sha256_file(spec),'asset_files':util.tree_hashes(assets),
             'runtime_lock_sha256':util.sha256_file(selected_lock_path), 'runtime_images':selected_lock['images'],
             'record':record,'aggregate':row}

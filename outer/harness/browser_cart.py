@@ -236,7 +236,8 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
         album = next(a for a in catalog['albums'] if a['albumId'] == 1)
         request = {'runInstanceId': instance, 'artifactSha256': artifact_hash, 'specSha256': spec_hash,
                    'baseUrl': base_url, 'albumId': album['albumId'], 'price': album['price'],
-                   'requireCartStatus': version == '1.3.0'}
+                   'requireCartStatus': version == '1.3.0',
+                   'structuralPrecondition': version == '1.3.0'}
         util.write_new_json(review/'request.json', request)
         collector = repo/'inner/browser/cart-review.cjs'
         environment = child_environment({k: os.environ[k] for k in

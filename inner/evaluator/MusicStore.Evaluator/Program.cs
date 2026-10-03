@@ -115,7 +115,8 @@ public static class Program
             try
             {
                 browserReview = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash,
-                    specHash, options.ReviewRunInstanceId, catalog, ledger.SpecVersion == "1.3.0");
+                    specHash, options.ReviewRunInstanceId, catalog, ledger.SpecVersion == "1.3.0",
+                    ledger.SpecVersion == "1.3.0");
                 File.Copy(options.BrowserCartEvidence, Path.Combine(evidenceDir, "browser-cart-receipt.json"));
             }
             catch (Exception ex)

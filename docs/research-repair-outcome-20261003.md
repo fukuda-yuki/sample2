@@ -11,10 +11,10 @@ has been started.
 | Issue | Implemented and demonstrated | Remaining acceptance |
 |---|---|---|
 | #20 | Single-manager, immutable pair/instance reservation, maximum two implementations in one pair, immediate stopped originals, serial heavy postprocessing, owned recovery and no replay; ordinary-worker mock overlap and finite fault controls | The fixed live comparison stopped after its serial two Runs on a browser dependency fault. Paired live slots were never dispatched. Improvement and the actual remote-publication/independent-download gate are not established. |
-| #21 | Versioned music and education ledgers, independent expected outcomes, ordinary scorer/browser combination, permitted/negative/unsupported/fault cases, retained known failures, cleanup identity and precise runtime artifacts | Basic **human** oracle/workflow confirmation is `not_run`. AI review and automated calibration do not satisfy it. Evidence covers the declared finite cases, not universal defect detection. |
+| #21 | Versioned music and education ledgers, independent expected outcomes, ordinary scorer/browser combination, permitted/negative/unsupported/fault cases, retained known failures, cleanup identity and precise runtime artifacts | Basic **human** oracle/workflow confirmation is `not_run`. The technical Preload exposed an unresolved static-input collection/contract confound. AI review and finite automated calibration do not establish full readiness. |
 | #22 | Two real source families, four semantic variants, nonuniform prices/discounts and grade mappings, required existing-row/relationship/history preservation, independent reference workflows and fixed-solution negative controls | Human acceptance remains `not_run`; the old Framework applications were not run. The new compatibility references are explicit .NET 8 adaptations. |
 | #23 | Intent/send/ack/response/complete-usage distinctions, partial cumulative usage counted once, missing totals null, absent-controller reconciliation, raw conflicts retained, ordinary-worker serializers and owned Docker faults | Provider-internal billing and undisclosed provider implementation changes are not observable. Historical inconsistencies were retained, not repaired in place. |
-| #24 | Fixed serial two-family/four-variant protocol, 64 pairs/128 slots, equal weights, held-out membership, all-assigned accounting, precision/missingness/session sensitivity, immutable preparation and fail-closed execution | Human-dependent prerequisites and a separate exact-bundle research-start instruction remain outstanding. No maintained-quality, noninferiority or general .NET migration claim is made. |
+| #24 | Fixed serial two-family/four-variant protocol, 64 pairs/128 slots, equal weights, held-out membership, all-assigned accounting, precision/missingness/session sensitivity, immutable preparation and fail-closed execution | Static-input collection/contract acceptance, human-dependent prerequisites and a separate exact-bundle research-start instruction remain outstanding. No maintained-quality, noninferiority or general .NET migration claim is made. |
 
 The two-Run technique is not adopted for the new serial study. #24 explicitly
 permits a deliberately serial regime while #20's speed acceptance remains open.
@@ -41,6 +41,21 @@ during postprocessing. Separately versioned scoring of these **new technical**
 saved products does not resume the campaign, change its failed status, or claim
 paired-live acceptance. The two paired slots remain undispatched. No passing
 replacement, account/model substitution or extra real-model trial was made.
+
+Saved Explore subsequently scored `pass`, quality 100, with complete browser
+coverage. Saved Preload's frozen package failed `R-001` publish: its project
+unconditionally includes `App_Data/initial-store.sqlite`, which the existing
+collector excludes. The workspace copy and supplied static input have exactly
+the same SHA256; the public submission prompt does not explicitly disclose the
+blanket SQLite exclusion. This is an unresolved collection/contract confound,
+so the frozen-package failure is not a causal verdict on the original workspace's
+implementation ability. No generated files or collection rules were changed.
+The final narrowly bound adapter records remaining browser checks as
+`not_run_product_prerequisite`, keeps the known frozen-package failure, leaves
+quality null and records confirmed cleanup. Its saved Preload attempt 2 is
+`evaluation_incomplete`, rather than an invented browser observer fault. Both
+earlier attempts and the failed original campaign remain unchanged. The
+acceptance ledger keeps `evaluation_chain=partial` and acquisition blocked.
 
 Ordinary-worker mock evidence is separate: `runs/_rm35` contains the ten fixed
 MusicStore recording/pair cases. `runs/_cuSer` contains exactly two Contoso
@@ -90,6 +105,11 @@ bytes and exact receipts. The prepared bundle and full environment check are in
 `artifacts/source-info-v2-prepared-20261003/`. A blocked check is a successful
 demonstration of the start gate, not a statement that acquisition is ready.
 Missing human confirmation cannot be removed by an automated receipt.
+The final affected classification, browser-boundary and start checks passed
+31 tests. Earlier passing regressions are reused only for byte-identical
+components; changed components have separate case receipts and branch witnesses.
+The committed [evidence index](research-repair-evidence-index.json) gives local
+receipt paths, SHA256 identities and their limited acceptance states.
 
 The integrated regression logs are
 `artifacts/final-outer-tests-b2969e3-20261003.log` (175 tests) and

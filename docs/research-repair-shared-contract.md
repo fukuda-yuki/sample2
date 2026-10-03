@@ -19,7 +19,16 @@ One manager holds the existing OS lock, permits at most the two slots of one pai
 
 A and B agree and publish versioned public request, ledger, expectation/authority map, selected source families and semantic variants before final calibration. Variant-specific answers live in old code/data or private oracle, never in the common public request. Variants are nested within a family and never count as independent applications. Existing identifiers, relationships, nonuniform amounts, order/quantity semantics, restart continuity, preserved behavior and corrected old defects must have executable observations. A single reference implementation is not an independent oracle; B provides a separate checker or manually derived expected values with source authority, and A calibrates multiple allowed implementation forms, defects and withheld controls through ordinary `score_run`, browser collection/composition and cleanup. New contract version must explicitly retain browser coverage.
 
-Human review is `not_run` until a human actually performs/records the required basic checks. Automated/AI review remains separate. Prepare a runnable reference and concrete checklist before requesting only missing judgments. Missing human acceptance blocks combined research readiness.
+Human review is `not_run` until a human actually performs/records the required basic checks. Automated/AI review remains separate. Prepare a runnable reference and concrete checklist before requesting only missing judgments. Missing human acceptance blocks combined research readiness under the preserved v1-v3 policies.
+
+The prospective [v4 research-lead acceptance amendment](research-lead-acceptance-v4.md)
+uses the user's explicit delegation for a narrowly defined AI-lead preparation
+decision, supported by independent source/data expectations and a separate AI
+methodological review. Its plan alone selects this policy; all five technical
+prerequisites and separate exact-bundle start authorization remain mandatory.
+Human review remains `not_run`; this does not close the old human acceptance
+criteria or establish ordinary-user acceptance. Old ledgers and bundles are not
+changed.
 
 ## Validation and scientific boundary
 

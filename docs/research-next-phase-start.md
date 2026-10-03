@@ -1,8 +1,10 @@
 # Next research phase: exact-bundle start and recovery
 
-The current protocol is `research/protocols/source-information-two-families-20261003-v3.json`.
-This prospective revision corrects static database delivery. The earlier v2
-protocol and blocked bundles remain preserved. Tasks, scientific allocation,
+The current protocol is `research/protocols/source-information-two-families-20261003-v4.json`.
+This prospective revision adopts the [delegated AI research-lead acceptance
+policy](research-lead-acceptance-v4.md) before any research dispatch. The v3 static
+database correction remains intact. Earlier protocols, blocked bundles and
+`human_review:not_run` remain preserved. Tasks, scientific allocation,
 source-presentation intervention, model settings and analysis are unchanged.
 It compares initial permitted-source presentation (`preload - explore`) under
 serial execution, using two fixed source families, two semantic variants per
@@ -51,25 +53,27 @@ four-Run comparison is separate from this study and does not authorize acquisiti
 Preparation freezes committed source bytes, four task profiles and per-task
 runtime/evaluator bundles, source/data/oracle assets, actual intervention,
 browser/Node/Python identities, assignments and exact acceptance receipts.
-This action sends no model request and reads no credential. The current v3
-ledger, bundle and recorded full environment check exist at the paths below.
+This action sends no model request and reads no credential. The accepted v4
+ledger is `artifacts/source-info-v4-acceptance-lead-20261003/ledger.json`;
+the bundle and full environment check are saved in
+`artifacts/source-info-v4-prepared-lead-20261003/`.
 This check-only command can be repeated and does not overwrite a receipt or
 start a worker:
 
 ```powershell
-python -m research.next_phase check --bundle .\artifacts\source-info-v3-prepared-20261003\bundle.json
+python -m research.next_phase check --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json
 ```
 
-A blocked check exits 2 and reports each missing acceptance separately. Basic
-human oracle/workflow confirmation for both families is mandatory. An agent's
-automated review cannot set `human_review=passed`. If a human review or accepted
-artifact changes, retain the old ledger/bundle and prepare a new version with
-the reviewed exact bytes. Do not edit a frozen bundle or its referenced ledger.
-The current bounded technical ledger has all five technical prerequisites passed;
-its human prerequisite remains `not_run`. The exact pending four-variant review
-packet, including common prompts and preview identities, is
-`artifacts/source-info-v3-human-review-20261003/packet-v2.json`. Neither this
-blocked check nor repair/Push authorization supplies research-start permission.
+A passing check exits 0; a blocked check exits 2 and lists missing acceptance.
+All five technical prerequisites remain mandatory. Only v4 can use the delegated
+AI-lead policy. It requires separate hashed user-delegation, lead-decision and
+independent-review receipts bound to the exact plan and task assets, including
+workflow and source/oracle evidence. An AI review cannot set `human_review=passed`.
+Human review remains `not_run` and ordinary-user acceptance is not claimed.
+The old v3 human-gated ledger and pending packet remain preserved; they have not
+become accepted under their old policy. Changed code, assets or acceptance require
+a new version; do not edit a frozen bundle or its referenced ledger. Passing
+preflight, delegated preparation, repair or Push does not authorize acquisition.
 The current task profiles select `workspace-static-db-v2`. Final workspace
 `.sqlite`, `.sqlite3` and `.db` files are submitted static assets; scratch and
 runtime databases belong in `/tmp`. Associated nonempty WAL, SHM or journal
@@ -79,22 +83,21 @@ algorithm. Conditions without opt-in retain legacy collection. Historical
 Preload lost its static copy under that legacy rule; its failed package and
 evaluations remain unchanged and no missing historical file is reconstructed.
 
-After an actual human reviews the exact assets, use a newly accepted ledger and
-a new bundle directory. The following are future commands, requiring that
-accepted ledger to be created first. For example,
-with the final accepted ledger saved at the following exact path:
+The new v4 version was prepared from the clean committed integration worktree
+using the accepted lead ledger. The commands below document its preparation;
+the output directory already exists, so do not rerun `prepare` into it:
 
 ```powershell
-python -m research.next_phase prepare --runtime deepseek-research-v2 --ledger .\artifacts\source-info-v3-acceptance-human-v1\ledger.json --browser .\artifacts\source-info-v2-environment-20261003\browser-pin.json --out .\artifacts\source-info-v3-prepared-human-v1
-python -m research.next_phase check --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json --out .\artifacts\source-info-v3-prepared-human-v1\environment-check.json
+python -m research.next_phase prepare --runtime deepseek-research-v2 --ledger .\artifacts\source-info-v4-acceptance-lead-20261003\ledger.json --browser .\artifacts\source-info-v2-environment-20261003\browser-pin.json --out .\artifacts\source-info-v4-prepared-lead-20261003
+python -m research.next_phase check --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json --out .\artifacts\source-info-v4-prepared-lead-20261003\environment-check.json
 ```
 
-These future accepted ledger, bundle and approval paths do not exist yet.
-Preparation uses a new output directory and cannot overwrite an earlier bundle.
+The separate user-start approval file does not exist. Preparation uses a new
+output directory and cannot overwrite an earlier bundle.
 If acceptance changes code or inputs, commit the change and update its affected
 runtime/evidence before preparing the new bundle.
 
-Only after all technical and human prerequisites pass, a separate user research
+After all technical and delegated-lead prerequisites pass, a separate user research
 start instruction must be recorded in a new approval JSON with `authorized=true`,
 `approved_by="user"`, the exact `bundle_sha256`, the original authorization
 reference and a UTC `approved_at_utc`. No such instruction or approval is inferred
@@ -103,10 +106,10 @@ The following exact command starts **one pair only**, and fails closed until bot
 preflight and that approval pass:
 
 ```powershell
-python -m research.next_phase execute --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json --approval .\artifacts\source-info-v3-prepared-human-v1\user-start-approval.json
+python -m research.next_phase execute --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json --approval .\artifacts\source-info-v4-prepared-lead-20261003\user-start-approval.json
 ```
 
-The short cohort root is `runs/source-info-v3`; attempts 4001 through 4064 and
+The short cohort root is `runs/source-info-v4`; attempts 4001 through 4064 and
 immutable instances distinguish all 128 assigned slots. Each Run keeps its
 ordinary 1800-second budget and 600-second provider timeout. No overlapping
 implementations, no account/model fallback and no replacement Runs are allowed.
@@ -116,7 +119,7 @@ order does not prove absence of carry-over, day, quota or provider effects.
 Full Issue20 live parallel speed and actual remote transport acceptance remain
 unestablished. Issue24 explicitly permits this deliberately serial regime, so
 those full Issue20 criteria do not block its first pair. Accepted serial
-task/evaluator/recording evidence and human confirmation still bind that pair.
+task/evaluator/recording evidence and delegated lead acceptance bind that pair.
 The actual public operation gate described below remains mandatory before every
 next pair; local simulated transport cannot satisfy it.
 
@@ -127,8 +130,8 @@ its owned transfer copies cleaned before another execute invocation can start
 the next pair. For pair 1:
 
 ```powershell
-python -m research.next_phase_sharing stage --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json --pair 1 --workspace .\artifacts\continuity-sharing-v1\pair-001
-python -m research.next_phase_sharing share --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json --pair 1 --workspace .\artifacts\continuity-sharing-v1\pair-001 --review .\artifacts\continuity-sharing-v1\pair-001\public-review.json
+python -m research.next_phase_sharing stage --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json --pair 1 --workspace .\artifacts\continuity-sharing-v1\pair-001
+python -m research.next_phase_sharing share --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json --pair 1 --workspace .\artifacts\continuity-sharing-v1\pair-001 --review .\artifacts\continuity-sharing-v1\pair-001\public-review.json
 ```
 
 The second command requires an actual exact-inventory public review, including
@@ -140,8 +143,8 @@ model request. Original Runs, evaluator attempts and raw provider records remain
 On interruption, stop and recover only existing owned instances:
 
 ```powershell
-python -m research.next_phase stop --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json
-python -m research.next_phase recover --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json
+python -m research.next_phase stop --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json
+python -m research.next_phase recover --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json
 ```
 
 Recovery never starts a worker. If a serial pair has a reserved but unsent second
@@ -149,7 +152,7 @@ slot, an explicit resume after unchanged preflight can start only that immutable
 unsent instance. Dispatched, uncertain or lost instances are never replayed:
 
 ```powershell
-python -m research.next_phase resume --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json --approval .\artifacts\source-info-v3-prepared-human-v1\user-start-approval.json
+python -m research.next_phase resume --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json --approval .\artifacts\source-info-v4-prepared-lead-20261003\user-start-approval.json
 ```
 
 Analysis reads identity-bound terminal receipts and versioned normalized usage,
@@ -157,7 +160,7 @@ checks stopped gateway originals and rejects changed/foreign usage. It does not
 accept arbitrary imported rows:
 
 ```powershell
-python -m research.next_phase_analysis --bundle .\artifacts\source-info-v3-prepared-human-v1\bundle.json --out .\artifacts\source-info-v3-prepared-human-v1\assigned-analysis.json
+python -m research.next_phase_analysis --bundle .\artifacts\source-info-v4-prepared-lead-20261003\bundle.json --out .\artifacts\source-info-v4-prepared-lead-20261003\assigned-analysis.json
 ```
 
 The old 100 pairs retain their original protocol, raw records, verdicts and ZIP.

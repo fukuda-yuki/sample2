@@ -65,8 +65,8 @@ def validate(record, repo):
 @contextmanager
 def activated(record, repo):
     """Forward only validated browser dependency paths during serial scoring."""
-    env = validate(record, repo)
-    before = {name: os.environ.get(name) for name in KEYS}
+    env = {**validate(record, repo), 'SAMPLE2_NODE': record['node_path']}
+    before = {name: os.environ.get(name) for name in env}
     try:
         os.environ.update(env)
         yield

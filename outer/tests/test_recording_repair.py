@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 import support
-from harness import gateway, live_usage, runtime, util
+from harness import gateway, live_usage, profiles, runtime, util
 
 
 class RecordingRepairTests(unittest.TestCase):
@@ -125,6 +125,13 @@ class RecordingRepairTests(unittest.TestCase):
                 self.assertFalse(called)
             finally:
                 proxy.shutdown(); proxy.server_close(); upstream.server_close()
+
+    def test_declared_common_hash_matches_actual_worker_mount_path(self):
+        repo=Path(__file__).resolve().parents[2]
+        condition=profiles.resolve(repo,'MS1-001','explore','deepseek-migration-v1')
+        prompt,context=profiles.prepare_prompt(condition,repo)
+        self.assertIn('/inputs/legacy-source',prompt)
+        self.assertEqual(context['common_sha256'],util.sha256_bytes(prompt.encode()))
 
 
 if __name__ == '__main__': unittest.main()

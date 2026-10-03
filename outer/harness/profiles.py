@@ -74,6 +74,8 @@ def prepare_prompt(condition, source, catalog=None):
               'Environment: .NET SDK 8; target net8.0. EF Core SQLite 8.0.31 and '
               'Microsoft.Data.Sqlite 8.0.31 are available offline. No Internet access. '
               'Use /tmp for scratch databases.\n\n' + request)
+    common = common.replace('/input/legacy-source',
+                            condition['runtime'].get('input_mount', '/input') + '/legacy-source')
     if condition['intervention']['method'] == catalog_input.METHOD:
         common = common.replace('/input/legacy-source', '/inputs/legacy-source')
         derived = Path(catalog)
@@ -130,9 +132,6 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
         inputs.update(catalog_input.prepare(repo, source))
         condition['input_policy']['allowlist'] += ['catalog-derived', 'catalog-tools']
     prompt, context = prepare_prompt(condition, source, inputs.get('catalog-derived'))
-    input_mount = condition['runtime'].get('input_mount', '/input')
-    if input_mount != '/input':
-        prompt = prompt.replace('/input/legacy-source', input_mount + '/legacy-source')
     if 'catalog-derived' in inputs:
         receipt = inputs['catalog-derived'].parent / 'preparation.json'
         context['preparation'] = {'path': str(receipt), 'sha256': util.sha256_file(receipt),

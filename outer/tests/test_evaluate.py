@@ -62,6 +62,16 @@ class RunFixture:
 
 class ScoreTestCase(RunFixture, unittest.TestCase):
 
+    def test_new_migration_contract_http_only_cannot_be_adopted(self):
+        condition = util.read_json(self.run_dir / 'condition.json')
+        condition['evaluation']['evaluation_version'] = '1.3.0'
+        util.write_json_atomic(self.run_dir / 'condition.json', condition)
+        result = self.score('ok')
+        self.assertEqual('evaluator_fault', result['scoring_state'])
+        self.assertFalse(result['adopted'])
+        self.assertIsNone(aggregate.row_for(self.runs, self.run_dir.name)['quality'])
+
+
     def test_research_http_only_is_not_adopted_by_ordinary_scoring(self):
         condition = util.read_json(self.run_dir / 'condition.json')
         condition['evaluation']['evaluation_version'] = '1.2.0'

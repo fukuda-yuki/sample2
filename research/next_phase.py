@@ -119,6 +119,8 @@ def acceptance_scopes(pins):
             'research/next_phase_execution.py', 'research/next_phase_sharing.py',
             'research/next_phase_analysis.py', 'research/catalog_delivery.py',
             'research/catalog_share.py', 'research/catalog_allocation_review.py')}
+    execution.update({name: digest for name, digest in pins.items() if name in
+        ('research/catalog_environment.py', 'research/next_phase_design.py')})
     serializer = {name: digest for name, digest in pins.items() if
         name.startswith(('outer/runtime/', 'outer/profiles/interventions/'))
         or name in ('outer/harness/profiles.py', 'outer/harness/migration_input.py',

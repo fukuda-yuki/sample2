@@ -34,6 +34,12 @@ $env:SAMPLE2_BROWSER_EXECUTABLE = 'C:\Users\mwam0\AppData\Local\ms-playwright\ch
 $env:SAMPLE2_MONITOR_ROOT = 'C:\Users\mwam0\.copilot\repos\copilot-agent-observability'
 ```
 
+The executor applies the validated browser pin during serial scoring, recovery
+and unsent-only continuation. A successful dependency preflight alone is not
+evidence that a collector received its required environment. Release tags include
+the frozen bundle hash, so technical sharing rehearsals and amended bundles do
+not reuse a study pair's tag.
+
 Do not copy an API key into these commands or environment settings. The existing
 Windows User credential is read only by the existing gateway bootstrap. Worker,
 scorer, generated app and monitor receive no credential. The dedicated technical

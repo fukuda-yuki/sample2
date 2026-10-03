@@ -41,6 +41,18 @@ def execution_plan(bundle, bundle_path):
         'runtime': bundle['runtime_id']}
 
 
+def browser_postprocess(bundle):
+    """The checked pin must reach the ordinary collector, not just preflight."""
+    from outer.harness import machine
+    from research import catalog_environment
+    def postprocess(repo, batch, run_id, archive):
+        if not bundle.get('browser'):
+            raise ValueError('Pinned browser environment is required for scoring')
+        with catalog_environment.activated(bundle['browser']['record'], repo):
+            return machine.postprocess(repo, batch, run_id, archive)
+    return postprocess
+
+
 def execute(repo, bundle_path, approval_path):
     # No credential lookup, directory creation, or worker startup before all
     # acceptance, environment and exact scientific-start gates pass.
@@ -79,7 +91,7 @@ def execute(repo, bundle_path, approval_path):
         else:
             util.write_new_json(launch, record)
         return pair_execution.execute_pair(plan, pair['cases'], batch, repo=repo, concurrency=1,
-            implement=guarded_implementation)
+            implement=guarded_implementation, postprocess=browser_postprocess(bundle))
     return {'status': 'complete', 'assigned_slots': bundle['plan']['allocation']['runs'],
         'model_dispatched': False, 'all_pair_gates_complete': True}
 
@@ -89,7 +101,8 @@ def recover(repo, bundle_path):
     next_phase.validate_plan(bundle['plan'])
     batch = next_phase.inside(repo, bundle['cohort'], 'runs')
     from research import pair_execution
-    return pair_execution.recover_pair(execution_plan(bundle, bundle_path), batch, repo=repo)
+    return pair_execution.recover_pair(execution_plan(bundle, bundle_path), batch, repo=repo,
+        postprocess=browser_postprocess(bundle))
 
 
 def resume(repo, bundle_path, approval_path):
@@ -118,4 +131,5 @@ def resume(repo, bundle_path, approval_path):
         if manifest['condition_sha256'] != binding['condition_sha256'] or manifest['prompt_sha256'] != binding['input_sha256']:
             raise ValueError('Reserved unsent input changed')
     return pair_execution.resume_pair(execution_plan(bundle, bundle_path), batch, authorization,
-        repo=repo, verify=verify, implement=guarded_implementation)
+        repo=repo, verify=verify, implement=guarded_implementation,
+        postprocess=browser_postprocess(bundle))

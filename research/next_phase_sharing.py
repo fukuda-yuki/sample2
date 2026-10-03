@@ -31,9 +31,21 @@ def pair_context(repo, bundle_path, number):
     return bundle, batch, current, pair, bindings
 
 
+def release_prefix(bundle_path, bundle):
+    """Keep distinct frozen bundles and technical fixtures off each other's tags."""
+    technical = bundle.get('kind') == 'continuity_sharing_technical_fixture'
+    if technical and not bundle['cohort'].startswith('runs/_technical-sharing-'):
+        raise ValueError('Technical sharing fixture must remain outside research cohorts')
+    if not technical and bundle.get('kind') != 'continuity_prospective_bundle':
+        raise ValueError('Sharing requires a frozen research bundle or explicit technical fixture')
+    prefix = 'technical-continuity' if technical else 'source-info-v2'
+    return prefix + '-' + util.sha256_file(bundle_path)[:12] + '-pair-'
+
+
 def stage(repo, bundle_path, number, destination):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     bundle, batch, current, pair, bindings = pair_context(repo, bundle_path, number)
+    release_prefix(bundle_path, bundle)
     if destination.exists() or not destination.is_relative_to(repo / 'artifacts'):
         raise ValueError('Use a new owned artifacts staging directory')
     public = destination / 'public'
@@ -118,9 +130,10 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     asset = catalog_delivery.package(workspace / 'public', workspace / 'package', review)
     original_extraction = workspace / 'before-upload-extraction.json'
     if not original_extraction.exists(): catalog_delivery.offline_extract(workspace / 'public', original_extraction)
+    prefix = release_prefix(bundle_path, bundle)
     if transfer is None:
-        transfer = lambda package, tag, commit: catalog_delivery.publish(package, tag, commit, tag_prefix='continuity-v1-pair-')
-    urls = transfer(workspace / 'package', f'continuity-v1-pair-{number:03d}', bundle['source_commit'])
+        transfer = lambda package, tag, commit: catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
+    urls = transfer(workspace / 'package', prefix + f'{number:03d}', bundle['source_commit'])
     publication = {'remote_assets_verified': True, 'urls': urls, 'package_sha256': asset['sha256'],
         'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number}
     publication_path = workspace / 'publication-receipt.json'

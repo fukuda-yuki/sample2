@@ -114,3 +114,33 @@ Python state tests do not establish Windows/Docker isolation. Actual-worker
 mock receipts and the separate live technical comparison are required before
 calling #20 accepted. Human task/evaluator review belongs to #21/#22 and is
 not replaced by these recording tests.
+
+The ordinary worker mock probe predeclares eight recording cases and, with
+`--pair`, a ninth case containing two overlapping actual OpenCode workers.
+All fault cases use the ordinary worker by default; only the upstream and
+credential bootstrap are replaced. The 75-response case emits 74 harmless
+deterministic bash actions and a 75th action that marks the crash boundary.
+`--synthetic-worker` is a diagnostic fallback and never establishes ordinary
+worker acceptance. Use a fresh output directory, keep failures and do not retry
+the same slots until success.
+
+The live template is `research/protocols/technical-pair-live-20261003.json`:
+exactly four maximum dispatches, MS1-CONT-A, explore/preload serial block then
+paired block, unchanged 1800/600-second budgets and runtime. The blocks have
+separate technical subcohorts and pending public gates. The campaign watches
+reported observed usage (20 million), starts (600) and accumulated Run time
+(7200 seconds) as safety stop triggers; polling can observe a threshold only
+after already sent traffic. Unknown totals are missing observations. No retries,
+replacements or extra passing trials are authorized. Product quality failure
+is retained and is not a speed-test exclusion. Actual external-publication time
+remains `not_run`, so local speed/safety results cannot complete all of #20.
+
+Prepare exact code/runtime/input/evaluator and mock hashes without dispatch:
+
+```powershell
+python outer/verify/technical-pair-live.py --mode prepare --repo <integrated-repo> --out <new-technical-cohort> --mock-receipt <mock-result.json>
+```
+
+The corresponding `--mode execute` is exclusively the predeclared technical
+test, using the existing Windows User credential through gateway stdin. It is
+not a new-study command and cannot resume the old catalog cohort.

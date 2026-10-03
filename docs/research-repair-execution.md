@@ -352,3 +352,53 @@ postprocessing, pair recovery/resume and publication gates retain that hold;
 scoring, monitor import and archive stages do not start. One independent
 nonempty-sidecar case verifies this distinction and retained receipt hashes
 without a worker or provider, including refusal to dispatch the reserved peer.
+
+If the manager disappears after saving that receipt but before journaling it,
+recovery first verifies and ingests the instance-bound receipt and its stopped
+raw/manifest/snapshot hashes. It retains the original receipt by path and SHA256,
+then records the same collection hold without recollection or another stop.
+The independent manager-gap case is included in the final 17-case pair suite;
+the original receipt remains unchanged and no peer, scorer or provider starts.
+
+## Final v3 prompt and collection witness
+
+The final production source is integration HEAD
+`3a0ed7e52c068299c073fec16f3bab2a325187b4`. Eight no-model preparations cover
+MS1-CONT-A/B and CU1-ENR-C/D, each in both arms. Their retained preparation
+receipt is `runs/_v3Prep/preparation-receipt.json` (SHA256
+`562e5ed63fd7234fd8884d4fb13c8d74bf8e7cc737573c7bf372d37b87826cda`).
+Explore packets are zero; preload packets are seven for music and ten for
+education. Current input-builder dependencies, public assets and common prompt
+bytes match the preserved preparation. Only `machine.py` changed among its
+controller dependencies; all four final runtime locks match current controllers.
+The final dependency witness preserves the earlier preparation and runtime locks
+instead of overwriting them.
+
+Exactly two additional ordinary OpenCode mock workers ran on that final source,
+MS1-CONT-A explore then preload, using `deepseek-research-v2`, 1800-second Run
+and 600-second provider budgets. Both passed on the first attempt. Saved upstream
+requests prove zero versus seven exact source packets and the common prompt
+SHA256 `ff9cf198cec0a515b8821a8f278b1f329d9e9ec884b274b35a8d08aa29b8604c`.
+Model, tools, permissions, compaction, OpenCode, runtime, budget, collection policy
+and public input bytes match across arms. Each upstream was capped at one mock
+response: two mock calls, zero real calls, zero user-key reads and no retries or
+replacements. Both owned workers/gateways are stopped and owned networks absent.
+
+The consolidated receipt is
+`artifacts/source-info-v3-serializer-mock-20261003/final-witness.json` (SHA256
+`acb3e0e765eeaacd158acd9aef5972a4e9071bea84ca023b9cd374e3ab3e8edd`).
+It binds `runs/_v3Ser/result.json` (SHA256
+`baa4478471a405eadde80f6c571e1933314a5b83cede74b8fd23e9db3f974e09`),
+the eight-input dependency witness, collector/archive fixture, confirmed-stop
+hold and manager-gap receipts, dispatch scope, final runtime and stopped raw
+originals. The initial Git ownership check failure happened before preparation
+or worker dispatch and is retained separately; the authorized actual-user
+correction required no persistent Git setting.
+
+There are now fourteen ordinary-worker mock Runs across three retained cohorts.
+The real technical campaign remains halted at two of four dispatches. No old
+frozen product, failure, raw record or campaign result was reconstructed or
+replaced. Paired live improvement and actual external publication remain
+unmeasured; human task/oracle/workflow review remains outstanding. These proofs
+support the prospective serial study's technical contract and do not complete
+all of #20 or establish acquisition readiness by themselves.

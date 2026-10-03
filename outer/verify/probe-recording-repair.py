@@ -99,6 +99,63 @@ if mode=='controller-loss75':
 '''
 
 
+def serialized_source_packets(run_root):
+    """Verify migration packets from stopped request originals, without dispatch.
+
+    The gateway's source_packet_count is specifically a CATALOG_SOURCE counter.
+    Migration packets have their own frozen source paths and text hashes.
+    """
+    import fnmatch
+    from outer.harness.gateway import check_initial_input
+    run_root=Path(run_root)
+    condition=util.read_json(run_root/'condition.json')
+    context=util.read_json(run_root/'context.json')
+    prompt=(run_root/'inputs/prompt.txt').read_text(encoding='utf-8')
+    starts=util.read_lines(run_root/'usage/raw/started.jsonl')
+    if not starts:
+        return {'verified':False,'reason':'no_saved_request'}
+    request=run_root/'usage/raw'/starts[0]['request_file']
+    body=util.read_json(request)
+    texts=[]
+    for message in body.get('messages',[]):
+        content=message.get('content','')
+        if isinstance(content,list):
+            content=''.join(part.get('text','') for part in content if isinstance(part,dict))
+        if isinstance(content,str): texts.append(content)
+    source=run_root/'inputs/legacy-source'
+    paths={p.relative_to(source).as_posix():p for p in source.rglob('*') if p.is_file()
+        and any(fnmatch.fnmatch(p.relative_to(source).as_posix(),pattern)
+                for pattern in condition['context_files'])}
+    blocks=context.get('blocks',[])
+    expected=set(paths) if context['method']=='preload' else set()
+    suffix=''.join('\n\n--- '+b['source']+' ---\n'+b['text'] for b in blocks)
+    common=prompt[:-len(suffix)] if suffix and prompt.endswith(suffix) else prompt
+    counts={name:sum(text.count('\n\n--- '+name+' ---\n') for text in texts) for name in paths}
+    packet_rows=[]
+    for block in blocks:
+        path=paths.get(block['source'])
+        packet_rows.append({'source':block['source'],'text_sha256':util.sha256_bytes(block['text'].encode()),
+            'declared_sha256':block['sha256'],'input_file_sha256':util.sha256_file(path) if path else None,
+            'input_text_identical':path is not None and path.read_text(encoding='utf-8-sig')==block['text'],
+            'serialized_occurrences':counts.get(block['source'],0)})
+    contract=check_initial_input(body,prompt)
+    request_hash=util.sha256_file(request)
+    verified=(contract['verified'] and request_hash==starts[0]['request_sha256']
+        and util.sha256_bytes(common.encode())==context['common_sha256']
+        and (not suffix or prompt.endswith(suffix))
+        and {b['source'] for b in blocks}==expected and len(blocks)==len(expected)
+        and all(counts[name]==(1 if name in expected else 0) for name in paths)
+        and all(r['text_sha256']==r['declared_sha256'] and r['input_text_identical'] for r in packet_rows))
+    return {'verified':bool(verified),'packet_count':sum(counts.values()),
+        'expected_packet_count':len(expected),'declared_packet_count':len(blocks),
+        'source_header_occurrences':counts,'packets':packet_rows,
+        'common_prompt_sha256':util.sha256_bytes(common.encode()),
+        'prompt_sha256':util.sha256_file(run_root/'inputs/prompt.txt'),
+        'context_sha256':util.sha256_file(run_root/'context.json'),
+        'request_path':str(request),'request_sha256':request_hash,
+        'gateway_catalog_source_packet_count':contract['source_packet_count']}
+
+
 def child(root,case,repo,paired=False,synthetic_worker=False,task_id='MS1-CONT-A',
           runtime_id='deepseek-migration-v1',exact_budget=False,maximum_mock_calls=0):
     root,repo=Path(root),Path(repo)
@@ -250,10 +307,12 @@ def main():
         counter=util.read_json(run_root/'usage/raw/mock-upstream-count.json') if (run_root/'usage/raw/mock-upstream-count.json').exists() else {}
         if a.maximum_mock_calls: passed=passed and counter.get('calls')==1 and counter.get('rejections')==0 and len(starts)==1
         contract=util.read_json(run_root/'usage/raw/first-request-contract.json') if (run_root/'usage/raw/first-request-contract.json').exists() else None
+        packets_receipt=serialized_source_packets(run_root) if a.task=='CU1-ENR-C' else None
         if a.task=='CU1-ENR-C':
             packets=10 if case=='actual-preload' else 0
             passed=passed and len(context.get('blocks',[]))==packets and contract and contract.get('verified')
-            passed=passed and contract.get('source_packet_count')==packets and contract.get('expected_source_packet_count')==packets
+            passed=passed and packets_receipt['verified'] and packets_receipt['packet_count']==packets
+            passed=passed and packets_receipt['expected_packet_count']==packets
             passed=passed and condition['budget']['value']==preset['timeout_seconds']
         result={'case':case,'passed':bool(passed and safe),'real_model_calls':0,
             'ordinary_opencode_worker':not a.synthetic_worker,
@@ -268,7 +327,7 @@ def main():
             'model_called':manifest['model_called'],'execution_evidence':evidence,
             'usage_complete':normalized['usage_complete'],'observed_tokens':normalized['observed_tokens'],
             'total_tokens':normalized['total_tokens'],'input_reached':normalized['input_reached'],
-            'first_request_contract':contract,
+            'first_request_contract':contract,'serialized_source_packets':packets_receipt,
             'model':first.get('model'),'tools':[t.get('function',{}).get('name') for t in first.get('tools',[])],
             'compaction':config['compaction'],'permission':config['permission'],
             'condition_sha256':manifest['condition_sha256'],'credential_records_redacted':safe,

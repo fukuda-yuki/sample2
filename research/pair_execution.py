@@ -251,9 +251,20 @@ def _postprocess_fault(row):
             or row.get('operation_status') == 'cleanup_failed')
 
 
+def _collection_hold(current, assignments):
+    for binding in assignments:
+        receipt = current['implementations'].get(binding['run_id'], {}).get('receipt', {})
+        if receipt.get('collection_status') == 'collection_fault' or receipt.get('collection_error_type'):
+            return {'status': 'held', 'reason': 'collection_fault', 'run_id': binding['run_id'],
+                'stop_confirmed': receipt.get('stop_confirmed'),
+                'submission_fixed': receipt.get('submission_fixed', False)}
+
+
 def _postprocess(plan, assignments, batch, repo, journal, postprocess):
     current = state(journal)
     _verify_plan(plan, current)
+    held = _collection_hold(current, assignments)
+    if held: return held
     for binding in assignments:
         previous = current['results'].get(binding['run_id'])
         if previous and _postprocess_fault(previous['row']):
@@ -354,6 +365,8 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
                     raise ValueError('Postprocess receipt identity mismatch')
                 append(journal, {'kind': 'result', **binding, 'row': receipt['row'],
                     'receipt': str(path), 'receipt_sha256': util.sha256_file(path)})
+        held = _collection_hold(state(journal), assignments)
+        if held: return held
         if len(assignments) != 2:
             return {'status': 'held', 'reason': 'pair_incomplete_unsent_slot_not_dispatched'}
         return _postprocess(plan, assignments, batch, repo, journal, postprocess)
@@ -363,6 +376,8 @@ def _validate_gate(value, current, pair):
     assigned = [d for d in current['dispatch'].values() if d['pair'] == pair]
     if len(assigned) != 2 or not all(d['run_id'] in current['results'] for d in assigned):
         raise ValueError('Exactly two terminal results required before the gate')
+    if _collection_hold(current, assigned):
+        raise ValueError('Recorded collection fault blocks publication gate')
     if any(_postprocess_fault(current['results'][d['run_id']]['row']) for d in assigned):
         raise ValueError('Recorded postprocess fault blocks publication gate')
     expected = {d['run_id']: d['run_instance_id'] for d in assigned}
@@ -421,6 +436,8 @@ def resume_pair(plan, batch, authorization, *, repo, verify, implement=machine.i
         if any(d['pair'] != pair for d in unsent):
             raise ValueError('Unsent reservations span different pairs')
         assignments = [d for d in current['reserved'].values() if d['pair'] == pair]
+        held = _collection_hold(current, assignments)
+        if held: return held
         if (authorization.get('authorized') is not True or authorization.get('approved_by') != 'user'
                 or not authorization.get('authorization_reference')
                 or authorization.get('plan_sha256') != plan['plan_sha256']

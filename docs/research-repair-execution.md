@@ -344,3 +344,11 @@ roundtrip and equal arm prompts. Actual SDK scoring of the new independent
 static-database fixture and the final new-prompt serializer proof are separately
 bound acceptance items. They do not authorize model retries or alteration of the
 stopped two-of-four campaign.
+
+Even when collection holds, `machine.implement` durably records the confirmed
+stop and raw/manifest hashes separately from `submission_fixed=false` and
+`collection_status=collection_fault`, then preserves the exception. Ordinary
+postprocessing, pair recovery/resume and publication gates retain that hold;
+scoring, monitor import and archive stages do not start. One independent
+nonempty-sidecar case verifies this distinction and retained receipt hashes
+without a worker or provider, including refusal to dispatch the reserved peer.

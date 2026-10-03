@@ -541,9 +541,15 @@ def request_stop(root):
 
 def scoring_command(condition, frozen, out, work, assets, version, sequence):
     name = 's2-score-' + uuid.uuid4().hex
+    initial = Path(assets) / 'initial-store.sqlite'
+    business = []
+    if condition['evaluation'].get('migration_contract'):
+        if not initial.is_file():
+            raise ValueError('Migration evaluation requires its frozen initial business database')
+        business = mount(initial, '/inputs/existing-business/initial-store.sqlite', True)
     cmd = ['docker', 'run', '--name', name, '--network', 'none', *sandbox_args(),
            *mount(frozen, '/artifact', True), *mount(assets, '/assets', True),
-           *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],
+           *business, *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],
            'dotnet', '/assets/evaluator/' + condition['evaluation']['assembly'], '--artifact', '/artifact',
            '--out', '/result', '--work', '/work', '--spec', '/assets/requirements.json',
            '--catalog', '/assets/catalog.json', '--evaluation-version', version, '--sequence', str(sequence)]

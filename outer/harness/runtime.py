@@ -354,15 +354,16 @@ def _start(repo, runs_dir, run_id):
     config = root / 'state' / 'opencode.json'
     util.write_new_json(config, opencode_config(condition))
     catalog = condition['intervention']['method'] == catalog_input.METHOD
+    stdin_prompt = condition['runtime'].get('prompt_transport') == 'stdin'
     gateway_args = ['create', '-i', '--name', state['gateway'], '--label', 'sample2.run=' + run_id,
                     '--label', 'sample2.instance=' + manifest['run_instance_id'],
                     '--network', private, '--network-alias', 'gateway', *sandbox_args(),
                     *mount(root / 'usage/raw', '/records'),
-                    *(mount(root / 'inputs', '/contract', True) if catalog else []), lock['images']['gateway'],
+                    *mount(root / 'inputs', '/contract', True), lock['images']['gateway'],
                     '--run-id', run_id, '--model', condition['runtime']['model_id'],
                     '--session-id', manifest.get('run_instance_id', run_id),
                     '--upstream-timeout', str(condition['runtime'].get('provider_timeout_seconds', 120))]
-    if catalog:
+    if catalog or stdin_prompt:
         gateway_args += ['--expected-prompt', '/contract/prompt.txt']
     manifest.update(started_at=run.now(), runner={'id': 'opencode', 'version': lock['opencode_version']},
                     synthetic=False, model_called=False)
@@ -415,7 +416,16 @@ def _start(repo, runs_dir, run_id):
                 at = args.index(lock['images']['worker'])
                 args = args[:at+1] + ['python3', '-c', catalog_input.WORKER_PREFLIGHT,
                                      'sample2/' + condition['runtime']['model_id']]
+            elif stdin_prompt:
+                at = args.index(lock['images']['worker'])
+                args = args[:at+1] + ['python3', '-c',
+                    "import os,sys; p=open(sys.argv[1],'rb'); os.dup2(p.fileno(),0); "
+                    "os.execvp('opencode',['opencode','run','--pure','--format','json','--title',sys.argv[2],'--model',sys.argv[3]])",
+                    condition['runtime'].get('input_mount', '/input') + '/prompt.txt', run_id,
+                    'sample2/' + condition['runtime']['model_id']]
             docker(*args)
+            state['worker_started_at'] = run.now()
+            util.write_json_atomic(root / 'runtime.json', state)
             with (root / 'evidence/agent.jsonl').open('xb') as log:
                 worker_process = subprocess.Popen(['docker', 'start', '-a', state['worker']],
                     env=child_environment(), stdout=log, stderr=subprocess.STDOUT)
@@ -462,15 +472,12 @@ def _start(repo, runs_dir, run_id):
         state['stopped_at'] = run.now()
         state['stop_confirmed'] = stopped
         util.write_json_atomic(root / 'runtime.json', state)
-        from .live_usage import journal
-        endings, _ = journal(root / 'usage/raw/events.jsonl')
-        observed_response = any(e.get('status') == 'completed' and not e.get('policy_error') for e in endings)
         manifest.update(ended_at=run.now(), duration_seconds=round(time.monotonic() - started, 3),
                         end_reason=reason if stopped else 'stop_unconfirmed', exit_code=exit_code,
-                        stop_confirmed=stopped, stop_method='container_exit', stop_evidence=state,
-                        model_called=(True if observed_response else
-                                      None if (root / 'usage/raw/started.jsonl').exists() else False))
+                        stop_confirmed=stopped, stop_method='container_exit', stop_evidence=state)
         run.save_manifest(runs_dir, run_id, manifest)
+        from .live_usage import update_manifest_evidence
+        update_manifest_evidence(root)
         # The measured interval ends above. Cleanup cannot change its outcome,
         # duration or usage, and runs even when subsequent normalization fails.
         manifest['network_cleanup'] = record_cleanup(root)
@@ -513,7 +520,10 @@ def request_stop(root):
                             stop_method='container_exit',
                             end_reason='operator_stop' if stopped else 'stop_unconfirmed')
             run.save_manifest(root.parent, root.name, manifest)
+            from . import live_usage
+            live_usage.update_manifest_evidence(root)
             record_cleanup(root)
+            live_usage.collect(root)
     except BlockingIOError:
         deadline = time.monotonic() + 55
         while time.monotonic() < deadline:

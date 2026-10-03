@@ -3,7 +3,44 @@ import json
 import re
 from pathlib import Path
 
-from . import util, run
+from . import util, run, gateway
+
+
+def execution_evidence(root):
+    """Reconcile activity without treating controller intent as transmission."""
+    root = Path(root)
+    manifest = util.read_json(root / 'manifest.json')
+    raw = root / 'usage/raw'
+    identity = (manifest['run_id'], manifest.get('run_instance_id', manifest['run_id']))
+    starts, start_errors = journal(raw / 'started.jsonl')
+    ends, end_errors = journal(raw / 'events.jsonl')
+    sends, send_errors = journal(raw / 'transmission.jsonl')
+    records = [e for e in starts + ends + sends
+               if (e.get('run_id'), e.get('session_id')) == identity]
+    wrong = len(records) != len(starts + ends + sends)
+    responses = [p.name for p in raw.glob('*.response.sse') if p.stat().st_size]
+    observed = bool(responses or any(e.get('send_evidence') == 'observed_send'
+                    or e.get('http_status') is not None for e in records))
+    runtime_path = root / 'runtime.json'
+    state = util.read_json(runtime_path) if runtime_path.exists() else {}
+    errors = start_errors + end_errors + send_errors + (['identity_mismatch'] if wrong else [])
+    # A disappeared journal from an already started worker cannot prove no send.
+    uncertain = bool(errors or responses or records or state.get('worker_started_at'))
+    send = ('observed_send' if observed else 'unknown' if uncertain else 'known_no_send')
+    return {'evidence_version': 3, 'send_evidence': send,
+            'model_called': True if observed else None if uncertain else False,
+            'provider_acknowledged': any(e.get('http_status') is not None for e in records),
+            'saved_response_count': len(responses), 'started_count': len(starts),
+            'terminal_count': len(ends), 'issues': errors,
+            'raw_sha256': {p.name: util.sha256_file(p) for p in sorted(raw.glob('*')) if p.is_file()}}
+
+
+def update_manifest_evidence(root):
+    evidence = execution_evidence(root)
+    manifest = util.read_json(Path(root) / 'manifest.json')
+    manifest.update(model_called=evidence['model_called'], execution_evidence=evidence)
+    run.save_manifest(Path(root).parent, Path(root).name, manifest)
+    return evidence
 
 
 def strings(value):
@@ -120,7 +157,7 @@ def collect(root):
     context = util.read_json(root / 'context.json')
     if util.sha256_file(root / 'context.json') != manifest.get('context_sha256'):
         issues.append('context_original_mismatch')
-    matches = []
+    matches, conflicts, raw_bindings = [], [], []
     source_reads = []
     prompt_reached = False
     for event in events:
@@ -134,6 +171,24 @@ def collect(root):
             continue
         if not response_path.is_file() or util.sha256_file(response_path) != event.get('response_sha256'):
             issues.append('response_original_mismatch')
+        if response_path.is_file():
+            parsed = gateway.parse_sse(response_path.read_bytes())
+            if parsed.get('usage') != event.get('usage'):
+                conflicts.append({'request_id': event['request_id'], 'raw_usage': parsed.get('usage'),
+                    'journal_usage': event.get('usage'), 'response_sha256': util.sha256_file(response_path)})
+                issues.append('raw_journal_usage_conflict')
+            # The raw report remains authoritative for observed partial amounts;
+            # a disagreement prevents exact totals and retains both alternatives.
+            event['journal_usage'] = event.get('usage')
+            event['usage'] = parsed.get('usage')
+            event['raw_stream_done'] = parsed['stream_done']
+            if parsed['parse_errors']:
+                issues.append('partial_or_invalid_sse')
+            if not parsed['stream_done'] or event.get('status') != 'completed':
+                issues.append('stream_incomplete')
+        raw_bindings.append({'request_id': event['request_id'], 'request_sha256': event['request_sha256'],
+            'response_sha256': util.sha256_file(response_path) if response_path.is_file() else None,
+            'run_instance_id': manifest.get('run_instance_id')})
         try:
             body = util.read_json(request_path)
         except (ValueError, UnicodeError):
@@ -200,5 +255,17 @@ def collect(root):
     components = [normalized['observed_input_tokens'], normalized['observed_output_tokens']]
     normalized['observed_tokens'] = sum(v for v in components if v is not None) if any(v is not None for v in components) else None
     normalized['observed_call_count'] = len(events)
+    normalized.update(evidence_version=3, run_instance_id=manifest.get('run_instance_id'),
+        conflicts=conflicts, raw_bindings=raw_bindings,
+        execution_evidence=execution_evidence(root))
     util.write_json_atomic(path, normalized)
+    # Append versioned receipts; compatibility files above remain readable by
+    # existing consumers. Neither provider originals nor old archives change.
+    import uuid
+    version = root / 'usage/derivations' / uuid.uuid4().hex
+    util.write_new_json(version / 'normalized.json', normalized)
+    util.write_new_json(version / 'binding.json', {'run_id': manifest['run_id'],
+        'run_instance_id': manifest.get('run_instance_id'), 'raw': raw_bindings,
+        'normalized_sha256': util.sha256_file(version / 'normalized.json'),
+        'manifest_sha256': util.sha256_file(root / 'manifest.json')})
     return normalized

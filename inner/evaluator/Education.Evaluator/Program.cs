@@ -290,10 +290,11 @@ public static class Program
             var g=web.Get("/Student/Edit/"+newId);var r=web.Post("/Student/Edit/"+newId,Form(g.Body,invalid));invalidEditOk&=r.Status==200&&HasForm(r.Body)&&Snapshot(host.DatabasePath)==editedSnapshot;
         }
         Check(10,invalidEditOk,"Nine missing/whitespace/51-char/calendar-invalid edit cases preserve all tables.");
+        var preStopSnapshot=Snapshot(host.DatabasePath);
         var firstPid=host.AppProcessId;host.Stop();var firstStopped=host.ProcessExited;host.Start();var restarted=host.WaitReady(TimeSpan.FromSeconds(30));
         var restartIdentity=firstStopped&&host.AppProcessId!=firstPid;
         File.WriteAllText(Path.Combine(evidence,"restart.json"),JsonSerializer.Serialize(new{firstPid,firstStopConfirmed=firstStopped,restartedPid=host.AppProcessId,sameDatabasePath=host.DatabasePath},Json));
-        Check(11,restarted.Ready&&restartIdentity&&Snapshot(host.DatabasePath)==editedSnapshot&&RowsMatch(host.DatabasePath,out _),"Restart retains the actual complete pre-stop database without duplication; independent invalid-input failures remain E-008/E-010; first stop="+firstStopped+", distinct PID="+restartIdentity);
+        Check(11,restarted.Ready&&restartIdentity&&Snapshot(host.DatabasePath)==preStopSnapshot&&RowsMatch(host.DatabasePath,out _),"Restart retains the actual complete pre-stop database without duplication; independent invalid-input failures remain E-008/E-010; first stop="+firstStopped+", distinct PID="+restartIdentity);
         host.Stop();
     }
 

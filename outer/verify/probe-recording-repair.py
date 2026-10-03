@@ -1,0 +1,193 @@
+"""Finite production-controller/actual-worker mock recording acceptance.
+
+Uses the prepared NEW namespace. Credential bootstrap is a fixed canary; no
+Windows API credential is read. Each injected Run is a distinct technical slot.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+import uuid
+from unittest.mock import patch
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+from outer.harness import live_usage, profiles, run, runtime, util
+from outer.harness.security import child_environment
+
+REPO=Path(__file__).resolve().parents[2]
+CANARY='synthetic-repair-only-canary'
+CASES=('actual-explore','actual-preload','partial-usage','partial-no-usage',
+       'done-only','after-send-before-ack','controller-loss75','write-failure')
+
+GATEWAY=r'''
+import json,sys,threading,time,uuid
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from pathlib import Path
+sys.path.insert(0,'/app')
+from gateway import Gateway
+mode,rid,instance=sys.argv[1:]
+model='deepseek-v4.1-flash'
+class Upstream(BaseHTTPRequestHandler):
+    def log_message(self,*args): pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers['Content-Length']))
+        if mode=='after-send-before-ack':
+            time.sleep(2); self.connection.close(); return
+        self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers()
+        if mode=='done-only': self.wfile.write(b'data: [DONE]\n\n'); return
+        item={'id':'mock-'+uuid.uuid4().hex,'model':model,'object':'chat.completion.chunk','created':1,
+              'choices':[{'index':0,'delta':{'role':'assistant','content':'synthetic complete'},'finish_reason':None}]}
+        self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode()); self.wfile.flush()
+        item['choices']=[{'index':0,'delta':{},'finish_reason':'stop'}]
+        if mode!='partial-no-usage': item['usage']={'prompt_tokens':20,'completion_tokens':5,'total_tokens':25}
+        self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode()); self.wfile.flush()
+        if mode not in ('partial-usage','partial-no-usage'): self.wfile.write(b'data: [DONE]\n\n')
+server=ThreadingHTTPServer(('127.0.0.1',0),Upstream)
+threading.Thread(target=server.serve_forever,daemon=True).start()
+gateway=Gateway(('0.0.0.0',8080),'/records',rid,model,sys.stdin.readline().strip(),
+    session_id=instance,upstream_host='127.0.0.1',upstream_port=server.server_port,tls=False,
+    expected_prompt='/contract/prompt.txt')
+if mode=='write-failure':
+    original=gateway.record
+    def record(file,obj):
+        if file=='started.jsonl': raise OSError('synthetic write failure before send')
+        return original(file,obj)
+    gateway.record=record
+gateway.serve_with_signals()
+'''
+
+WORKER=r'''
+import json,sys,time,urllib.request
+from pathlib import Path
+mode=sys.argv[1]
+body={'model':'deepseek-v4.1-flash','stream':True,'messages':[{'role':'user','content':Path('/inputs/prompt.txt').read_text()}]}
+for i in range(75 if mode=='controller-loss75' else 1):
+    request=urllib.request.Request('http://gateway:8080/v1/chat/completions',data=json.dumps(body).encode(),
+        headers={'Content-Type':'application/json'})
+    try: urllib.request.urlopen(request,timeout=10).read()
+    except Exception: pass
+    print(json.dumps({'type':'step_finish','sessionID':'synthetic-native','index':i}),flush=True)
+if mode=='controller-loss75':
+    Path('/workspace/responses-ready').write_text('75')
+    while True: time.sleep(.1)
+'''
+
+
+def child(root,case,repo):
+    root,repo=Path(root),Path(repo)
+    old_docker=runtime.docker
+    resolver=profiles.resolve
+    def resolve(*args,**kwargs):
+        c=resolver(*args,**kwargs)
+        c['budget']['value']=120; c['runtime']['timeout_seconds']=120
+        return c
+    def docker(*args,**kwargs):
+        args=list(args)
+        if args and args[0]=='create' and '--name' in args:
+            name=args[args.index('--name')+1]
+            lock=util.read_json(repo/'artifacts/runtime/music-store-continuity-v1/lock.json')
+            if name.startswith('s2-gateway-'):
+                at=args.index(lock['images']['gateway'])
+                instance=args[args.index('--session-id')+1]
+                rid=args[args.index('--run-id')+1]
+                args=args[:at]+['--entrypoint','python3',*runtime.mount(root/'fixtures','/fixtures',True),
+                    lock['images']['gateway'],'/fixtures/gateway.py',case,rid,instance]
+            elif name.startswith('s2-worker-') and not case.startswith('actual-'):
+                at=args.index(lock['images']['worker'])
+                args=args[:at]+[*runtime.mount(root/'fixtures','/fixtures',True),lock['images']['worker'],
+                    'python3','/fixtures/worker.py',case]
+        return old_docker(*args,**kwargs)
+    with patch.object(profiles,'resolve',resolve),patch.object(runtime,'docker',docker),\
+         patch.object(runtime,'_gateway_credential',return_value=CANARY):
+        intervention='preload' if case=='actual-preload' else 'explore'
+        manifest=profiles.create(repo,root,'MS1-CONT-A',intervention,1,'deepseek-migration-v1')
+        runtime.start(repo,root,manifest['run_id'])
+
+
+def main():
+    p=argparse.ArgumentParser()
+    p.add_argument('--repo',type=Path,default=REPO)
+    p.add_argument('--out',type=Path)
+    p.add_argument('--child',type=Path)
+    p.add_argument('--case',choices=CASES)
+    p.add_argument('--cases',nargs='+',choices=CASES,default=CASES)
+    a=p.parse_args()
+    if a.child: child(a.child,a.case,a.repo); return 0
+    repo=a.repo.resolve()
+    batch=a.out or repo/'runs'/('_recording-repair-mock-'+uuid.uuid4().hex[:12])
+    batch.mkdir(parents=True,exist_ok=False)
+    util.write_new_json(batch/'plan.json',{'cohort':'technical-recording-mock','real_model_calls':0,
+        'cases':a.cases,'controller_files':runtime.controller_files(repo),
+        'limits':{'runs':len(a.cases),'run_seconds':120,'fixed_no_retries':True},
+        'expected':{'actual-*':'complete usage, exact serialized prompt, identical runtime and access',
+            'partial-usage':'observed 25, total null','partial-no-usage':'observed null, total null',
+            'done-only':'usage incomplete','after-send-before-ack':'observed send, no ack, usage missing',
+            'controller-loss75':'observed activity after absent-controller stop, 75 saved responses',
+            'write-failure':'no observed send, missing usage; retained failed write original'}})
+    results=[]
+    for case in a.cases:
+        root=batch/case; fixtures=root/'fixtures'; fixtures.mkdir(parents=True)
+        (fixtures/'gateway.py').write_text(GATEWAY,encoding='utf-8')
+        (fixtures/'worker.py').write_text(WORKER,encoding='utf-8')
+        rid='MS1-CONT-A-'+('preload' if case=='actual-preload' else 'explore')+'-001'
+        run_root=root/rid
+        with (root/'controller.log').open('xb') as output:
+            process=subprocess.Popen([sys.executable,__file__,'--repo',str(repo),'--child',str(root),'--case',case],
+                cwd=repo,env=child_environment(),stdout=output,stderr=subprocess.STDOUT)
+            try:
+                if case=='controller-loss75':
+                    deadline=time.monotonic()+90
+                    while not (run_root/'workspace/responses-ready').exists():
+                        if process.poll() is not None or time.monotonic()>deadline:
+                            raise RuntimeError('75-response fixture did not reach crash boundary')
+                        time.sleep(.2)
+                    process.kill(); process.wait(timeout=10)
+                    runtime.request_stop(run_root)
+                else:
+                    code=process.wait(timeout=150)
+                    if code: raise RuntimeError('Mock controller failed; see '+str(root/'controller.log'))
+            finally:
+                if process.poll() is None:
+                    process.kill(); process.wait(timeout=10)
+                if (run_root/'runtime.json').exists(): runtime.stop_owned(run_root)
+        live_usage.update_manifest_evidence(run_root)
+        normalized=live_usage.collect(run_root)
+        manifest=util.read_json(run_root/'manifest.json')
+        evidence=manifest['execution_evidence']
+        passed=manifest.get('stop_confirmed') and (manifest.get('network_cleanup') or {}).get('confirmed')
+        if case.startswith('actual-'): passed=passed and normalized['usage_complete'] and normalized['input_reached']
+        else: passed=passed and (not normalized['usage_complete'] or case=='controller-loss75')
+        if case=='partial-usage': passed=passed and normalized['observed_tokens']==25 and normalized['total_tokens'] is None
+        if case in ('partial-no-usage','done-only','after-send-before-ack','write-failure'):
+            passed=passed and normalized['total_tokens'] is None
+        if case=='after-send-before-ack': passed=passed and evidence['send_evidence']=='observed_send' and not evidence['provider_acknowledged']
+        if case=='controller-loss75':
+            passed=passed and manifest['model_called'] is True and evidence['saved_response_count']==75
+        safe=all(CANARY.encode() not in f.read_bytes() for f in (run_root/'usage').rglob('*') if f.is_file())
+        config=util.read_json(run_root/'state/opencode.json')
+        starts=util.read_lines(run_root/'usage/raw/started.jsonl')
+        first=util.read_json(run_root/'usage/raw'/starts[0]['request_file']) if starts else {}
+        result={'case':case,'passed':bool(passed and safe),'real_model_calls':0,
+            'run_id':rid,'run_instance_id':manifest['run_instance_id'],'root':str(run_root),
+            'model_called':manifest['model_called'],'execution_evidence':evidence,
+            'usage_complete':normalized['usage_complete'],'observed_tokens':normalized['observed_tokens'],
+            'total_tokens':normalized['total_tokens'],'input_reached':normalized['input_reached'],
+            'first_request_contract':util.read_json(run_root/'usage/raw/first-request-contract.json')
+                if (run_root/'usage/raw/first-request-contract.json').exists() else None,
+            'model':first.get('model'),'tools':[t.get('function',{}).get('name') for t in first.get('tools',[])],
+            'compaction':config['compaction'],'permission':config['permission'],
+            'condition_sha256':manifest['condition_sha256'],'credential_records_redacted':safe,
+            'isolation':util.read_json(run_root/'evidence/isolation.json')}
+        util.write_new_json(root/'result.json',result); results.append(result)
+        util.write_json_atomic(batch/'progress.json',{'results':results,'complete':False})
+        print(json.dumps({'case':case,'passed':result['passed'],'root':str(run_root)}),flush=True)
+        if not result['passed']: raise RuntimeError('Finite mock case failed; no replacement: '+str(root))
+    util.write_new_json(batch/'result.json',{'passed':all(r['passed'] for r in results),'results':results,
+        'real_model_calls':0,'directory':str(batch)})
+    print(str(batch)); return 0
+
+
+if __name__=='__main__': sys.exit(main())

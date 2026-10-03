@@ -26,6 +26,52 @@ def verify_conditions(root, expected, intervention):
         raise ValueError('Acceptance conditions changed after the batch plan; no model dispatched')
 
 
+def implement(repo, runs_dir, run_id):
+    """Implement and fix stopped originals now; no scorer/importer/archive here."""
+    root = Path(runs_dir) / run_id
+    try:
+        runtime.start(repo, runs_dir, run_id)
+    finally:
+        manifest = run.load_manifest(runs_dir, run_id)
+        if manifest.get('stop_confirmed') and not (root / 'snapshot.json').exists():
+            run.collect_run(runs_dir, run_id)
+        receipt = {'run_id': run_id, 'run_instance_id': manifest['run_instance_id'],
+            'stop_confirmed': manifest.get('stop_confirmed'), 'at': run.now(),
+            'manifest_sha256': util.sha256_file(root / 'manifest.json'),
+            'raw': util.tree_hashes(root / 'usage/raw'),
+            'snapshot_sha256': util.sha256_file(root / 'snapshot.json') if (root / 'snapshot.json').exists() else None}
+        util.write_new_json(root / 'implementation-receipt.json', receipt)
+    return receipt
+
+
+def postprocess(repo, runs_dir, run_id, archive):
+    """Idempotent serial continuation. Existing scoring/import/archive stays put."""
+    root = Path(runs_dir) / run_id
+    manifest = run.load_manifest(runs_dir, run_id)
+    if not manifest.get('stop_confirmed'):
+        raise RuntimeError('Unconfirmed stop blocks heavy postprocessing')
+    scoring = evaluate.last_scoring(root)
+    if scoring is None:
+        # A started/incomplete scoring directory is uncertain, never rescore it
+        # automatically after a crash.
+        if evaluate.used_sequences(root):
+            raise RuntimeError('Interrupted scoring requires explicit reconciliation')
+        evaluate.score_run(repo, runs_dir, run_id)
+    from . import monitor
+    monitor.link(repo, root)
+    reference_path = root / 'archive-reference.json'
+    if reference_path.exists():
+        reference = util.read_json(reference_path)
+        preserve.verify(archive, reference['package_id'], reference['sha256'])
+    else:
+        reference = preserve.pack_run(archive, root, include=['evidence', 'workspace'])
+        util.write_new_json(reference_path, reference)
+    row = aggregate.row_for(runs_dir, run_id)
+    row['network_cleanup'] = manifest.get('network_cleanup')
+    row['archive'] = reference
+    return row
+
+
 def execute(repo, runs_dir, task, intervention, attempt, runtime_id, archive, *, expected=None):
     manifest = profiles.create(repo, runs_dir, task, intervention, attempt, runtime_id)
     rid = manifest['run_id']

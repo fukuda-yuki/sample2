@@ -53,7 +53,8 @@ public sealed class BrowserCartReview
     public Result For(string checkId) => results[checkId];
 
     public static BrowserCartReview Load(string path, string artifactHash, string specHash,
-        string runInstanceId, Catalog catalog)
+        string runInstanceId, Catalog catalog, bool requireCartStatus = false,
+        bool structuralPrecondition = false)
     {
         var receipt = JsonSerializer.Deserialize<Receipt>(File.ReadAllText(path),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -124,7 +125,8 @@ public sealed class BrowserCartReview
                 continue;
             }
             if (album == null || lines[0].Count != countBefore
-                || !WellFormedCart(beforeHtml) || Html.Money(beforeHtml) != countBefore * album.Price)
+                || !WellFormedCart(beforeHtml) || !Html.Money(beforeHtml).HasValue
+                || !structuralPrecondition && Html.Money(beforeHtml) != countBefore * album.Price)
                 throw new InvalidDataException("Browser removal lacks its populated precondition.");
 
             if (removal.Action == "not-run-unsupported")
@@ -148,10 +150,13 @@ public sealed class BrowserCartReview
             var linesOk = countAfter == 0 ? remaining.Count == 0
                 : remaining.Count == 1 && remaining[0].AlbumId == album.AlbumId && remaining[0].Count == 1;
             var total = Html.Money(afterHtml);
-            var pass = WellFormedCart(afterHtml) && linesOk && total == countAfter * album.Price;
+            var status = new HtmlParser().ParseDocument(afterHtml).QuerySelectorAll("[id='cart-status']");
+            var statusOk = !requireCartStatus || status.Length == 1
+                && status[0].TextContent.Trim() == $"Cart ({countAfter})";
+            var pass = WellFormedCart(afterHtml) && linesOk && total == countAfter * album.Price && statusOk;
             review.results[removal.CheckId] = new Result(pass,
                 $"Agent browser click: {Scenarios.DescribeCart(remaining)}, displayed total {Scenarios.DescribeMoney(total)}; "
-                + $"expected quantity {countAfter}, total {Html.Money2(countAfter * album.Price)}. "
+                + $"expected quantity {countAfter}, total {Html.Money2(countAfter * album.Price)}, cart summary match {statusOk}. "
                 + $"Before={removal.Before.Path}; after={removal.After.Path}; receipt SHA-256={review.ReceiptSha256}.");
         }
         return review;

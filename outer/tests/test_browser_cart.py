@@ -11,6 +11,11 @@ from harness import browser_cart, util
 
 
 class BrowserCoverageTests(unittest.TestCase):
+    def test_migration_version_retains_browser_requirement(self):
+        self.assertTrue(browser_cart.required('1.3.0'))
+        self.assertTrue(browser_cart.required('1.2.0'))
+        self.assertFalse(browser_cart.required('1.1.0'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

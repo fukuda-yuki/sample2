@@ -1,5 +1,6 @@
 """Owned browser-review cleanup only; reuses the Run lock and Docker wrapper."""
 import json
+import os
 from pathlib import Path
 import re
 import uuid
@@ -9,8 +10,16 @@ from . import ownership, runtime, util
 from .run import now
 
 
+def _local_path(value):
+    """Use Win32 extended paths for durable cleanup receipts in long Run roots."""
+    path = Path(value).resolve()
+    if os.name == 'nt' and not str(path).startswith('\\\\?\\'):
+        path = Path('\\\\?\\' + str(path))
+    return path
+
+
 def register(out, instance, kind, name, resource_id=None):
-    path = Path(out)/'browser-resources.json'
+    path = _local_path(out)/'browser-resources.json'
     state = util.read_json(path) if path.exists() else {
         'owner': 's2-browser-' + uuid.uuid4().hex, 'run_instance_id': instance, 'resources': []}
     if state['run_instance_id'] != instance:
@@ -22,7 +31,7 @@ def register(out, instance, kind, name, resource_id=None):
 
 
 def latest(out):
-    out = Path(out)
+    out = _local_path(out)
     attempts = util.read_lines(out/'browser-cleanup-attempts/index.jsonl')
     if attempts:
         return attempts[-1]
@@ -40,7 +49,7 @@ def cleanup(out, *, locked=False):
     No model, evaluator, application launch, artifact write, or observation occurs.
     A failed resource does not suppress attempts to recover the other owned ones.
     """
-    out = Path(out)
+    out = _local_path(out)
     with nullcontext() if locked else ownership.lease(out):
         state = util.read_json(out/'browser-resources.json')
         receipt = {'owner': state['owner'], 'run_instance_id': state['run_instance_id'],

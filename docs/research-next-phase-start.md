@@ -65,6 +65,11 @@ human oracle/workflow confirmation for both families is mandatory. An agent's
 automated review cannot set `human_review=passed`. If a human review or accepted
 artifact changes, retain the old ledger/bundle and prepare a new version with
 the reviewed exact bytes. Do not edit a frozen bundle or its referenced ledger.
+The current bounded technical ledger has all five technical prerequisites passed;
+its human prerequisite remains `not_run`. The exact pending four-variant review
+packet, including common prompts and preview identities, is
+`artifacts/source-info-v3-human-review-20261003/packet-v2.json`. Neither this
+blocked check nor repair/Push authorization supplies research-start permission.
 The current task profiles select `workspace-static-db-v2`. Final workspace
 `.sqlite`, `.sqlite3` and `.db` files are submitted static assets; scratch and
 runtime databases belong in `/tmp`. Associated nonempty WAL, SHM or journal
@@ -107,6 +112,13 @@ ordinary 1800-second budget and 600-second provider timeout. No overlapping
 implementations, no account/model fallback and no replacement Runs are allowed.
 Provider-side cache remains naturally encountered on the same account; balanced
 order does not prove absence of carry-over, day, quota or provider effects.
+
+Full Issue20 live parallel speed and actual remote transport acceptance remain
+unestablished. Issue24 explicitly permits this deliberately serial regime, so
+those full Issue20 criteria do not block its first pair. Accepted serial
+task/evaluator/recording evidence and human confirmation still bind that pair.
+The actual public operation gate described below remains mandatory before every
+next pair; local simulated transport cannot satisfy it.
 
 After both implementations stop, the controller serializes scoring, monitor
 import and archives, then holds. A pair's public subset must be reviewed, remotely

@@ -74,3 +74,14 @@ The helper opens hidden owned app processes, records PID/generation/absolute app
 The helper was exercised on a second disposable pair at ports 5053/5054. The initial stop safely refused a timestamp mismatch because PowerShell's JSON reader materialized an ISO UTC string as a DateTime and a later culture conversion lost its timezone. The corrected stop keeps the date type/timezone, stopped exactly that owned pair, and left the human-review pair at 5051/5052 responding with HTTP 200. `artifacts/task-human-review-stopcheck-v1/stop-receipt.json` binds this result to the stop-helper hash.
 
 Required human judgments are the source/data-defined arithmetic, quantities/current prices, visible decrement/removal without a refresh, invalid versus valid address checkout, existing identifiers/historical amounts versus current amounts, and credibility of this explicitly narrow source/data preservation scope. The pending template gives exact steps and amounts for each. Required human acceptance, independent applications and held-out task reservation are not replaced by successful automated controls. Issue #22 remains open and combined acquisition readiness must remain blocked while its mandatory human confirmation is missing.
+
+## Subsequent independent family addition
+
+The v2 candidate register adds an independently sourced and executed education
+family with two nested variants; see [the education task report](research-repair-education-tasks.md).
+The one-family counts and held-out limitations above describe the preserved
+Music Store acceptance unit and old plan. The new selected scope has two families,
+not four independent tasks, and prospectively reserves education for future model
+outcomes while exposing reference/oracle/calibration work. Human confirmation
+remains not_run and mandatory. Ordinary evaluator/browser integration and the
+coordinator's final start gate are recorded separately.

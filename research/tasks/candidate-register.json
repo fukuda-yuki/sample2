@@ -1,30 +1,170 @@
 {
   "schema_version": 1,
-  "register_id": "migration-candidates-20261003-v1",
+  "register_id": "migration-candidates-20261003-v2",
   "selection_frozen_before_model_results": true,
   "model_runs_used_for_selection": 0,
-  "selected_family_ids": ["music-store-continuity"],
-  "independent_selected_family_count": 1,
+  "selected_family_ids": [
+    "music-store-continuity",
+    "contoso-enrollment"
+  ],
+  "independent_selected_family_count": 2,
   "six_task_allocation_adopted": false,
   "candidates": [
     {
       "family_id": "music-store-continuity",
-      "status": "selected_for_apparatus_and_conditional_exploration_only",
+      "status": "selected_executed_development_calibration_family",
       "independence": "One source family; A/B are nested semantic variants, not independent applications.",
-      "source": {"repository": "chack411/MVC-Music-Store", "branch": "net48", "commit": "2967afb9d69488641df0d154e2ad5827a7820e71", "availability": "public", "license": "Upstream readme declares code Ms-PL; no upstream LICENSE file."},
+      "source": {
+        "repository": "chack411/MVC-Music-Store",
+        "branch": "net48",
+        "commit": "2967afb9d69488641df0d154e2ad5827a7820e71",
+        "availability": "public",
+        "license": "Upstream readme declares code Ms-PL; no upstream LICENSE file."
+      },
       "overlay": "Researcher-authored operational pricing policy and synthetic existing-business SQLite installation. These are not evidence of a deployed customer system.",
       "known_solutions": "The upstream tutorial and sample2's reference/alternative are public. This repair adds a compatibility reference. Contamination has not been eliminated.",
       "target": ".NET 8 SQLite storefront with source-defined unit pricing, existing identifiers/rows and temporal order continuity",
-      "existing_assets": ["246 albums with nonuniform prices", "genres/artists and their relationships", "customer 301", "historical order 7001", "details 9101/9102 with historical prices", "retained cart 5001"],
-      "preserved": ["catalog and customer identifiers/relationships", "historical headers/details/unit prices", "quantity aggregation", "session isolation", "restart continuity"],
-      "corrected_legacy_defects": ["Missing cart-line removal must not crash or alter another cart", "Malformed/missing address fields must not create an order", "Ordinary removal UI must update all current values"],
-      "excluded": ["login/account migration", "administration", "external integration", "concurrency/performance", "maintenance-effort inference"],
-      "dependencies": [".NET SDK 8+", "Microsoft.Data.Sqlite 8.0.31", "ordinary evaluator/browser runtime for integrated calibration"],
-      "feasibility": {"reference_workflows": 2, "model_time_limit_seconds_proposal": 1200, "model_repetitions": "coordinator chooses prospectively; not selected from model success", "reference_minutes": "measure finite execution receipt rather than assume"},
+      "existing_assets": [
+        "246 albums with nonuniform prices",
+        "genres/artists and their relationships",
+        "customer 301",
+        "historical order 7001",
+        "details 9101/9102 with historical prices",
+        "retained cart 5001"
+      ],
+      "preserved": [
+        "catalog and customer identifiers/relationships",
+        "historical headers/details/unit prices",
+        "quantity aggregation",
+        "session isolation",
+        "restart continuity"
+      ],
+      "corrected_legacy_defects": [
+        "Missing cart-line removal must not crash or alter another cart",
+        "Malformed/missing address fields must not create an order",
+        "Ordinary removal UI must update all current values"
+      ],
+      "excluded": [
+        "login/account migration",
+        "administration",
+        "external integration",
+        "concurrency/performance",
+        "maintenance-effort inference"
+      ],
+      "dependencies": [
+        ".NET SDK 8+",
+        "Microsoft.Data.Sqlite 8.0.31",
+        "ordinary evaluator/browser runtime for integrated calibration"
+      ],
+      "feasibility": {
+        "reference_workflows": 2,
+        "model_time_limit_seconds_proposal": 1800,
+        "model_repetitions": "coordinator chooses prospectively; not selected from model success",
+        "reference_minutes": "measure finite execution receipt rather than assume"
+      },
       "human_confirmation": "not_run"
     },
-    {"family_id": "independent-data-entry-workflow", "status": "unselected_design_candidate", "source": null, "independence": "Would require a materially different real source application, provenance and executable existing-data workflow.", "reference_execution": "not_run", "held_out": false, "reason": "No authenticated source/reference has been prepared; it contributes zero tasks to the present allocation."},
-    {"family_id": "independent-scheduling-workflow", "status": "unselected_design_candidate", "source": null, "independence": "Would require a materially different real scheduling application with independent business rules.", "reference_execution": "not_run", "held_out": false, "reason": "Not obtained or executed; it contributes zero tasks to the present allocation."}
+    {
+      "family_id": "contoso-enrollment",
+      "status": "selected_executed_prospectively_reserved_model_outcome_family",
+      "independence": "Separate education application, upstream repository and Student/Course/Enrollment domain; C/D are nested semantic variants, one family.",
+      "source": {
+        "repository": "jbogard/ContosoUniversity",
+        "branch": "master",
+        "commit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "availability": "public",
+        "license": "Apache-2.0",
+        "scope": "21 exact upstream files; blob SHA1 and SHA256 verified, source-pin.json"
+      },
+      "overlay": "Explicit researcher-authored synthetic raw Person/Department/Course/Enrollment SQLite installation and controlled old Grade enum order. Not evidence of a deployed customer system.",
+      "known_solutions": "Public tutorial/upstream and successor examples exist; newly authored compatibility reference is available. Contamination is not eliminated.",
+      "target": ".NET 8 SQLite Student create/edit/search plus readonly courses and enrollments; actual old singular/TPH FirstName migration and source-defined nullable grade ordinal semantics.",
+      "existing_assets": [
+        "students101/202",
+        "departments10/20 with budgets and start dates",
+        "courses1045/2021/4041 with nonuniform credits",
+        "enrollments9001/9002/9003/9010, nullable grade and meaningful ordinals"
+      ],
+      "preserved": [
+        "all old IDs/field values/relationships",
+        "source-defined FullName",
+        "raw grade ordinals and semantic display",
+        "external CourseID assignments",
+        "restart full-row continuity"
+      ],
+      "corrected_legacy_defects": [
+        "explicit no-mutation validation for missing/blank/oversize names or invalid date",
+        "unknown IDs return404 rather than uncontrolled failure"
+      ],
+      "excluded": [
+        "login",
+        "instructors",
+        "course/department administration",
+        "grade edit/delete",
+        "pagination/sort",
+        "external integrations",
+        "concurrency/performance"
+      ],
+      "dependencies": [
+        ".NET SDK8+",
+        "Microsoft.Data.Sqlite8.0.31",
+        "ordinary evaluator/browser runtime"
+      ],
+      "feasibility": {
+        "reference_workflows": 2,
+        "negative_controls": 1,
+        "reference_checks_each": 52,
+        "model_time_limit_seconds_proposal": 1800,
+        "reference_seconds": "actual per-case duration in education-acceptance-v1/workflow-v2/summary.json",
+        "old_framework_execution": "not_run"
+      },
+      "acceptance": {
+        "independent_python_reference": "passed",
+        "normal_score_browser": "A coordinator receipt required",
+        "human_confirmation": "not_run"
+      },
+      "held_out": true,
+      "human_confirmation": "not_run"
+    },
+    {
+      "family_id": "independent-data-entry-workflow",
+      "status": "unselected_design_candidate",
+      "source": null,
+      "independence": "Would require a materially different real source application, provenance and executable existing-data workflow.",
+      "reference_execution": "not_run",
+      "held_out": false,
+      "reason": "No authenticated source/reference has been prepared; it contributes zero tasks to the present allocation."
+    },
+    {
+      "family_id": "independent-scheduling-workflow",
+      "status": "unselected_design_candidate",
+      "source": null,
+      "independence": "Would require a materially different real scheduling application with independent business rules.",
+      "reference_execution": "not_run",
+      "held_out": false,
+      "reason": "Not obtained or executed; it contributes zero tasks to the present allocation."
+    }
   ],
-  "remaining_acceptance": ["Basic human confirmation of expected arithmetic and ordinary workflow", "Materially independent executed source applications", "Held-out independent task reservation before a confirmatory study"]
+  "remaining_acceptance": [
+    "Basic human confirmation of both families expected values and ordinary workflow",
+    "Normal scoring/browser integration acceptance and final code verification",
+    "Scope-limited research start gate; general population/secret benchmark claims unsupported"
+  ],
+  "variant_hierarchy": {
+    "music-store-continuity": [
+      "MS1-CONT-A",
+      "MS1-CONT-B"
+    ],
+    "contoso-enrollment": [
+      "CU1-ENR-C",
+      "CU1-ENR-D"
+    ]
+  },
+  "development_calibration_membership": [
+    "music-store-continuity"
+  ],
+  "held_out_family_for_future_model_outcomes": [
+    "contoso-enrollment"
+  ],
+  "held_out_limitations": "Prospectively assigned before any model outcomes; source/reference/oracle/evaluator calibration and human basic review are exposed. Not a secret benchmark."
 }

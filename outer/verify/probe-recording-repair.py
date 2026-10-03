@@ -13,7 +13,8 @@ import time
 import uuid
 from unittest.mock import patch
 
-sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+IMPORT_REPO=Path(sys.argv[sys.argv.index('--repo')+1]) if '--repo' in sys.argv else Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(IMPORT_REPO.resolve()))
 from outer.harness import live_usage, machine, profiles, run, runtime, util
 from research import pair_execution
 from outer.harness.security import child_environment
@@ -42,7 +43,7 @@ class Upstream(BaseHTTPRequestHandler):
         if mode=='done-only': self.wfile.write(b'data: [DONE]\n\n'); return
         item={'id':'mock-'+uuid.uuid4().hex,'model':model,'object':'chat.completion.chunk','created':1,
               'choices':[{'index':0,'delta':{'role':'assistant','content':'synthetic complete'},'finish_reason':None}]}
-        if mode=='controller-loss75':
+        if mode=='controller-loss75' and request.get('tools'):
             assert any(t.get('function',{}).get('name')=='bash' for t in request.get('tools',[]))
             command=('touch /workspace/responses-ready; sleep 20' if self.server.calls==75
                      else 'printf synthetic-recording-fixture-'+str(self.server.calls))

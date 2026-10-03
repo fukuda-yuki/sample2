@@ -74,14 +74,18 @@ def main():
     identity_fault=any('Baseline identity' in str(f) for f in output.get('evaluatorFaults',[]))
     actual={'exit_code':code,'quality':output.get('quality'),'identity_fault':identity_fault}
     assert actual==expected['baseline_spec_mismatch']
-    own_manifest=util.read_json(composed/'evaluator-manifest.json')
-    assert own_manifest['evaluatorSha256']==condition['evaluation']['evaluator_sha256']
+    # The historical SDK rejects this baseline before normal manifest emission.
+    # Bind the actually dispatched DLL through the composition intent instead;
+    # absence of a success manifest cannot be treated as an observed pass.
+    intent=util.read_json(composed/'composition-intent.json')
+    assert intent['evaluator_sha256']==condition['evaluation']['evaluator_sha256']
     assert output['artifactSha256']==case['artifact_sha256']
     assert browser_cleanup.latest(composed)['confirmed']
     receipt['cases'].append({'name':'bound-static-baseline-spec-mismatch','expected':expected['baseline_spec_mismatch'],
         'actual':actual,'matched':True,'output_sha256':util.sha256_file(composed/'evaluation.json'),
-        'manifest_sha256':util.sha256_file(composed/'evaluator-manifest.json'),
-        'evaluator_sha256':own_manifest['evaluatorSha256'],'artifact_sha256':output['artifactSha256'],
+        'composition_intent_sha256':util.sha256_file(composed/'composition-intent.json'),
+        'success_manifest_emitted':(composed/'evaluator-manifest.json').is_file(),
+        'evaluator_sha256':intent['evaluator_sha256'],'artifact_sha256':output['artifactSha256'],
         'baseline_sha256':util.sha256_file(baseline/'evaluation.json'),'cleanup':browser_cleanup.latest(composed)})
     receipt['positive_originals_unchanged']=util.tree_hashes(browser_cleanup._local_path(source_root))==protected
     receipt['fixture_unchanged']=util.tree_hashes(args.fixture.resolve())==fixture_hashes

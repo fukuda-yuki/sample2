@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "family_id": "contoso-enrollment",
+  "variants": {
+    "C": {"task_id": "CU1-ENR-C", "grade_enum": ["A", "B", "C", "D", "F"], "course_credits": {"1045": 4, "2021": 3, "4041": 2}, "manual_grade_expectations": {"9001": "A", "9002": "B", "9003": "No grade", "9010": "D"}},
+    "D": {"task_id": "CU1-ENR-D", "grade_enum": ["B", "A", "D", "C", "F"], "course_credits": {"1045": 5, "2021": 1, "4041": 2}, "manual_grade_expectations": {"9001": "B", "9002": "A", "9003": "No grade", "9010": "C"}}
+  },
+  "selection_frozen_before_model_results": true,
+  "model_runs_used_for_selection": 0,
+  "membership": "prospectively_reserved_family_for_research_model_outcomes",
+  "apparatus_exposure": "Reference, independent oracle and evaluator calibration are performed before acquisition; this is not a completely secret held-out benchmark. The source tutorial and known solutions are public.",
+  "human_review": "not_run",
+  "independence": "Separate upstream application and education enrollment domain; C/D are nested semantic variants and count as one family.",
+  "manual_expectation_authority": "Ordinal 0/1/3 is manually mapped through the declared old enum; null is No grade from upstream DisplayFormat. Independently parse the old source enum and raw SQLite values to check these assertions."
+}

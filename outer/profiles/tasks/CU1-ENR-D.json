@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "task_id": "CU1-ENR-D",
+  "task_title": "Contoso enrollment existing-data migration, semantic variant D",
+  "family_id": "contoso-enrollment",
+  "semantic_variant": "D",
+  "task_input_adapter": "migration-v1",
+  "start_state": {
+    "kind": "migration-snapshot",
+    "source_repository": "jbogard/ContosoUniversity",
+    "source_branch": "master",
+    "source_commit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+    "asset_variant": "D",
+    "provenance_note": "Pinned 21-file real public education subset plus explicitly synthetic raw old business installation; C/D are one nested family."
+  },
+  "environment": {
+    "runtime": "dotnet",
+    "sdk": "8.0.425",
+    "network": "gateway-only",
+    "target_framework": "net8.0",
+    "packages": [
+      "Microsoft.EntityFrameworkCore.Sqlite/8.0.31",
+      "Microsoft.Data.Sqlite/8.0.31"
+    ]
+  },
+  "migration_request": "Modernize the supplied Contoso University Student/Course/Enrollment subset from ASP.NET MVC 5 / .NET Framework to a .NET 8 web application. The real old source and raw legacy-school.sqlite together define this installation. Preserve student identifiers/names/enrollment dates, course identifiers/titles/credits/department relationships, department records and existing enrollment identifiers/course/student relationships/nullable stored grade values. The stored grade integer means the corresponding member of the Grade enum in this installation's old Models/Enrollment.cs; preserve that meaning in the displayed grade. A null grade is displayed as No grade. No installation-specific grade mapping or answer is given here.\n\nUse Microsoft.NET.Sdk.Web, net8.0 or later, accept --urls and build with dotnet publish. Do not reference or launch System.Web or old application assemblies. Read ConnectionStrings:SchoolContext (environment variable ConnectionStrings__SchoolContext). When its SQLite path does not exist, import /inputs/existing-business/legacy-school.sqlite into that path. The old export uses singular Person, Department, Course and Enrollment tables. Migrate Person rows whose Discriminator is Student into Students, mapping old FirstName to FirstMidName. Target tables are Students(ID,LastName,FirstMidName,EnrollmentDate), Departments(DepartmentID,Name,Budget,StartDate), Courses(CourseID,Title,Credits,DepartmentID), and Enrollments(EnrollmentID,CourseID,StudentID,Grade). Retain all specified old identifiers, field values and relationships; Grade stays the nullable original integer, decoded for display using the old enum. Extra columns/tables are allowed. Do not reinitialize or duplicate existing target data on restart.\n\nGET / returns 200 and links to /Student and /Course. GET /Student lists students with links /Student/Details/ID and /Student/Edit/ID; optional SearchString filters by substring in LastName or FirstMidName without returning unrelated students. GET /Student/Details/ID shows names, enrollment date and this student's enrolled courses with their correct grade meanings. GET /Course lists courses; GET /Course/Details/ID shows title, credits and department name. Unknown student/course/edit IDs return 404. The preserved course IDs are externally assigned identifiers rather than newly numbered rows.\n\nGET /Student/Create and /Student/Edit/ID expose ordinary forms with LastName, FirstMidName and EnrollmentDate controls and a Create or Save button. POST /Student/Create creates one student with a fresh ID that does not collide with old IDs and redirects to its details. POST /Student/Edit/ID changes only the selected student's name/date and redirects to its details; it must not create a duplicate student or change course/enrollment/department rows. Names are nonblank and at most 50 characters; EnrollmentDate must parse as a calendar date. Invalid create/edit redisplays the form with status 200 and does not mutate the database. The visible ordinary Save control must work through application behavior, including application navigation; an evaluator must not force navigation to obtain the saved state. Editing a newly created student is part of the ordinary workflow. Initial imported rows remain unchanged until a user explicitly edits one.\n\nFor portable observation, student list rows use id student-ID. Student details have student-id, student-first-name, student-last-name, student-enrollment-date and student-full-name markers; the full name follows the old Person.FullName rule. Each enrollment row uses enrollment-ID with grade-ID containing the displayed grade and a /Course/Details/COURSE link. Course rows use course-ID; course details have course-id, course-credits and department-name markers. Attribute quote style, layout and extra markup may vary. Dates use yyyy-MM-dd. Retained and newly created/edited students, courses, enrollments and departments survive restart. Login, instructors, department/course administration, grade editing, delete, pagination/sort options, concurrency/performance and external integrations are excluded.\n",
+  "input_policy": {
+    "allowlist": [
+      "legacy-source",
+      "existing-business"
+    ],
+    "denied": [
+      "inner/",
+      "docs/",
+      "research/",
+      "evaluation-assets/",
+      "migration-oracle.json"
+    ],
+    "note": "Raw old singular SQLite and old source are accessible in both conditions; derived target and private expectations never enter implementation inputs."
+  },
+  "evaluation": {
+    "evaluation_version": "education-1.0.0",
+    "spec_path": "inner/spec/requirements-cu-D-education-1.0.0.json",
+    "spec_sha256": "21d57e0786c7e8329b9a47545b6e5d72262eb0b2342e8ee29edd4a4ba44e198a",
+    "project": "Education.Evaluator/Education.Evaluator.csproj",
+    "assembly": "Education.Evaluator.dll",
+    "catalog_path": "artifacts/education-assets-v2/CU1-ENR-D/evaluation/catalog.json",
+    "migration_contract": {
+      "initial_database": "initial-store.sqlite",
+      "oracle": "migration-oracle.json",
+      "import_input": "legacy-school.sqlite"
+    },
+    "extra_assets": {
+      "artifacts/education-assets-v2/CU1-ENR-D/evaluation/initial-store.sqlite": "initial-store.sqlite",
+      "artifacts/education-assets-v2/CU1-ENR-D/evaluation/migration-oracle.json": "migration-oracle.json",
+      "artifacts/education-assets-v2/CU1-ENR-D/inputs/existing-business/legacy-school.sqlite": "legacy-school.sqlite"
+    }
+  },
+  "context_files": [
+    "INSTALLATION-NOTE.txt",
+    "src/ContosoUniversity/Models/Person.cs",
+    "src/ContosoUniversity/Models/Enrollment.cs",
+    "src/ContosoUniversity/Models/Course.cs",
+    "src/ContosoUniversity/DAL/SchoolContext.cs",
+    "src/ContosoUniversity/Features/Student/Details.cs",
+    "src/ContosoUniversity/Features/Student/Create.cs",
+    "src/ContosoUniversity/Features/Student/Edit.cs",
+    "src/ContosoUniversity/Features/Student/Index.cs",
+    "OperationalData/existing-data.json"
+  ],
+  "explanation": "Preserve old Student/Course/Enrollment/Department identifiers and relationships while converting raw singular schema/FirstName and retaining source-defined grade ordinal meanings. Inspect old source and raw business data.",
+  "human_review": "not_run",
+  "membership": "prospectively_reserved_family_for_research_model_outcomes",
+  "held_out": true,
+  "held_out_limitation": "Reference/oracle/evaluator calibration is inspected; public tutorial/known solutions are exposed. Reserved for unseen model outcomes, not secret benchmark."
+}

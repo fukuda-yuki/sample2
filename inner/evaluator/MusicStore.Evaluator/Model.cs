@@ -47,6 +47,8 @@ public sealed class Ledger
 
     public List<string> KnownLimits { get; set; } = new List<string>();
 
+    public MigrationContract MigrationContract { get; set; }
+
     private static readonly JsonSerializerOptions ReadOptions = new JsonSerializerOptions
     {
         PropertyNameCaseInsensitive = true,

@@ -42,7 +42,22 @@ public static class Checks
             ["C-028"] = C028,
             ["C-029"] = C029,
             ["C-030"] = C030,
+            ["C-031"] = C031,
         };
+
+    private static CheckResult C031(RunState state)
+    {
+        if (state.Migration?.HasConfirmedFailure == true)
+            return Make(state, "R-030", "C-031", "Seeded SQLite migration, checkout and restart",
+                Judgement.Fail, state.Migration.Detail, state.Migration.Detail);
+        var pre = Precondition(state, "R-030", "C-031", "Seeded SQLite migration, checkout and restart");
+        if (pre != null) return pre;
+        if (state.Migration == null)
+            return Make(state, "R-030", "C-031", "Migration continuity", Judgement.Error,
+                "Independent migration oracle was not loaded.", "");
+        return Make(state, "R-030", "C-031", "Seeded SQLite migration, checkout and restart",
+            state.Migration.Judgement, state.Migration.Detail, state.Migration.Detail);
+    }
 
     private static CheckResult Make(RunState state, string requirementId, string checkId, string input, string judgement, string observed, string evidence)
     {

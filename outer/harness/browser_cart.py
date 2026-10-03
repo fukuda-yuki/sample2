@@ -19,7 +19,9 @@ OBSERVED = 'agent_observed_C-015_C-016'
 
 
 def required(version):
-    return version == '1.2.0'
+    # Explicit contract versions: a new task must never inherit HTTP-only
+    # acceptance accidentally. Keep the historical 1.1.0 interpretation.
+    return version in ('1.2.0', '1.3.0')
 
 
 def coverage_complete(output):
@@ -185,6 +187,14 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
                 or condition['evaluation']['spec_sha256'] != spec_hash):
             raise ValueError('Browser target/baseline identity mismatch')
         baseline_bound = True
+        migration = util.read_json(assets/'requirements.json').get('migrationContract')
+        if migration:
+            import shutil
+            initial_database = (assets/migration['initialDatabase']).resolve()
+            if not initial_database.is_relative_to(assets.resolve()):
+                raise ValueError('Initial database escapes frozen evaluation assets')
+            shutil.copyfile(initial_database, state/'store.sqlite')
+            intent['initial_database_sha256'] = util.sha256_file(initial_database)
         util.reject_links(published)
         configs = list(published.glob('*.runtimeconfig.json'))
         if len(configs) != 1:

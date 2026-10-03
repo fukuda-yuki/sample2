@@ -18,7 +18,9 @@ public sealed class RunState : IDisposable
 
     public string EvaluationVersion { get; set; } = Program.DefaultEvaluationVersion;
 
-    public bool ExplicitOrderContract => EvaluationVersion == "1.2.0";
+    public bool ExplicitOrderContract => EvaluationVersion is "1.2.0" or "1.3.0";
+
+    public MigrationContinuity Migration { get; set; }
 
     public bool AppReady { get; set; }
 

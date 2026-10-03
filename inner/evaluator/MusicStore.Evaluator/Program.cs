@@ -7,7 +7,7 @@ namespace MusicStore.Evaluator;
 public static class Program
 {
     /// <summary>評価器自身の版。ビルドの同一性は evaluator_sha256 が表す。</summary>
-    public const string EvaluatorVersion = "1.1.0";
+    public const string EvaluatorVersion = "1.3.0";
 
     /// <summary>
     /// 判定の意味（検査集合・合否規則・配点）の既定版。--evaluation-version で上書きできる。
@@ -48,8 +48,17 @@ public static class Program
 
         if (ledger != null)
         {
-            if ((ledger.SpecVersion == "1.2.0") != (options.EvaluationVersion == "1.2.0"))
-                faults.Add("Evaluation 1.2.0 requires the 1.2.0 ledger; historical contracts must not be relabeled.");
+            if (new[] { "1.2.0", "1.3.0" }.Contains(ledger.SpecVersion)
+                || new[] { "1.2.0", "1.3.0" }.Contains(options.EvaluationVersion))
+            {
+                if (ledger.SpecVersion != options.EvaluationVersion)
+                    faults.Add("Evaluation version requires its matching ledger; historical contracts must not be relabeled.");
+            }
+            if (ledger.Requirements.Any(r => r.Checks.Count == 0)
+                || ledger.AllCheckIds().Distinct().Count() != ledger.AllCheckIds().Count())
+                faults.Add("Every requirement needs unique executable observations; empty coverage cannot pass.");
+            if (ledger.SpecVersion == "1.3.0" && ledger.MigrationContract == null)
+                faults.Add("Migration 1.3.0 requires frozen initial database and independent oracle assets.");
             var missing = ledger.AllCheckIds().Where(id => !Checks.Registry.ContainsKey(id)).ToList();
             if (missing.Count > 0)
             {
@@ -126,6 +135,19 @@ public static class Program
             EvaluationVersion = options.EvaluationVersion,
             BrowserCartReview = browserReview,
         };
+        if (ledger.MigrationContract != null)
+        {
+            try
+            {
+                state.Migration = MigrationContinuity.Load(ledger.MigrationContract,
+                    Path.GetDirectoryName(options.SpecPath));
+            }
+            catch (Exception ex)
+            {
+                WriteFaultOutput(options, ledger, startedAt, new List<string> { "Migration assets: " + ex.Message });
+                return 2;
+            }
+        }
 
         Console.WriteLine($"[evaluator] evaluation id: {evaluationId}");
         Console.WriteLine($"[evaluator] artifact: {options.ArtifactPath} (sha256 {artifactHash.Substring(0, 12)})");
@@ -304,6 +326,7 @@ public static class Program
             return;
         }
 
+        state.Migration?.Seed(state.Host.DatabasePath);
         state.Host.Start();
         var (ready, detail) = state.Host.WaitReady(TimeSpan.FromSeconds(60));
         state.AppReady = ready;
@@ -312,6 +335,8 @@ public static class Program
         {
             return;
         }
+
+        state.Migration?.Preserved(state.Host.DatabasePath, "startup");
 
         using (var probe = new WebSession(state.Host.BaseUrl))
         {
@@ -326,6 +351,7 @@ public static class Program
         state.InvalidCheckout = Scenarios.RunInvalidCheckout(state);
         state.Isolation = Scenarios.RunIsolation(state);
         state.Restart = Scenarios.RunRestart(state, state.Order.OrderId);
+        state.Migration?.Observe(state);
 
         foreach (var fault in new ScenarioResult[] { state.Browse, state.Cart, state.Order, state.InvalidCheckout, state.Isolation, state.Restart, state.Static })
         {

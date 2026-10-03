@@ -285,6 +285,23 @@ def check(repo, bundle_path, *, environment=True):
     else:
         reasons.append('environment:not_checked')
     cohort = inside(repo, bundle['cohort'], 'runs')
+    if (cohort / '_control/pair-journal.jsonl').exists():
+        from research import pair_execution
+        from research.next_phase_execution import provider_metadata
+        current = pair_execution.state(cohort / '_control/pair-journal.jsonl')
+        for rid, binding in current['dispatch'].items():
+            if binding['plan_sha256'] != util.sha256_file(bundle_path) or binding['cohort'] != bundle['cohort']:
+                reasons.append('existing_dispatch_plan_identity_mismatch:' + rid)
+                continue
+            root = cohort / rid
+            metadata_path = root / 'provider-metadata-receipt.json'
+            saved = util.read_json(metadata_path) if metadata_path.exists() else {}
+            actual = provider_metadata(root, bundle['plan']['settings']['model_id'])
+            if saved.get('unexpected_reported_model') or actual['unexpected_reported_model']:
+                reasons.append('provider_model_change_requires_new_protocol:' + rid)
+            implemented = current['implementations'].get(rid)
+            if implemented and util.tree_hashes(root / 'usage/raw') != implemented['receipt']['raw']:
+                reasons.append('stopped_gateway_originals_changed:' + rid)
     parent = cohort if cohort.exists() else cohort.parent
     while not parent.exists(): parent = parent.parent
     required = bundle['precision']['feasibility']['next_pair_peak_increment_scenario_bytes']

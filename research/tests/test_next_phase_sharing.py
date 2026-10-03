@@ -100,6 +100,12 @@ class SharingRecoveryTests(unittest.TestCase):
             self.assertFalse((work / 'package').exists())
             for rid, hashes in original.items(): self.assertEqual(sharing.catalog_share.inventory(batch / rid), hashes)
             self.assertIn(1, pair_execution.state(batch / '_control/pair-journal.jsonl')['gates'])
+            stages = util.read_lines(work / 'public-gate-timing.jsonl')
+            completed = [e for e in stages if e['event'] == 'stage_completed']
+            self.assertEqual([e['stage'] for e in completed], ['package_including_compression',
+                'before_upload_offline_extract', 'publication_and_remote_hash_check',
+                'download_restore_offline_extract', 'owned_copy_cleanup'])
+            self.assertTrue(all(e['duration_seconds'] >= 0 and e['plan_sha256'] == dispatch['plan_sha256'] for e in completed))
 
     def fixture(self, root):
         work = root / 'artifacts/continuity-sharing-v1/pair-001'

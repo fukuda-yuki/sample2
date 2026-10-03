@@ -188,8 +188,17 @@ def terminal_row(root, binding, result, implementation, current):
     row = result['row']
     if row.get('run_id') != binding['run_id'] or row.get('run_instance_id') != binding['run_instance_id']:
         raise ValueError('Terminal row belongs to another instance')
-    if any(current.get(k) != v for k, v in row.items() if k not in ('archive', 'network_cleanup')):
+    if any(current.get(k) != v for k, v in row.items() if k not in ('archive', 'network_cleanup', 'postprocessing')):
         raise ValueError('Current aggregate differs from the immutable terminal row')
+    if row.get('postprocessing'):
+        timing = row['postprocessing']
+        path = Path(timing['receipt']).resolve()
+        if (path != (Path(root) / 'postprocess-timing.jsonl').resolve()
+                or util.sha256_file(path) != timing['receipt_sha256']
+                or util.read_lines(path) != timing['stages']
+                or any(e.get('run_id') != binding['run_id'] or e.get('run_instance_id') != binding['run_instance_id']
+                    for e in timing['stages'])):
+            raise ValueError('Postprocessing clock evidence changed or belongs to another instance')
     raw = Path(root) / 'usage/raw'
     if util.tree_hashes(raw) != implementation['receipt']['raw']:
         raise ValueError('Stopped gateway originals changed after implementation receipt')

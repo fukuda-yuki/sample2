@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import shutil
 
-from outer.harness import profiles, util
+from outer.harness import machine, profiles, util
 from research import catalog_delivery, catalog_share, next_phase, pair_execution
 
 
@@ -40,6 +40,13 @@ def release_prefix(bundle_path, bundle):
         raise ValueError('Sharing requires a frozen research bundle or explicit technical fixture')
     prefix = 'technical-continuity' if technical else 'source-info-v2'
     return prefix + '-' + util.sha256_file(bundle_path)[:12] + '-pair-'
+
+
+def clocked(workspace, bundle_path, number, bundle, bindings, stage_name, operation):
+    return machine.timed_stage(Path(workspace) / 'public-gate-timing.jsonl', stage_name, operation,
+        binding={'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
+            'cohort': bundle['cohort'],
+            'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings}})
 
 
 def stage(repo, bundle_path, number, destination):
@@ -127,13 +134,17 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
         raise ValueError('Public bytes belong to another plan/pair')
     for rid, original in manifest['original_inventory'].items():
         if catalog_share.inventory(batch / rid) != original: raise ValueError('Original pair changed after review')
-    asset = catalog_delivery.package(workspace / 'public', workspace / 'package', review)
+    asset = clocked(workspace, bundle_path, number, bundle, bindings, 'package_including_compression',
+        lambda: catalog_delivery.package(workspace / 'public', workspace / 'package', review))
     original_extraction = workspace / 'before-upload-extraction.json'
-    if not original_extraction.exists(): catalog_delivery.offline_extract(workspace / 'public', original_extraction)
+    if not original_extraction.exists():
+        clocked(workspace, bundle_path, number, bundle, bindings, 'before_upload_offline_extract',
+            lambda: catalog_delivery.offline_extract(workspace / 'public', original_extraction))
     prefix = release_prefix(bundle_path, bundle)
     if transfer is None:
         transfer = lambda package, tag, commit: catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
-    urls = transfer(workspace / 'package', prefix + f'{number:03d}', bundle['source_commit'])
+    urls = clocked(workspace, bundle_path, number, bundle, bindings, 'publication_and_remote_hash_check',
+        lambda: transfer(workspace / 'package', prefix + f'{number:03d}', bundle['source_commit']))
     publication = {'remote_assets_verified': True, 'urls': urls, 'package_sha256': asset['sha256'],
         'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number}
     publication_path = workspace / 'publication-receipt.json'
@@ -143,7 +154,8 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     attempt = 1
     while (workspace / f'roundtrip-{attempt:03d}').exists(): attempt += 1
     trip_root = workspace / f'roundtrip-{attempt:03d}'
-    restored = catalog_delivery.roundtrip(asset, urls, trip_root, fetch=fetch)
+    restored = clocked(workspace, bundle_path, number, bundle, bindings, 'download_restore_offline_extract',
+        lambda: catalog_delivery.roundtrip(asset, urls, trip_root, fetch=fetch))
     if restored['extraction_sha256'] != util.sha256_file(original_extraction):
         raise ValueError('Downloaded offline extraction differs from reviewed bytes')
     for rid, original in manifest['original_inventory'].items():
@@ -193,7 +205,8 @@ def finish(repo, bundle_path, number, workspace, review, finalization):
                 any(Path(p).exists() for p in cleanup.get('targets', []))):
             raise ValueError('Retained cleanup is incomplete or copies reappeared')
     else:
-        cleanup = catalog_delivery.cleanup(workspace, repo / 'artifacts/continuity-sharing-v1', restored)
+        cleanup = clocked(workspace, bundle_path, number, bundle, bindings, 'owned_copy_cleanup',
+            lambda: catalog_delivery.cleanup(workspace, repo / 'artifacts/continuity-sharing-v1', restored))
         util.write_new_json(cleanup_path, {**cleanup, 'package_sha256': saved['package_sha256']})
     gate_path = workspace / f'gate-{attempt:03d}.json'
     refs = {**saved['evidence_files'], str(cleanup_path): util.sha256_file(cleanup_path),
@@ -222,7 +235,13 @@ def main():
     if args.mode == 'stage': result = stage(args.repo, args.bundle, args.pair, args.workspace)
     else:
         if not args.review: parser.error('share requires --review of exact public bytes')
-        result = share(args.repo, args.bundle, args.pair, args.workspace, args.review)
+        bundle, _, _, _, bindings = pair_context(args.repo, args.bundle, args.pair)
+        workspace = args.workspace.resolve()
+        allowed = args.repo.resolve() / 'artifacts/continuity-sharing-v1'
+        if workspace == allowed or not workspace.is_relative_to(allowed):
+            raise ValueError('Public gate clock must stay inside the owned sharing workspace')
+        result = clocked(workspace, args.bundle, args.pair, bundle, bindings, 'local_public_gate',
+            lambda: share(args.repo, args.bundle, args.pair, workspace, args.review))
     print(json.dumps(result, indent=2))
 
 

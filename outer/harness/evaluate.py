@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import run as run_mod
 from . import util
-from . import browser_cart, browser_cleanup
+from . import browser_review as browser_cart, browser_cleanup
 from .security import child_environment
 
 DEFAULT_EVALUATOR_DLL = 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll'
@@ -296,7 +296,30 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
             # Keep legacy HTTP output as evidence, never adopt it as research quality.
             exit_code = 2
     produced = temporary / 'evaluation.json'
-    if timed_out or not produced.is_file():
+    if (browser_required and not produced.is_file() and (timed_out or exit_code != 0)
+            and (http_out / 'evaluation.json').is_file() and (http_out / 'results.jsonl').is_file()):
+        baseline = util.read_json(http_out / 'evaluation.json')
+        if (not check_mismatches(baseline, condition, version, frozen, independent_hash, spec, spec_sha256)
+                and _reported_evaluator_sha256(http_out) == evaluator_sha256):
+            # An observer failure before browser collection must retain already
+            # confirmed, bound product failures; it never creates numeric quality.
+            fallback = {**baseline, 'quality': None, 'researchStatus': 'incomplete',
+                        'browserReviewCoverage': 'not_run_evaluator_fault',
+                        'browserCartCoverage': 'not_run_evaluator_fault',
+                        'reviewRunInstanceId': manifest.get('run_instance_id'),
+                        'baselineEvaluationSha256': util.sha256_file(http_out / 'evaluation.json'),
+                        'baselineResultsSha256': util.sha256_file(http_out / 'results.jsonl'),
+                        'evaluatorFaults': baseline.get('evaluatorFaults') or ['HTTP evaluator exited before browser collection']}
+            util.write_new_json(produced, fallback)
+            shutil.copyfile(http_out / 'evaluator-manifest.json', temporary / 'evaluator-manifest.json')
+            util.write_new_json(browser_cleanup._local_path(temporary) / 'browser-cleanup.json', {
+                'confirmed': True, 'status': 'no_browser_resources_created', 'resources': [],
+                'run_instance_id': manifest.get('run_instance_id'), 'artifact_sha256': independent_hash,
+                'spec_sha256': spec_sha256, 'model_called': False, 'browser_observed': False,
+                'evaluator_container': container_name,
+                'evaluator_container_removed': container_name is None or stopped.returncode == 0,
+                'scope': 'HTTP observer failed before browser launch; no browser resource intent or creation occurred'})
+    if (timed_out and not browser_required) or not produced.is_file():
         target = evaluations / ('fault-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
         record = _base_record(run_id, sequence, version, exit_code, independent_hash,
                               spec_sha256, 'evaluator_fault', None, [], command,
@@ -322,7 +345,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                           spec_sha256, state, output, mismatches, command,
                           evaluator_sha256=evaluator_sha256,
                           evaluator_sha256_reported=_reported_evaluator_sha256(temporary),
-                          timeout_seconds=timeout, work_dir=str(work_dir),
+                          timed_out=timed_out, timeout_seconds=timeout, work_dir=str(work_dir),
                           artifact_sha256_frozen=frozen_hash)
     record['evaluation_sha256'] = util.sha256_file(produced)
     record['operation_status'] = ('cleanup_failed' if browser_required
@@ -415,6 +438,8 @@ def _base_record(run_id, sequence, version, exit_code, independent_hash, spec_sh
         'verdict': (output or {}).get('verdict'),
         'browser_cart_coverage': (output or {}).get('browserCartCoverage', 'not_run_http_only'),
         'browser_cart_evidence_sha256': (output or {}).get('browserCartEvidenceSha256'),
+        'browser_review_coverage': (output or {}).get('browserReviewCoverage'),
+        'browser_review_evidence_sha256': (output or {}).get('browserReviewEvidenceSha256'),
         'research_status': (output or {}).get('researchStatus', 'incomplete'),
         'quality': (output or {}).get('quality'),
         'requirement_count': (output or {}).get('requirementCount'),
@@ -499,7 +524,8 @@ def _append_index(run_dir, record):
                         'scoring_state', 'adopted', 'evaluator_exit_code',
                         'evaluator_sha256', 'evaluator_sha256_pinned', 'verdict',
                         'quality', 'spec_sha256', 'artifact_sha256_outer', 'mismatches',
-                        'browser_cart_coverage', 'browser_cart_evidence_sha256', 'research_status',
+                        'browser_cart_coverage', 'browser_cart_evidence_sha256', 'browser_review_coverage',
+                        'browser_review_evidence_sha256', 'research_status',
                         'evaluation_sha256', 'operation_status',
                         'work_dir', 'recorded_at', 'directory') if key in record})
 

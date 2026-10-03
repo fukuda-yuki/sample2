@@ -180,6 +180,19 @@ class PairExecutionTests(unittest.TestCase):
         self.assertEqual(calls,['A'])
         current=pair.state(self.batch/'_control/pair-journal.jsonl')
         self.assertEqual(current['results']['A']['row']['scoring']['state'],'evaluator_fault')
+        recovered=pair.recover_pair(self.plan,self.batch,repo=self.root,postprocess=postprocess)
+        self.assertEqual(recovered['reason'],'postprocess_fault')
+        self.assertEqual(calls,['A'])
+
+    def test_second_recorded_scoring_fault_rejects_publication_gate(self):
+        def postprocess(repo,batch,rid,archive):
+            return {'run_id':rid,'verdict':'fail','scoring':{'state':'completed' if rid=='A' else 'evaluator_fault'}}
+        result=pair.execute_pair(self.plan,self.cases,self.batch,repo=self.root,concurrency=2,
+            prepare=self.prepare,implement=self.implement,postprocess=postprocess)
+        self.assertEqual(result['reason'],'postprocess_fault')
+        proof=self.root/'gate.json'; util.write_new_json(proof,{})
+        with self.assertRaisesRegex(ValueError,'Recorded postprocess fault'):
+            pair.record_pair_gate(self.batch,1,proof)
 
 
 if __name__ == '__main__': unittest.main()

@@ -241,9 +241,21 @@ def _implementation_result(future, binding, batch):
     return receipt, failed
 
 
+def _postprocess_fault(row):
+    return ((row.get('scoring') or {}).get('state') in
+            ('evaluator_fault', 'rejected_mismatch', 'not_attempted')
+            or row.get('operation_status') == 'cleanup_failed')
+
+
 def _postprocess(plan, assignments, batch, repo, journal, postprocess):
     current = state(journal)
     _verify_plan(plan, current)
+    for binding in assignments:
+        previous = current['results'].get(binding['run_id'])
+        if previous and _postprocess_fault(previous['row']):
+            return {'status': 'held', 'reason': 'postprocess_fault',
+                    'run_id': binding['run_id'],
+                    'scoring_state': (previous['row'].get('scoring') or {}).get('state')}
     for binding in assignments:
         rid = binding['run_id']
         implementation = current['implementations'].get(rid)
@@ -266,7 +278,7 @@ def _postprocess(plan, assignments, batch, repo, journal, postprocess):
             append(journal, {'kind': 'result', **binding, 'row': row,
                 'receipt': str(receipt_path), 'receipt_sha256': util.sha256_file(receipt_path)})
             scoring_state = (row.get('scoring') or {}).get('state')
-            if scoring_state in ('evaluator_fault', 'rejected_mismatch', 'not_attempted') or row.get('operation_status') == 'cleanup_failed':
+            if _postprocess_fault(row):
                 append(journal, {'kind': 'pause', **binding, 'reason': 'postprocess_fault',
                     'scoring_state': scoring_state, 'operation_status': row.get('operation_status')})
                 return {'status': 'held', 'reason': 'postprocess_fault', 'run_id': rid,
@@ -343,6 +355,8 @@ def _validate_gate(value, current, pair):
     assigned = [d for d in current['dispatch'].values() if d['pair'] == pair]
     if len(assigned) != 2 or not all(d['run_id'] in current['results'] for d in assigned):
         raise ValueError('Exactly two terminal results required before the gate')
+    if any(_postprocess_fault(current['results'][d['run_id']]['row']) for d in assigned):
+        raise ValueError('Recorded postprocess fault blocks publication gate')
     expected = {d['run_id']: d['run_instance_id'] for d in assigned}
     if (value.get('pair') != pair or value.get('plan_sha256') != assigned[0]['plan_sha256']
             or value.get('cohort') != assigned[0]['cohort'] or value.get('run_instances') != expected):

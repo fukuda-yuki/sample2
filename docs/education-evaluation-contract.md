@@ -52,7 +52,7 @@ grade failure. `inner/calibration/migration-chain.py --education` uses ordinary
 all code/input/ledger/public contract hashes, each case result, and actual owned
 cleanup confirmation. Preparation and final receipt paths are versioned rather
 than overwriting old evidence. The final joint receipt at
-`artifacts/edu21-v4-httpfault/joint-calibration-acceptance-v2.json` binds the
+`artifacts/edu21-v4-httpfault/joint-calibration-acceptance-v3.json` binds the
 original nine controls plus the later HTTP-fault control to their actual measured
 builds and the final unchanged dependencies. Normal C/D and invalid names were
 remeasured with the final Education DLL; the corrected HTTP-fault cleanup case
@@ -93,3 +93,33 @@ failure remains bound to the HTTP baseline, browser coverage remains incomplete,
 and numeric quality is suppressed. Missing/ambiguous publish without a confirmed
 build failure, mismatched evidence, and actual observer dependency faults retain
 their fault classification. This does not repair or recollect a saved package.
+
+The final classification correction was checked against the saved **new technical**
+Preload submission in a new scoring attempt only. The receipt at
+`artifacts/technical-evaluator-recovery-v2/recovery-receipt.json` records R-001
+failure, incomplete browser coverage, null quality, no evaluator fault, confirmed
+cleanup and unchanged original files/index prefix. The earlier failed recovery
+receipt remains intact. The saved Explore pass was retained without another
+score. No additional model call, old-study rescore, replacement submission or
+product repair occurred. The original technical campaign remains halted at two
+of four planned runs; the parallel two are not_run.
+
+There is an **unresolved collection confound** in that Preload result. Its
+`App_Data/initial-store.sqlite` is a byte-identical static copy of the supplied
+input, referenced unconditionally by the submitted project. The existing
+collector excludes every `.sqlite` file; the worker's submission prompt does not
+explicitly disclose that blanket exclusion. The original snapshot records the
+file's removal. The frozen package therefore fails publish, but this cannot be
+interpreted as a causal failure of the original workspace's implementation
+ability. Collection policy and public requirements were left unchanged under
+the latest limited authorization. Finite evaluator calibration acceptance
+does not resolve this confound: **new research is not ready to start**. Human
+acceptance remains separate and not_run by the evaluation agent.
+
+The v3 joint receipt binds the final four task locks, evaluator DLLs/images,
+controller/collector/environment bytes, public profiles, ledgers and prepared
+inputs/private oracles. It links all earlier receipts and preserves their actual
+build identities. Thirty retained observations have passed C-001/E-001, so the
+new failed-build shortcut cannot execute in those cases. The narrow adapter
+boundary tests cover MusicStore and both Education variants. No complete matrix
+was rerun to verify the classification-only addition.

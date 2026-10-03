@@ -68,9 +68,13 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
         self.assertEqual('fail_critical', record['verdict'])
         self.assertIsNone(record['quality'])
         self.assertFalse(record['adopted'])
+        self.assertEqual('evaluation_incomplete', record['operation_status'])
         row = aggregate.row_for(self.runs, self.manifest['run_id'])
         self.assertEqual('fail_critical', row['verdict'])
         self.assertIsNone(row['quality'])
+        self.assertEqual('evaluation_incomplete', row['operation_status'])
+        self.assertTrue(row['browser_cleanup']['confirmed'])
+        self.assertEqual('no_browser_resources_created', row['browser_cleanup']['status'])
 
     def test_http_fault_from_unbound_target_cannot_invent_known_failure(self):
         record = self.score('fault-after-critical-unbound', evaluation_version='1.3.0')
@@ -81,6 +85,7 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
         record = self.score('fault-after-critical-timeout', evaluation_version='1.3.0', timeout=1)
         self.assertEqual('evaluator_fault', record['scoring_state'])
         self.assertTrue(record['evaluator_timed_out'])
+        self.assertEqual('evaluation_incomplete', record['operation_status'])
         self.assertEqual('fail_critical', record['verdict'])
         self.assertIsNone(record['quality'])
         self.assertFalse(record['adopted'])

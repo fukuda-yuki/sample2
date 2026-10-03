@@ -169,5 +169,17 @@ class PairExecutionTests(unittest.TestCase):
         util.write_json_atomic(paths['publication_receipt'],{**values['publication_receipt'],'urls':{}})
         with self.assertRaises(ValueError): pair.state(journal)
 
+    def test_scoring_infrastructure_fault_retains_row_and_blocks_next_processing(self):
+        calls=[]
+        def postprocess(repo,batch,rid,archive):
+            calls.append(rid)
+            return {'run_id':rid,'verdict':None,'scoring':{'state':'evaluator_fault'}}
+        result=pair.execute_pair(self.plan,self.cases,self.batch,repo=self.root,concurrency=2,
+            prepare=self.prepare,implement=self.implement,postprocess=postprocess)
+        self.assertEqual(result['reason'],'postprocess_fault')
+        self.assertEqual(calls,['A'])
+        current=pair.state(self.batch/'_control/pair-journal.jsonl')
+        self.assertEqual(current['results']['A']['row']['scoring']['state'],'evaluator_fault')
+
 
 if __name__ == '__main__': unittest.main()

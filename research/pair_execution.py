@@ -265,6 +265,12 @@ def _postprocess(plan, assignments, batch, repo, journal, postprocess):
             util.write_new_json(receipt_path, {**binding, 'row': row})
             append(journal, {'kind': 'result', **binding, 'row': row,
                 'receipt': str(receipt_path), 'receipt_sha256': util.sha256_file(receipt_path)})
+            scoring_state = (row.get('scoring') or {}).get('state')
+            if scoring_state in ('evaluator_fault', 'rejected_mismatch', 'not_attempted') or row.get('operation_status') == 'cleanup_failed':
+                append(journal, {'kind': 'pause', **binding, 'reason': 'postprocess_fault',
+                    'scoring_state': scoring_state, 'operation_status': row.get('operation_status')})
+                return {'status': 'held', 'reason': 'postprocess_fault', 'run_id': rid,
+                        'scoring_state': scoring_state}
         except Exception as exc:
             append(journal, {'kind': 'pause', 'pair': binding['pair'], 'reason': 'postprocess_fault',
                              'error_type': type(exc).__name__})

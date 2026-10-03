@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from outer.harness import util
+from outer.harness import machine, util
 from research import pair_execution as pair
 
 
@@ -57,6 +57,110 @@ class PairExecutionTests(unittest.TestCase):
 
     def test_serial_regression(self):
         self.execute(concurrency=1); self.assertEqual(self.peak,1); self.assertEqual(self.stopped,['A','B'])
+
+    def test_collection_sidecar_hold_preserves_confirmed_raw_and_blocks_recovery_resume(self):
+        import sqlite3
+        from contextlib import closing
+        sends=[]
+        originals={}
+        def prepare(binding):
+            manifest=self.prepare(binding)
+            root=self.batch/binding['run_id']
+            util.write_new_json(root/'condition.json',{'collection_policy':util.STATIC_DB_COLLECTION_POLICY})
+            manifest.update(collection_policy=util.STATIC_DB_COLLECTION_POLICY,submission_fixed=False,
+                condition_sha256=util.sha256_file(root/'condition.json'))
+            util.write_json_atomic(root/'manifest.json',manifest)
+            data=root/'workspace/Data'; data.mkdir(parents=True)
+            dbfile=data/'seed.sqlite'
+            with closing(sqlite3.connect(dbfile)) as db:
+                db.execute('CREATE TABLE Facts(Id INTEGER)'); db.commit()
+            if binding['run_id']=='A': Path(str(dbfile)+'-wal').write_bytes(b'unresolved-sidecar')
+            originals[binding['run_id']]=util.tree_hashes(root/'workspace')
+            return manifest
+        def stopped_runtime(repo,batch,rid):
+            sends.append(rid)
+            root=batch/rid
+            raw=root/'usage/raw'; raw.mkdir(parents=True)
+            (raw/'fixture.response.sse').write_bytes(b'data: synthetic-no-provider-fixture\n\n')
+            manifest=util.read_json(root/'manifest.json'); manifest['stop_confirmed']=True
+            util.write_json_atomic(root/'manifest.json',manifest)
+            return manifest
+        with patch.object(machine.runtime,'start',side_effect=stopped_runtime):
+            result=pair.execute_pair(self.plan,self.cases,self.batch,repo=self.root,concurrency=1,
+                prepare=prepare,implement=machine.implement,postprocess=self.postprocess)
+        self.assertEqual('implementation_fault',result['reason'])
+        self.assertEqual(['A'],sends)
+        self.assertEqual([],self.heavy)
+        root=self.batch/'A'; receipt_path=root/'implementation-receipt.json'
+        receipt=util.read_json(receipt_path); original_hash=util.sha256_file(receipt_path)
+        self.assertTrue(receipt['stop_confirmed'])
+        self.assertFalse(receipt['submission_fixed'])
+        self.assertEqual('collection_fault',receipt['collection_status'])
+        self.assertEqual('ValueError',receipt['collection_error_type'])
+        self.assertIsNone(receipt['snapshot_sha256'])
+        self.assertEqual(util.tree_hashes(root/'usage/raw'),receipt['raw'])
+        self.assertEqual(originals['A'],util.tree_hashes(root/'workspace'))
+        self.assertFalse((root/'frozen').exists())
+        with patch.object(machine.evaluate,'score_run',side_effect=lambda *a:self.fail('No ordinary scorer after collection fault')):
+            with self.assertRaisesRegex(RuntimeError,'collection fault blocks'):
+                machine.postprocess(self.root,self.batch,'A',self.root/'archive')
+        self.assertFalse((root/'postprocess-timing.jsonl').exists())
+        recovered=pair.recover_pair(self.plan,self.batch,repo=self.root,
+            stop=lambda *a:self.fail('Already stopped raw must not be re-stopped'),
+            postprocess=lambda *a:self.fail('Collection fault must block all heavy stages'))
+        self.assertEqual('collection_fault',recovered['reason'])
+        self.assertTrue(recovered['stop_confirmed'])
+        self.assertFalse(recovered['submission_fixed'])
+        journal=self.batch/'_control/pair-journal.jsonl'; current=pair.state(journal)
+        auth={'authorized':True,'approved_by':'user','authorization_reference':'fixture-only',
+            'plan_sha256':self.plan['plan_sha256'],'journal_sha256':util.sha256_file(journal),
+            'run_instances':{'B':current['reserved']['B']['run_instance_id']}}
+        resumed=pair.resume_pair(self.plan,self.batch,auth,repo=self.root,
+            verify=lambda *a:self.fail('Held collection must not authorize further dispatch'),
+            implement=lambda *a:self.fail('No unsent peer model/worker start'),postprocess=self.postprocess)
+        self.assertEqual('collection_fault',resumed['reason'])
+        self.assertEqual(original_hash,util.sha256_file(receipt_path))
+        self.assertEqual([],self.heavy)
+
+    def test_manager_gap_ingests_confirmed_collection_fault_original_without_recollection(self):
+        def held_implementation(repo,batch,rid):
+            root=batch/rid
+            manifest=util.read_json(root/'manifest.json')
+            manifest.update(stop_confirmed=True,submission_fixed=False,started_at='synthetic_fixture')
+            util.write_json_atomic(root/'manifest.json',manifest)
+            raw=root/'usage/raw'; raw.mkdir(parents=True)
+            (raw/'original.response.sse').write_bytes(b'synthetic-stopped-raw')
+            workspace=root/'workspace'; workspace.mkdir()
+            (workspace/'held.sqlite').write_bytes(b'independent-static-database-fixture')
+            (workspace/'held.sqlite-wal').write_bytes(b'unresolved')
+            receipt={'run_id':rid,'run_instance_id':manifest['run_instance_id'],
+                'stop_confirmed':True,'submission_fixed':False,'collection_status':'collection_fault',
+                'collection_error_type':'ValueError','manifest_sha256':util.sha256_file(root/'manifest.json'),
+                'raw':util.tree_hashes(raw),'snapshot_sha256':None}
+            util.write_new_json(root/'implementation-receipt.json',receipt)
+            raise ValueError('Synthetic collection hold after receipt preservation')
+        self.assertEqual('implementation_fault',self.execute(concurrency=1,implement=held_implementation)['reason'])
+        journal=self.batch/'_control/pair-journal.jsonl'
+        rows=[row for row in pair.events(journal) if row['kind'] not in ('implemented','pause')]
+        journal.write_text(''.join(json.dumps(row)+'\n' for row in rows),encoding='utf-8')
+        self.assertEqual({'A'},set(pair.state(journal)['pending']))
+        root=self.batch/'A'; original=root/'implementation-receipt.json'
+        original_hash=util.sha256_file(original); before=util.tree_hashes(root/'workspace')
+        with patch.object(pair.run,'collect_run',side_effect=lambda *a:self.fail('Saved confirmed hold must not recollect')):
+            result=pair.recover_pair(self.plan,self.batch,repo=self.root,
+                stop=lambda *a:self.fail('Saved confirmed stop must not be repeated'),
+                postprocess=lambda *a:self.fail('No heavy stages from manager gap'))
+        self.assertEqual('collection_fault',result['reason'])
+        self.assertTrue(result['stop_confirmed']); self.assertFalse(result['submission_fixed'])
+        self.assertEqual(original_hash,util.sha256_file(original))
+        self.assertEqual(before,util.tree_hashes(root/'workspace'))
+        current=pair.state(journal); recovered=current['implementations']['A']['receipt']
+        self.assertEqual(original_hash,recovered['reconciles_implementation_receipt']['sha256'])
+        self.assertEqual(set(),set(current['pending']))
+        self.assertEqual([],self.heavy)
+        original.write_bytes(original.read_bytes()+b' ')
+        with self.assertRaisesRegex(ValueError,'original receipt changed'):
+            pair.state(journal)
 
     def test_unconfirmed_one_side_blocks_all_heavy_work(self):
         def implement(repo,batch,rid):

@@ -4,6 +4,7 @@
   "task_title": "Music Store existing-data continuity, semantic variant A",
   "family_id": "music-store-continuity",
   "semantic_variant": "A",
+  "collection_policy": "workspace-static-db-v2",
   "task_input_adapter": "migration-v1",
   "start_state": {
     "kind": "migration-snapshot",

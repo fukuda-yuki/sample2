@@ -208,6 +208,7 @@ def child(root,case,repo,paired=False,synthetic_worker=False,task_id='MS1-CONT-A
             'common_prompt_sha256':context['common_sha256'],
             'declared_source_packets':len(context.get('blocks',[])),
             'input_sha256':util.tree_hashes(run_root/'inputs'),'budget':condition['budget'],
+            'collection_policy':util.resolve_collection_policy(condition.get('collection_policy')),
             'runtime':condition['runtime'],'runtime_lock_sha256':machine.fingerprint(condition['runtime_lock']),
             'maximum_mock_calls':maximum_mock_calls or None,'real_model_calls':0})
         runtime.start(repo,root,manifest['run_id'])
@@ -228,16 +229,19 @@ def main():
     p.add_argument('--cases',nargs='+',choices=CASES,default=CASES)
     a=p.parse_args()
     runtime_id=a.runtime or TASK_RUNTIMES[a.task]
-    if runtime_id!=TASK_RUNTIMES[a.task]: raise ValueError('Task/runtime identity differs from declared finite scope')
-    if a.task=='CU1-ENR-C' and (a.pair or a.synthetic_worker or not a.exact_budget
+    if runtime_id!=TASK_RUNTIMES[a.task] and not (a.task=='MS1-CONT-A' and runtime_id=='deepseek-research-v2'):
+        raise ValueError('Task/runtime identity differs from declared finite scope')
+    if runtime_id=='deepseek-research-v2' and (a.pair or a.synthetic_worker or not a.exact_budget
             or tuple(a.cases)!=('actual-explore','actual-preload') or a.maximum_mock_calls!=2):
-        raise ValueError('CU serializer acceptance is exactly two ordinary-worker cases with unchanged budget and two mock calls')
+        raise ValueError('Research serializer acceptance is exactly two ordinary-worker cases with unchanged budget and two mock calls')
     if a.child:
         child(a.child,a.case,a.repo,a.pair,a.synthetic_worker,a.task,runtime_id,a.exact_budget,
               1 if a.maximum_mock_calls else 0); return 0
     repo=a.repo.resolve()
     batch=a.out or repo/'runs'/('_recording-repair-mock-'+uuid.uuid4().hex[:12])
     preset=profiles.read(repo,'runtimes',runtime_id)
+    if runtime_id=='deepseek-research-v2' and profiles.read(repo,'tasks',a.task).get('collection_policy')!=util.STATIC_DB_COLLECTION_POLICY:
+        raise ValueError('Final research serializer requires the declared static database collection policy')
     lock=util.read_json(profiles.runtime_root(repo,a.task,preset)/'lock.json')
     if runtime.controller_files(repo)!=lock['controller_files']:
         raise ValueError('Final prepared controller differs; no mock/model dispatch')
@@ -307,9 +311,9 @@ def main():
         counter=util.read_json(run_root/'usage/raw/mock-upstream-count.json') if (run_root/'usage/raw/mock-upstream-count.json').exists() else {}
         if a.maximum_mock_calls: passed=passed and counter.get('calls')==1 and counter.get('rejections')==0 and len(starts)==1
         contract=util.read_json(run_root/'usage/raw/first-request-contract.json') if (run_root/'usage/raw/first-request-contract.json').exists() else None
-        packets_receipt=serialized_source_packets(run_root) if a.task=='CU1-ENR-C' else None
-        if a.task=='CU1-ENR-C':
-            packets=10 if case=='actual-preload' else 0
+        packets_receipt=serialized_source_packets(run_root) if runtime_id=='deepseek-research-v2' else None
+        if runtime_id=='deepseek-research-v2':
+            packets=len(context.get('blocks',[])) if case=='actual-preload' else 0
             passed=passed and len(context.get('blocks',[]))==packets and contract and contract.get('verified')
             passed=passed and packets_receipt['verified'] and packets_receipt['packet_count']==packets
             passed=passed and packets_receipt['expected_packet_count']==packets
@@ -318,6 +322,7 @@ def main():
             'ordinary_opencode_worker':not a.synthetic_worker,
             'run_id':rid,'run_instance_id':manifest['run_instance_id'],'root':str(run_root),
             'task':a.task,'runtime_id':runtime_id,'budget':condition['budget'],'runtime':condition['runtime'],
+            'collection_policy':util.resolve_collection_policy(condition.get('collection_policy')),
             'common_prompt_sha256':context['common_sha256'],
             'declared_source_packets':len(context.get('blocks',[])),
             'pre_dispatch_receipt_sha256':util.sha256_file(root/'pre-dispatch.json'),
@@ -362,7 +367,7 @@ def main():
     actual=[r for r in results if r['case'] in ('actual-explore','actual-preload')]
     comparison=None
     if len(actual)==2:
-        shared=('model','tools','compaction','permission','runtime','budget','common_prompt_sha256','public_input_files','opencode_version')
+        shared=('model','tools','compaction','permission','runtime','budget','collection_policy','common_prompt_sha256','public_input_files','opencode_version')
         comparison={key+'_identical':actual[0][key]==actual[1][key] for key in shared}
     passed=all(r['passed'] for r in results) and (all(comparison.values()) if comparison else True)
     util.write_new_json(batch/'result.json',{'passed':passed,'results':results,'serialization_comparison':comparison,

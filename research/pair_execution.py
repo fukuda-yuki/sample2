@@ -251,9 +251,20 @@ def _postprocess_fault(row):
             or row.get('operation_status') == 'cleanup_failed')
 
 
+def _collection_hold(current, assignments):
+    for binding in assignments:
+        receipt = current['implementations'].get(binding['run_id'], {}).get('receipt', {})
+        if receipt.get('collection_status') == 'collection_fault' or receipt.get('collection_error_type'):
+            return {'status': 'held', 'reason': 'collection_fault', 'run_id': binding['run_id'],
+                'stop_confirmed': receipt.get('stop_confirmed'),
+                'submission_fixed': receipt.get('submission_fixed', False)}
+
+
 def _postprocess(plan, assignments, batch, repo, journal, postprocess):
     current = state(journal)
     _verify_plan(plan, current)
+    held = _collection_hold(current, assignments)
+    if held: return held
     for binding in assignments:
         previous = current['results'].get(binding['run_id'])
         if previous and _postprocess_fault(previous['row']):
@@ -317,6 +328,25 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
             if manifest['run_instance_id'] != binding['run_instance_id']:
                 raise ValueError('Recovery instance mismatch')
             previous = current['implementations'].get(rid)
+            saved_path = root / 'implementation-receipt.json'
+            if not previous and saved_path.exists():
+                saved_hash = util.sha256_file(saved_path)
+                saved = util.read_json(saved_path)
+                if saved.get('run_id') != rid or saved.get('run_instance_id') != binding['run_instance_id']:
+                    raise ValueError('Saved implementation receipt instance mismatch')
+                if saved.get('stop_confirmed') is True and (saved.get('collection_status') == 'collection_fault'
+                        or saved.get('collection_error_type')):
+                    snapshot = root / 'snapshot.json'
+                    snapshot_hash = util.sha256_file(snapshot) if snapshot.exists() else None
+                    if (saved.get('manifest_sha256') != util.sha256_file(root / 'manifest.json')
+                            or saved.get('raw') != util.tree_hashes(root / 'usage/raw')
+                            or saved.get('snapshot_sha256') != snapshot_hash
+                            or util.sha256_file(saved_path) != saved_hash):
+                        raise ValueError('Saved stopped collection receipt hashes changed')
+                    recovered = {**saved, 'recovered': True,
+                        'reconciles_implementation_receipt': {'path': str(saved_path.resolve()), 'sha256': saved_hash}}
+                    _record_implementation(journal, binding, recovered, batch)
+                    previous = state(journal)['implementations'][rid]
             if not previous or previous['receipt'].get('stop_confirmed') is not True:
                 if not (root / 'runtime.json').exists() and not manifest.get('started_at'):
                     # runtime.json is durably written before container allocation.
@@ -354,6 +384,8 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
                     raise ValueError('Postprocess receipt identity mismatch')
                 append(journal, {'kind': 'result', **binding, 'row': receipt['row'],
                     'receipt': str(path), 'receipt_sha256': util.sha256_file(path)})
+        held = _collection_hold(state(journal), assignments)
+        if held: return held
         if len(assignments) != 2:
             return {'status': 'held', 'reason': 'pair_incomplete_unsent_slot_not_dispatched'}
         return _postprocess(plan, assignments, batch, repo, journal, postprocess)
@@ -363,6 +395,8 @@ def _validate_gate(value, current, pair):
     assigned = [d for d in current['dispatch'].values() if d['pair'] == pair]
     if len(assigned) != 2 or not all(d['run_id'] in current['results'] for d in assigned):
         raise ValueError('Exactly two terminal results required before the gate')
+    if _collection_hold(current, assigned):
+        raise ValueError('Recorded collection fault blocks publication gate')
     if any(_postprocess_fault(current['results'][d['run_id']]['row']) for d in assigned):
         raise ValueError('Recorded postprocess fault blocks publication gate')
     expected = {d['run_id']: d['run_instance_id'] for d in assigned}
@@ -421,6 +455,8 @@ def resume_pair(plan, batch, authorization, *, repo, verify, implement=machine.i
         if any(d['pair'] != pair for d in unsent):
             raise ValueError('Unsent reservations span different pairs')
         assignments = [d for d in current['reserved'].values() if d['pair'] == pair]
+        held = _collection_hold(current, assignments)
+        if held: return held
         if (authorization.get('authorized') is not True or authorization.get('approved_by') != 'user'
                 or not authorization.get('authorization_reference')
                 or authorization.get('plan_sha256') != plan['plan_sha256']

@@ -56,14 +56,25 @@ def implement(repo, runs_dir, run_id):
         runtime.start(repo, runs_dir, run_id)
     finally:
         manifest = run.load_manifest(runs_dir, run_id)
-        if manifest.get('stop_confirmed') and not (root / 'snapshot.json').exists():
-            run.collect_run(runs_dir, run_id)
-        receipt = {'run_id': run_id, 'run_instance_id': manifest['run_instance_id'],
-            'stop_confirmed': manifest.get('stop_confirmed'), 'at': run.now(),
-            'manifest_sha256': util.sha256_file(root / 'manifest.json'),
-            'raw': util.tree_hashes(root / 'usage/raw'),
-            'snapshot_sha256': util.sha256_file(root / 'snapshot.json') if (root / 'snapshot.json').exists() else None}
-        util.write_new_json(root / 'implementation-receipt.json', receipt)
+        collection_error = None
+        try:
+            if manifest.get('stop_confirmed') and not (root / 'snapshot.json').exists():
+                run.collect_run(runs_dir, run_id)
+        except BaseException as exc:
+            collection_error = type(exc).__name__
+            raise
+        finally:
+            manifest = run.load_manifest(runs_dir, run_id)
+            receipt = {'run_id': run_id, 'run_instance_id': manifest['run_instance_id'],
+                'stop_confirmed': manifest.get('stop_confirmed'), 'at': run.now(),
+                'submission_fixed': manifest.get('submission_fixed', False),
+                'collection_status': 'collection_fault' if collection_error else
+                    ('fixed' if manifest.get('submission_fixed') else 'not_fixed'),
+                'collection_error_type': collection_error,
+                'manifest_sha256': util.sha256_file(root / 'manifest.json'),
+                'raw': util.tree_hashes(root / 'usage/raw'),
+                'snapshot_sha256': util.sha256_file(root / 'snapshot.json') if (root / 'snapshot.json').exists() else None}
+            util.write_new_json(root / 'implementation-receipt.json', receipt)
     return receipt
 
 
@@ -73,6 +84,11 @@ def postprocess(repo, runs_dir, run_id, archive):
     manifest = run.load_manifest(runs_dir, run_id)
     if not manifest.get('stop_confirmed'):
         raise RuntimeError('Unconfirmed stop blocks heavy postprocessing')
+    implementation = root / 'implementation-receipt.json'
+    if implementation.exists():
+        saved = util.read_json(implementation)
+        if saved.get('collection_status') == 'collection_fault' or saved.get('collection_error_type'):
+            raise RuntimeError('Recorded collection fault blocks heavy postprocessing')
     timing = root / 'postprocess-timing.jsonl'
     binding = {**(manifest.get('assignment') or {}), 'run_id': run_id,
                'run_instance_id': manifest['run_instance_id']}

@@ -106,6 +106,7 @@ def create_run(repo, runs_dir, task_id, condition_id, attempt, inputs, *, resolv
     input leaves no half-made run behind.
     """
     condition = resolved_condition or load_condition(repo, task_id)
+    collection_policy = util.resolve_collection_policy(condition.get('collection_policy'))
     import re
     if not all(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,95}', x or '')
                for x in (task_id, condition_id)) or type(attempt) is not int or attempt < 1:
@@ -144,6 +145,7 @@ def create_run(repo, runs_dir, task_id, condition_id, attempt, inputs, *, resolv
         'attempt': attempt,
         'condition_path': 'runs/{}/condition.json'.format(run_id),
         'condition_sha256': util.sha256_file(run_dir / 'condition.json'),
+        'collection_policy': collection_policy,
         'created_at': now(),
         'inputs_manifest_sha256': None,
         'inputs_total_bytes': total_bytes,
@@ -312,7 +314,15 @@ def collect_run(runs_dir, run_id):
     manifest = load_manifest(runs_dir, run_id)
     if not manifest.get('stop_confirmed'):
         raise RuntimeError('停止を確認していない Run は回収しません: ' + run_id)
-    snapshot = {'schema_version': 1, 'run_id': run_id, 'collected_at': now()}
+    condition_path = run_dir / 'condition.json'
+    if util.sha256_file(condition_path) != manifest['condition_sha256']:
+        raise ValueError('Submission collection condition changed after assignment')
+    condition = util.read_json(condition_path)
+    policy = util.resolve_collection_policy(condition.get('collection_policy'))
+    if util.resolve_collection_policy(manifest.get('collection_policy')) != policy:
+        raise ValueError('Submission collection policy differs from assigned manifest')
+    snapshot = {'schema_version': 1, 'run_id': run_id, 'collected_at': now(),
+                'collection_policy': policy, 'collection_contract': util.collection_contract(policy)}
     workspace = run_dir / 'workspace'
     frozen = run_dir / 'frozen'
     if not workspace.is_dir():
@@ -327,8 +337,8 @@ def collect_run(runs_dir, run_id):
         save_manifest(runs_dir, run_id, manifest)
         return manifest, snapshot
 
-    collected_before = util.artifact_hash(workspace)
-    result = util.collect(workspace, frozen)
+    collected_before = util.collection_hash(workspace, policy=policy)
+    result = util.collect(workspace, frozen, policy=policy)
     snapshot.update(result)
     snapshot['artifact_sha256_collected'] = collected_before
     snapshot['artifact_sha256'] = util.artifact_hash(frozen)
@@ -339,11 +349,9 @@ def collect_run(runs_dir, run_id):
     snapshot['artifact_hash_changed_by_collection'] = (
         snapshot['artifact_sha256'] != collected_before)
     snapshot['collection_note'] = (
-        'artifact_sha256_collected は実装役の作業ツリーのバイト列、'
-        'artifact_sha256 は改行と BOM を固定した後のバイト列に対する値。'
-        'どちらも生成物のディレクトリと拡張子を先に除いてから計算するので、'
-        '差は改行と BOM の固定による分だけである。'
-        '評価 ID は後者から作られる。')
+        'artifact_sha256_collected hashes the workspace files selected by the assigned collection policy '
+        'before text normalization; artifact_sha256 hashes the frozen evaluator identity. '
+        'Any difference must be explained by recorded text normalization. Evaluation IDs use the latter.')
     util.write_new_json(run_dir / 'snapshot.json', snapshot)
     manifest['submission_fixed'] = True
     save_manifest(runs_dir, run_id, manifest)

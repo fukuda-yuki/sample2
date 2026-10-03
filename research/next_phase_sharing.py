@@ -79,6 +79,11 @@ def stage(repo, bundle_path, number, destination):
         for relative, source in catalog_share.files(batch / rid):
             name = bundle['cohort'] + '/' + rid + '/' + relative
             reason = catalog_share.exclusion(relative)
+            if (relative.startswith('frozen/') and relative.lower().endswith(
+                    ('.sqlite', '.sqlite3', '.db', '-wal', '-shm', '-journal'))):
+                reason = ('Submitted static databases remain in the complete local frozen package; '
+                    'this public evidence slice records their hashes and omissions and does not '
+                    'provide runnable application or database/evaluator replay.')
             if reason:
                 manifest['excluded'].append({'path': name, **originals[rid][relative], 'reason': reason})
             else:

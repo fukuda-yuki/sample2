@@ -74,6 +74,8 @@ def prepare_prompt(condition, source, catalog=None):
               'Environment: .NET SDK 8; target net8.0. EF Core SQLite 8.0.31 and '
               'Microsoft.Data.Sqlite 8.0.31 are available offline. No Internet access. '
               'Use /tmp for scratch databases.\n\n' + request)
+    common = common.replace('/input/legacy-source',
+                            condition['runtime'].get('input_mount', '/input') + '/legacy-source')
     if condition['intervention']['method'] == catalog_input.METHOD:
         common = common.replace('/input/legacy-source', '/inputs/legacy-source')
         derived = Path(catalog)
@@ -106,7 +108,8 @@ def prepare_prompt(condition, source, catalog=None):
                                 'text': b['text']} for b in blocks]}
 
 
-def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'):
+def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek', *,
+           run_instance_id=None, assignment=None):
     repo = Path(repo).resolve()
     condition = resolve(repo, task_id, intervention, runtime_id)
     prepared_root = runtime_root(repo, task_id, condition['runtime'])
@@ -115,11 +118,16 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
         raise ValueError('Prepare an evaluator from a clean committed checkout before spending model usage')
     if lock['opencode_version'] != condition['runtime']['opencode_version']:
         raise ValueError('Prepared runtime does not match profile')
-    source = repo / 'artifacts' / 'sources' / condition['start_state']['source_commit']
-    source_lock = util.read_json(source.parent / (source.name + '.json'))
-    if util.tree_hashes(source) != source_lock['files']:
-        raise ValueError('Prepared source changed')
-    inputs = {'legacy-source': source}
+    if condition.get('task_input_adapter') == 'migration-v1':
+        from . import migration_input
+        inputs = migration_input.prepare(repo, condition)
+        source = inputs['legacy-source']
+    else:
+        source = repo / 'artifacts' / 'sources' / condition['start_state']['source_commit']
+        source_lock = util.read_json(source.parent / (source.name + '.json'))
+        if util.tree_hashes(source) != source_lock['files']:
+            raise ValueError('Prepared source changed')
+        inputs = {'legacy-source': source}
     if condition['intervention']['method'] == catalog_input.METHOD:
         inputs.update(catalog_input.prepare(repo, source))
         condition['input_policy']['allowlist'] += ['catalog-derived', 'catalog-tools']
@@ -151,11 +159,20 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
     task = read(repo, 'tasks', task_id)
     for key, dest in [('spec_path', 'requirements.json'), ('catalog_path', 'catalog.json')]:
         shutil.copy2(repo / task['evaluation'][key], assets / dest)
+    for source_path, dest in task['evaluation'].get('extra_assets', {}).items():
+        if Path(dest).name != dest or ':' in dest or '\\' in dest:
+            raise ValueError('Invalid extra evaluator asset name')
+        source_path = (repo / source_path).resolve()
+        if not source_path.is_relative_to(repo):
+            raise ValueError('Extra evaluator asset escaped repository')
+        shutil.copy2(source_path, assets / dest)
     if util.sha256_file(assets / 'requirements.json') != condition['evaluation']['spec_sha256']:
         raise ValueError('Task ledger hash mismatch; retain incomplete Run')
     (root / 'inputs' / 'prompt.txt').write_bytes(prompt.encode('utf-8'))
     util.write_new_json(root / 'context.json', context)
-    manifest.update(schema_version=2, intervention_id=intervention, run_instance_id=uuid.uuid4().hex,
+    manifest.update(schema_version=2, intervention_id=intervention,
+                    run_instance_id=run_instance_id or uuid.uuid4().hex, evidence_version=3,
+                    assignment=assignment,
                     profile_files=util.tree_hashes(root / 'profiles'),
                     context_sha256=util.sha256_file(root / 'context.json'),
                     prompt_sha256=util.sha256_file(root / 'inputs' / 'prompt.txt'),

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "family_id": "music-store-continuity",
+  "variants": {
+    "A": {
+      "task_id": "MS1-CONT-A",
+      "membership": "calibration_and_exploratory_development",
+      "pricing_rate": "1.00",
+      "raw_prices": {"1": "7.25", "2": "12.40", "3": "0.95", "41": "3.60"},
+      "historical_order": {"OrderId": 7001, "CustomerId": 301, "Username": "archival-ada", "Total": "32.75"},
+      "historical_details": [
+        {"OrderDetailId": 9101, "OrderId": 7001, "AlbumId": 1, "Quantity": 3, "UnitPrice": "7.25"},
+        {"OrderDetailId": 9102, "OrderId": 7001, "AlbumId": 2, "Quantity": 1, "UnitPrice": "11.00"}
+      ],
+      "independently_derived_workflows": {
+        "checkout": {"unit_prices": {"1": "7.25", "2": "12.40"}, "total": "26.90"},
+        "second": {"unit_prices": {"2": "12.40"}, "total": "12.40"},
+        "restart": {"unit_prices": {"3": "0.95"}, "total": "0.95"}
+      }
+    },
+    "B": {
+      "task_id": "MS1-CONT-B",
+      "membership": "calibration_and_exploratory_development",
+      "pricing_rate": "0.90",
+      "raw_prices": {"1": "9.95", "2": "2.75", "3": "15.50", "41": "6.15"},
+      "historical_order": {"OrderId": 7001, "CustomerId": 301, "Username": "archival-ada", "Total": "25.15"},
+      "historical_details": [
+        {"OrderDetailId": 9101, "OrderId": 7001, "AlbumId": 1, "Quantity": 2, "UnitPrice": "9.95"},
+        {"OrderDetailId": 9102, "OrderId": 7001, "AlbumId": 2, "Quantity": 1, "UnitPrice": "5.25"}
+      ],
+      "independently_derived_workflows": {
+        "checkout": {"unit_prices": {"1": "8.96", "2": "2.48"}, "total": "20.40"},
+        "second": {"unit_prices": {"2": "2.48"}, "total": "2.48"},
+        "restart": {"unit_prices": {"3": "13.95"}, "total": "13.95"}
+      }
+    }
+  },
+  "held_out": {
+    "semantic_variant_ids": [],
+    "independent_family_ids": [],
+    "status": "none_available",
+    "reason": "A and B are exposed to apparatus calibration before acquisition. Neither is an independent held-out application. No confirmatory/general-migration claim is supported."
+  },
+  "human_review": "not_run",
+  "arithmetic_authority": "Manually specified decimal values: A=2*7.25+12.40=26.90. B rounds each unit: 9.95*0.90=8.955->8.96; 2.75*0.90=2.475->2.48; 2*8.96+2.48=20.40. Separate Python Decimal recomputation checks these assertions."
+}

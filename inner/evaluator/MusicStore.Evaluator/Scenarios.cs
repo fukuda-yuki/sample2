@@ -562,7 +562,9 @@ public static class Scenarios
             var afterA = sessionA.Get("/ShoppingCart");
             var afterB = sessionB.Get("/ShoppingCart");
             result.ForeignRemovalPreserved = Html.SameCart(cartA.Body, afterA.Body)
-                && Html.SameCart(cartB.Body, afterB.Body);
+                && Html.CartLines(cartB.Body).Select(x => (x.RecordId, x.AlbumId, x.Count))
+                    .SequenceEqual(Html.CartLines(afterB.Body).Select(x => (x.RecordId, x.AlbumId, x.Count)))
+                && Html.Money(cartB.Body).HasValue && Html.Money(cartB.Body) == Html.Money(afterB.Body);
         }
 
         return result;

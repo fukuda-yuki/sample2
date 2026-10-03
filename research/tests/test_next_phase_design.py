@@ -9,6 +9,21 @@ from research.next_phase_analysis import summarize, interval_sensitivity, termin
 
 
 class NextPhaseMeasurementTests(unittest.TestCase):
+    def test_auxiliary_stage_clock_is_bound_without_changing_aggregate_outcome(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = {'run_id': 'run', 'run_instance_id': 'instance'}
+            stage = {**binding, 'stage': 'scoring', 'event': 'stage_completed', 'duration_seconds': 1}
+            path = root / 'postprocess-timing.jsonl'
+            util.append_line(path, stage)
+            outcome = {**binding, 'usage': {'total_tokens': None}}
+            row = {**outcome, 'postprocessing': {'receipt': str(path),
+                'receipt_sha256': util.sha256_file(path), 'stages': [stage]}}
+            self.assertEqual(terminal_row(root, binding, {'row': row}, {'receipt': {'raw': {}}}, outcome), row)
+            util.append_line(path, {**stage, 'run_instance_id': 'foreign'})
+            with self.assertRaises(ValueError):
+                terminal_row(root, binding, {'row': row}, {'receipt': {'raw': {}}}, outcome)
+
     def test_foreign_normalized_usage_and_changed_total_cannot_enter_terminal_row(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -541,12 +541,16 @@ def request_stop(root):
 
 def scoring_command(condition, frozen, out, work, assets, version, sequence):
     name = 's2-score-' + uuid.uuid4().hex
-    initial = Path(assets) / 'initial-store.sqlite'
     business = []
-    if condition['evaluation'].get('migration_contract'):
+    migration = condition['evaluation'].get('migration_contract')
+    if migration:
+        import_input = migration.get('import_input', 'initial-store.sqlite')
+        if import_input not in ('initial-store.sqlite', 'legacy-school.sqlite'):
+            raise ValueError('Migration evaluation import input is not an allowed public database')
+        initial = Path(assets) / import_input
         if not initial.is_file():
             raise ValueError('Migration evaluation requires its frozen initial business database')
-        business = mount(initial, '/inputs/existing-business/initial-store.sqlite', True)
+        business = mount(initial, '/inputs/existing-business/' + import_input, True)
     cmd = ['docker', 'run', '--name', name, '--network', 'none', *sandbox_args(),
            *mount(frozen, '/artifact', True), *mount(assets, '/assets', True),
            *business, *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],

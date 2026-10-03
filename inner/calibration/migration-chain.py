@@ -24,6 +24,7 @@ def main():
     parser.add_argument('--browser-pin', type=Path, required=True)
     parser.add_argument('--contract-root', type=Path,
                         help='Task owner checkout with public request/profiles for upstream authority binding')
+    parser.add_argument('--education', action='store_true', help='Run the independent education-1.0.0 contract')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     repo, out = args.repo.resolve(), args.out.resolve()
@@ -32,7 +33,9 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     cases = util.read_json(args.cases)
     bundle = args.evaluator_bundle.resolve()
-    evaluator_hash = util.sha256_file(bundle/'MusicStore.Evaluator.dll')
+    assembly = 'Education.Evaluator.dll' if args.education else 'MusicStore.Evaluator.dll'
+    evaluation_version = 'education-1.0.0' if args.education else '1.3.0'
+    evaluator_hash = util.sha256_file(bundle/assembly)
     pin = util.read_json(args.browser_pin)
     environment = pin['environment']
     for key, value in environment.items(): os.environ[key] = value
@@ -58,12 +61,15 @@ def main():
              repo/'outer/harness/browser_cleanup.py',repo/'outer/harness/aggregate.py',
              repo/'inner/browser/cart-review.cjs']},'human_review':'not_run','cases':[]}
     receipt['evaluator_source_files'] = {p.relative_to(repo).as_posix():util.sha256_file(p)
-        for p in (repo/'inner/evaluator/MusicStore.Evaluator').glob('*')
+        for p in (repo/('inner/evaluator/Education.Evaluator' if args.education else 'inner/evaluator/MusicStore.Evaluator')).glob('*')
         if p.suffix in ('.cs','.csproj')}
     receipt['controller_files'] = {p.relative_to(repo).as_posix():util.sha256_file(p)
         for p in (repo/'outer/harness').glob('*.py')}
     receipt['runtime_lock_sha256'] = util.sha256_file(args.runtime_lock)
     receipt['calibration_driver_sha256'] = util.sha256_file(Path(__file__))
+    for p in [repo/'outer/harness/browser_review.py',repo/'outer/harness/education_browser.py',
+              repo/'inner/browser/education-review.cjs']:
+        if p.is_file(): receipt['chain_files'][p.relative_to(repo).as_posix()] = util.sha256_file(p)
     shutil.copyfile(args.runtime_lock, out/'runtime-lock.json')
     receipt['linked_contract_files'] = {}
     receipt['linked_contract_scope'] = 'Upstream authority/input binding; model serialization is separately validated by Issue #23.'
@@ -74,6 +80,11 @@ def main():
             'research/tasks/candidate-register.json',
             'research/migration_tasks.py',
             'outer/profiles/tasks/MS1-CONT-A.json','outer/profiles/tasks/MS1-CONT-B.json']
+        if args.education:
+            relatives = ['research/tasks/contoso-enrollment/public-request.txt',
+                'research/tasks/contoso-enrollment/source-pin.json', 'research/tasks/contoso-enrollment/variants.json',
+                'research/tasks/candidate-register.json', 'research/education_tasks.py',
+                'outer/profiles/tasks/CU1-ENR-C.json', 'outer/profiles/tasks/CU1-ENR-D.json']
         for relative in relatives:
             source = contract_root/relative
             if source.is_file():
@@ -84,16 +95,17 @@ def main():
     util.write_new_json(out/'predeclared-cases.json', cases)
     for index, case in enumerate(cases, 1):
         variant = case['variant']
-        task = 'MS1-CONT-' + variant
-        spec = repo/f'inner/spec/requirements-cont-{variant}-1.3.0.json'
+        task = ('CU1-ENR-' if args.education else 'MS1-CONT-') + variant
+        spec = repo/(f'inner/spec/requirements-cu-{variant}-education-1.0.0.json' if args.education else f'inner/spec/requirements-cont-{variant}-1.3.0.json')
         task_assets = args.task_assets.resolve()/variant
         condition = {'schema_version':2,'task_id':task,'task_title':task,
             'condition_id':'CAL','agent':None,'input_policy':{'allowlist':[],'denied':[]},
-            'evaluation':{'evaluation_version':'1.3.0','assembly':'MusicStore.Evaluator.dll',
-                'migration_contract':{'initial_database':'initial-store.sqlite','oracle':'migration-oracle.json'},
+            'evaluation':{'evaluation_version':evaluation_version,'assembly':assembly,
+                'migration_contract':{'initial_database':'initial-store.sqlite','oracle':'migration-oracle.json',
+                                     **({'import_input':'legacy-school.sqlite'} if args.education else {})},
                 'spec_path':'evaluation-assets/requirements.json','catalog_path':'evaluation-assets/catalog.json',
                 'spec_sha256':util.sha256_file(spec),'evaluator_sha256':evaluator_hash,
-                'evaluator_build':{'source_path':'inner/evaluator/MusicStore.Evaluator',
+                'evaluator_build':{'source_path':'inner/evaluator/'+assembly.removesuffix('.dll'),
                     'source_commit':source_commit,'command':'prebuilt immutable calibration bundle',
                     'sdk_version':lock['versions']['dotnet'],'sha256_origin':str(bundle),'clean_worktree':clean}},
             'runtime_lock':copy.deepcopy(lock)}
@@ -102,7 +114,7 @@ def main():
         assets = root/'evaluation-assets'
         shutil.copytree(bundle,assets/'evaluator')
         shutil.copyfile(spec,assets/'requirements.json')
-        for name in ('catalog.json','initial-store.sqlite','migration-oracle.json'):
+        for name in ('catalog.json','initial-store.sqlite','migration-oracle.json', *(['legacy-school.sqlite'] if args.education else [])):
             shutil.copyfile(task_assets/name,assets/name)
         util.write_new_json(root/'profiles/calibration.json',{'case':case,'model_called':False})
         util.write_new_json(root/'context.json',{'technical_case':case['name'],'model_called':False,

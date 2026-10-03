@@ -9,7 +9,7 @@ from pathlib import Path
 from . import evaluate
 from . import run as run_mod
 from . import util
-from . import browser_cart, browser_cleanup
+from . import browser_review as browser_cart, browser_cleanup
 
 
 def build(runs_dir):
@@ -70,7 +70,7 @@ def row_for(runs_dir, run_id):
         if not browser_verified:
             scored = False
             scoring_state = 'evaluation_incomplete'
-            issues.append({'kind': 'browser_unobserved', 'detail': 'C-015/C-016 browser evidence missing, mismatched or incomplete'})
+            issues.append({'kind': 'browser_unobserved', 'detail': 'Required browser evidence missing, mismatched or incomplete'})
 
     if execution != 'completed':
         issues.append({'kind': 'execution', 'detail': execution})
@@ -118,6 +118,7 @@ def row_for(runs_dir, run_id):
                     'evaluation_version': (scoring or {}).get('evaluation_version'),
                     'evaluator_sha256': (scoring or {}).get('evaluator_sha256'),
                     'browser_cart_coverage': (scoring or {}).get('browser_cart_coverage', 'not_run_http_only'),
+                    'browser_review_coverage': (scoring or {}).get('browser_review_coverage'),
                     'research_status': 'complete' if browser_verified else 'incomplete',
                     'browser_execution': browser_cart.execution_identity(run_dir / scoring['directory']) if browser_verified else None,
                     'evaluator_sha256_pinned': (scoring or {}).get('evaluator_sha256_pinned')},

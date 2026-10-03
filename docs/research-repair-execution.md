@@ -187,6 +187,42 @@ default remains `initial-store.sqlite`. Unknown/escaping names and absent files
 are rejected before Docker is invoked. This extension is prepared separately
 and does not change the frozen four-slot music-store technical cohort.
 
+The new education-family serializer check is retained at
+`runs/_cuSer/serialization-derivation-v1.json` (SHA256
+`e98ed7f08c147abc52494a6556dd0373c7d55a4d53fe31a1035ac134e3050ae1`).
+It executed exactly two ordinary OpenCode workers, CU1-ENR-C explore then
+preload, with the prepared `deepseek-research-v2` runtime at integration HEAD
+`fa5d0752d48a86ba3d8c049fe0b42309571a3a46`. The unchanged budgets were 1800
+seconds per Run and 600 seconds per provider request. Each mock upstream was
+capped at one response; two responses were saved in total, with zero real calls
+and no worker retry or replacement. Together with the retained music-store
+campaign, there are twelve ordinary-worker mock Runs across two cohorts.
+
+Saved actual request originals prove explore transmitted zero source packets
+and preload transmitted all ten, each exactly once. Their text hashes match
+the frozen context and public source inputs. The common public prompt SHA256 is
+`5ce355f8a687250bc33a5f3aab832ee50fca8df5879ed99acae3535650751676`.
+Model, tools, permissions, compaction, OpenCode 1.17.11, runtime and all 24 public
+input files match across arms. The raw `legacy-school.sqlite` input was present
+under the read-only `/inputs` mount; the target database and private oracle were
+absent from worker inputs. Both workers/gateways were confirmed stopped, owned
+networks absent, and all original Run directories retained.
+
+The initial preload probe result remains `passed=false`: the probe incorrectly
+used the gateway's `CATALOG_SOURCE` counter for migration packets. The gateway
+had already verified the complete, exact serialized prompt before upstream
+send. A separate read-only derivation checks saved request hashes, exact prompt,
+common prefix, every migration header and source text; it records the accepted
+10/10 packet proof without rewriting the failed result or running another
+worker. The execution scope binds script commit `5db3181` and its file SHA256
+separately from integration HEAD/controller/runtime hashes. The derivation
+binds corrected script commit `b372a46`; four no-dispatch checks cover valid
+preload/explore, duplicate prompt, changed input and changed request originals.
+CU1-ENR-D has no worker trial; the parent's frozen profile/input-byte checks and
+shared worker serializer cover its matching paths/public request. These mock
+responses establish serialization, settings and isolation, without measuring
+product quality or real-provider behavior.
+
 ## Fixed live campaign outcome
 
 The frozen live plan at integration HEAD
@@ -213,7 +249,8 @@ network; original stopped containers and all Run directories are retained.
 
 Serial implementation makespan was 1675.581535 seconds; the partial local
 block including its first failed postprocessing was 1720.881566 seconds.
-Peak observed HTTP concurrency was two within the serial Run regime; Run
+Peak observed HTTP concurrency was two within the serial Run concurrency-one
+regime; Run
 concurrency and native HTTP concurrency are separate measurements. Paired
 elapsed improvement and distribution equivalence are unmeasured. External
 publication time/acceptance remains `not_run`. This campaign does not complete
@@ -256,6 +293,11 @@ validated browser paths and pinned Node using
 is restored on success or failure. The generic child environment remains
 restricted. This correction does not authorize reopening the failed campaign,
 resending either assigned instance or adding replacement model trials.
+Any final-code evaluator-only verification of these two saved new technical
+outputs must use this scoped verified pin and separate versioned receipts.
+It retains the original scoring failure and stopped two-of-four campaign;
+it cannot supply the missing paired dispatch/comparison or external-publication
+acceptance. No further real-model trial is authorized by that verification.
 
 New source acquisition invokes Git archive with invocation-local
 `core.autocrlf=false` and `core.eol=lf`, records that byte basis/configuration,

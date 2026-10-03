@@ -21,6 +21,8 @@ def main():
     parser.add_argument('--task-assets', type=Path, required=True)
     parser.add_argument('--evaluator-bundle', type=Path, required=True)
     parser.add_argument('--runtime-lock', type=Path, required=True)
+    parser.add_argument('--runtime-lock-dir', type=Path,
+                        help='Select and bind the exact <task>/lock.json image for each case')
     parser.add_argument('--browser-pin', type=Path, required=True)
     parser.add_argument('--contract-root', type=Path,
                         help='Task owner checkout with public request/profiles for upstream authority binding')
@@ -48,6 +50,20 @@ def main():
     clean = not bool(subprocess.check_output(['git','status','--porcelain'],cwd=repo,text=True).strip())
     if not clean: raise RuntimeError('Commit calibration sources before freezing the executable receipt')
     lock = util.read_json(args.runtime_lock)
+    task_locks = {}
+    if args.runtime_lock_dir:
+        for variant in sorted({case['variant'] for case in cases}):
+            task = ('CU1-ENR-' if args.education else 'MS1-CONT-') + variant
+            path = args.runtime_lock_dir.resolve()/task/'lock.json'
+            selected = util.read_json(path)
+            if (selected['evaluator_files'] != util.tree_hashes(bundle)
+                    or selected['evaluator_files'] != util.tree_hashes(path.parent/'evaluator')
+                    or selected['evaluator_sha256'] != evaluator_hash):
+                raise RuntimeError('Per-task runtime evaluator bundle differs: '+task)
+            current = {p.name:util.sha256_file(p) for p in (repo/'outer/harness').glob('*.py')}
+            if selected['controller_files'] != current:
+                raise RuntimeError('Per-task runtime controller differs from calibration checkout: '+task)
+            task_locks[task] = (path, selected)
     runs = out/'runs'
     receipt = {'schema_version':1,'scope':'technical evaluator calibration; no research/model runs',
         'source_commit':source_commit,'evaluator_sha256':evaluator_hash,
@@ -66,11 +82,18 @@ def main():
     receipt['controller_files'] = {p.relative_to(repo).as_posix():util.sha256_file(p)
         for p in (repo/'outer/harness').glob('*.py')}
     receipt['runtime_lock_sha256'] = util.sha256_file(args.runtime_lock)
+    receipt['task_runtimes'] = {task:{'lock_sha256':util.sha256_file(path),
+        'images':selected['images'], 'evaluator_sha256':selected['evaluator_sha256'],
+        'evaluator_files':selected['evaluator_files'], 'evaluator_build':selected['evaluator_build']}
+        for task,(path,selected) in task_locks.items()}
     receipt['calibration_driver_sha256'] = util.sha256_file(Path(__file__))
     for p in [repo/'outer/harness/browser_review.py',repo/'outer/harness/education_browser.py',
               repo/'inner/browser/education-review.cjs']:
         if p.is_file(): receipt['chain_files'][p.relative_to(repo).as_posix()] = util.sha256_file(p)
     shutil.copyfile(args.runtime_lock, out/'runtime-lock.json')
+    for task,(path,selected) in task_locks.items():
+        target = out/'task-runtime-locks'/task; target.mkdir(parents=True)
+        shutil.copyfile(path,target/'lock.json')
     receipt['linked_contract_files'] = {}
     receipt['linked_contract_scope'] = 'Upstream authority/input binding; model serialization is separately validated by Issue #23.'
     if args.contract_root:
@@ -96,6 +119,7 @@ def main():
     for index, case in enumerate(cases, 1):
         variant = case['variant']
         task = ('CU1-ENR-' if args.education else 'MS1-CONT-') + variant
+        selected_lock_path, selected_lock = task_locks.get(task, (args.runtime_lock, lock))
         spec = repo/(f'inner/spec/requirements-cu-{variant}-education-1.0.0.json' if args.education else f'inner/spec/requirements-cont-{variant}-1.3.0.json')
         task_assets = args.task_assets.resolve()/variant
         condition = {'schema_version':2,'task_id':task,'task_title':task,
@@ -107,8 +131,10 @@ def main():
                 'spec_sha256':util.sha256_file(spec),'evaluator_sha256':evaluator_hash,
                 'evaluator_build':{'source_path':'inner/evaluator/'+assembly.removesuffix('.dll'),
                     'source_commit':source_commit,'command':'prebuilt immutable calibration bundle',
-                    'sdk_version':lock['versions']['dotnet'],'sha256_origin':str(bundle),'clean_worktree':clean}},
-            'runtime_lock':copy.deepcopy(lock)}
+                    'sdk_version':selected_lock['versions']['dotnet'],'sha256_origin':str(bundle),'clean_worktree':clean}},
+            'runtime_lock':copy.deepcopy(selected_lock)}
+        if task_locks:
+            condition['evaluation']['evaluator_build'] = copy.deepcopy(selected_lock['evaluator_build'])
         manifest = run.create_run(repo,runs,task,'CAL',index,{},resolved_condition=condition)
         root = runs/manifest['run_id']
         assets = root/'evaluation-assets'
@@ -158,6 +184,7 @@ def main():
             'expected':case['expected'],'actual':actual,'matched':not failures,'mismatch_keys':failures,
             'artifact_sha256':run.read_snapshot(root)['artifact_sha256'],
             'spec_sha256':util.sha256_file(spec),'asset_files':util.tree_hashes(assets),
+            'runtime_lock_sha256':util.sha256_file(selected_lock_path), 'runtime_images':selected_lock['images'],
             'record':record,'aggregate':row}
         receipt['cases'].append(saved)
         util.write_new_json(out/(case['name']+'.json'),saved)

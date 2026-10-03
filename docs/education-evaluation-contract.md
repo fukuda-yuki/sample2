@@ -111,10 +111,11 @@ collector excludes every `.sqlite` file; the worker's submission prompt does not
 explicitly disclose that blanket exclusion. The original snapshot records the
 file's removal. The frozen package therefore fails publish, but this cannot be
 interpreted as a causal failure of the original workspace's implementation
-ability. Collection policy and public requirements were left unchanged under
-the latest limited authorization. Finite evaluator calibration acceptance
-does not resolve this confound: **new research is not ready to start**. Human
-acceptance remains separate and not_run by the evaluation agent.
+ability. The original collection rule, frozen submission and failed evaluation
+remain unchanged. The later prospective collection repair described below does
+not establish a causal quality result for that original workspace. Human
+acceptance remains separate and not_run by the evaluation agent; **new research
+is not ready to start** while that mandatory acceptance is missing.
 
 The v3 joint receipt binds the final four task locks, evaluator DLLs/images,
 controller/collector/environment bytes, public profiles, ledgers and prepared
@@ -123,3 +124,62 @@ build identities. Thirty retained observations have passed C-001/E-001, so the
 new failed-build shortcut cannot execute in those cases. The narrow adapter
 boundary tests cover MusicStore and both Education variants. No complete matrix
 was rerun to verify the classification-only addition.
+
+The prospective `workspace-static-db-v2` collection policy is now explicitly
+selected by all four new task profiles. It preserves regular workspace
+`.sqlite`, `.sqlite3` and `.db` submission assets; mutable runtime and scratch
+files belong under `/tmp`. Nonempty associated WAL/SHM/journal files cause a
+collection hold rather than a silent omission or an automatic checkpoint.
+Absent opt-in, the historical collection selection remains unchanged. The
+workspace selection hash and the frozen submission identity are separate:
+the latter includes every regular file except files under `bin`, `obj` and
+`.git`, matching both existing SDK implementations. No SDK, ledger, private
+oracle or scoring criterion changed for this repair.
+
+A new independent fixture was prepared from reference source and the canonical
+input without using or reconstructing a saved model submission. Its project
+references `Data/initial-store.sqlite` through unconditional
+`CopyToOutputDirectory`; its independent expected rows were checked before
+scoring. Exactly three predeclared cases were accepted:
+
+- The closed static SQLite file survived workspace collection, frozen input,
+  SDK source copying and publish with identical bytes. Ordinary `score_run`,
+  browser composition, aggregation and owned cleanup returned pass, quality
+  100 and complete coverage.
+- Changing one byte in a newly collected frozen database changed the artifact
+  identity. Ordinary scoring rejected the mismatch before launching the SDK.
+- A baseline with an incorrect ledger hash was rejected by the SDK composer
+  with exit code 2 and null quality. The refusal binds the actual evaluator DLL
+  through the composition intent; it does not claim a successful manifest.
+
+The evidence is `artifacts/sqlite-v3-positive/calibration-receipt.json`,
+`artifacts/sqlite-v3-controls-v3/controls-receipt.json` and the stage/manifest
+binding in `artifacts/sqlite-v3-controls-v3/driver-binding.json`. Two earlier
+control setup failures remain preserved; neither reached scoring. The passing
+positive was not repeated, expectations were not changed, and this follow-up
+made no model call or saved-technical scoring attempt.
+
+The final dependency receipt is
+`artifacts/sqlite-v3-finalization/joint-calibration-acceptance-v4.json`, with
+the private evaluator proof beside it. It binds production source
+`3a0ed7e52c068299c073fec16f3bab2a325187b4`, four current locks, complete
+32-file evaluator inventories, ledgers, profiles, prepared inputs/private
+oracles and the browser pin. Eight actual image/payload comparisons preserve
+RootFS/configuration equality without saving environment values or hashes.
+The current MusicStore DLL equals the corrective six-case and per-task routing
+receipts; the current Education DLL equals the final normal C/D, invalid-name
+and corrected HTTP-fault receipts. Initial receipts with different DLLs remain
+historical evidence, with only the prior joints' explicit outcome-specific
+dependency witnesses retaining their unaffected observations. A read-only
+comparison also confirmed all 34 historical frozen artifact identities under
+the matching all-files hash; none was rescored.
+
+The three new cases were measured at source `03d117d8`. Among the 24 controller
+files, only `machine.py` changed before the final production source. The
+fixtures directly called `run.collect_run` and ordinary `evaluate.score_run`,
+so the new implementation-receipt exception branch and heavy-postprocessing
+guard were not executed; pair-manager changes are outside that path as well.
+Their lifecycle/hold acceptance belongs to the separate execution evidence.
+This receipt accepts the declared future collection and evaluator boundaries,
+retains the original technical campaign at halted two of four, and leaves
+human acceptance and permission to start the study unresolved.

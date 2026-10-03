@@ -312,6 +312,13 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                         'evaluatorFaults': baseline.get('evaluatorFaults') or ['HTTP evaluator exited before browser collection']}
             util.write_new_json(produced, fallback)
             shutil.copyfile(http_out / 'evaluator-manifest.json', temporary / 'evaluator-manifest.json')
+            util.write_new_json(browser_cleanup._local_path(temporary) / 'browser-cleanup.json', {
+                'confirmed': True, 'status': 'no_browser_resources_created', 'resources': [],
+                'run_instance_id': manifest.get('run_instance_id'), 'artifact_sha256': independent_hash,
+                'spec_sha256': spec_sha256, 'model_called': False, 'browser_observed': False,
+                'evaluator_container': container_name,
+                'evaluator_container_removed': container_name is None or stopped.returncode == 0,
+                'scope': 'HTTP observer failed before browser launch; no browser resource intent or creation occurred'})
     if (timed_out and not browser_required) or not produced.is_file():
         target = evaluations / ('fault-{:03d}-{}'.format(sequence, uuid.uuid4().hex))
         record = _base_record(run_id, sequence, version, exit_code, independent_hash,

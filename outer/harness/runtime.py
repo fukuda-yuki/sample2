@@ -483,7 +483,7 @@ def _start(repo, runs_dir, run_id):
         manifest['network_cleanup'] = record_cleanup(root)
     from . import live_usage
     live_usage.collect(root)
-    return manifest
+    return run.load_manifest(runs_dir, run_id)
 
 
 def request_stop(root):

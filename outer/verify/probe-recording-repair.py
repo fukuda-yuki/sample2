@@ -14,7 +14,8 @@ import uuid
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from outer.harness import live_usage, profiles, run, runtime, util
+from outer.harness import live_usage, machine, profiles, run, runtime, util
+from research import pair_execution
 from outer.harness.security import child_environment
 
 REPO=Path(__file__).resolve().parents[2]
@@ -34,6 +35,7 @@ class Upstream(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def do_POST(self):
         self.rfile.read(int(self.headers['Content-Length']))
+        self.server.calls+=1
         if mode=='after-send-before-ack':
             time.sleep(2); self.connection.close(); return
         self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers()
@@ -42,10 +44,12 @@ class Upstream(BaseHTTPRequestHandler):
               'choices':[{'index':0,'delta':{'role':'assistant','content':'synthetic complete'},'finish_reason':None}]}
         self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode()); self.wfile.flush()
         item['choices']=[{'index':0,'delta':{},'finish_reason':'stop'}]
-        if mode!='partial-no-usage': item['usage']={'prompt_tokens':20,'completion_tokens':5,'total_tokens':25}
+        if mode!='partial-no-usage' and not (mode=='controller-loss75' and self.server.calls==75):
+            item['usage']={'prompt_tokens':20,'completion_tokens':5,'total_tokens':25}
         self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode()); self.wfile.flush()
         if mode not in ('partial-usage','partial-no-usage'): self.wfile.write(b'data: [DONE]\n\n')
 server=ThreadingHTTPServer(('127.0.0.1',0),Upstream)
+server.calls=0
 threading.Thread(target=server.serve_forever,daemon=True).start()
 gateway=Gateway(('0.0.0.0',8080),'/records',rid,model,sys.stdin.readline().strip(),
     session_id=instance,upstream_host='127.0.0.1',upstream_port=server.server_port,tls=False,
@@ -76,7 +80,7 @@ if mode=='controller-loss75':
 '''
 
 
-def child(root,case,repo):
+def child(root,case,repo,paired=False):
     root,repo=Path(root),Path(repo)
     old_docker=runtime.docker
     resolver=profiles.resolve
@@ -102,6 +106,20 @@ def child(root,case,repo):
         return old_docker(*args,**kwargs)
     with patch.object(profiles,'resolve',resolve),patch.object(runtime,'docker',docker),\
          patch.object(runtime,'_gateway_credential',return_value=CANARY):
+        if paired:
+            plan={'plan_sha256':util.sha256_file(root/'plan.json'),'cohort':'technical-mock-pair',
+                  'runtime':'deepseek-migration-v1'}
+            cases=[{'run_id':'MS1-CONT-A-'+arm+'-001','task':'MS1-CONT-A','condition':arm,
+                    'attempt':1,'pair':1,'slot':i} for i,arm in enumerate(('explore','preload'),1)]
+            def postprocess(repo,batch,rid,archive):
+                peers=[util.read_json(batch/c['run_id']/'manifest.json') for c in cases]
+                assert all(m['stop_confirmed'] for m in peers)
+                assert all((batch/c['run_id']/'implementation-receipt.json').is_file() for c in cases)
+                util.append_line(root/'heavy-boundary.jsonl',{'run_id':rid,'at':run.now(),'both_stopped':True})
+                return {'run_id':rid,'verdict':None,'technical_boundary_only':True}
+            result=pair_execution.execute_pair(plan,cases,root,repo=repo,concurrency=2,postprocess=postprocess)
+            util.write_new_json(root/'pair-result.json',result)
+            return
         intervention='preload' if case=='actual-preload' else 'explore'
         manifest=profiles.create(repo,root,'MS1-CONT-A',intervention,1,'deepseek-migration-v1')
         runtime.start(repo,root,manifest['run_id'])
@@ -113,15 +131,16 @@ def main():
     p.add_argument('--out',type=Path)
     p.add_argument('--child',type=Path)
     p.add_argument('--case',choices=CASES)
+    p.add_argument('--pair',action='store_true')
     p.add_argument('--cases',nargs='+',choices=CASES,default=CASES)
     a=p.parse_args()
-    if a.child: child(a.child,a.case,a.repo); return 0
+    if a.child: child(a.child,a.case,a.repo,a.pair); return 0
     repo=a.repo.resolve()
     batch=a.out or repo/'runs'/('_recording-repair-mock-'+uuid.uuid4().hex[:12])
     batch.mkdir(parents=True,exist_ok=False)
     util.write_new_json(batch/'plan.json',{'cohort':'technical-recording-mock','real_model_calls':0,
-        'cases':a.cases,'controller_files':runtime.controller_files(repo),
-        'limits':{'runs':len(a.cases),'run_seconds':120,'fixed_no_retries':True},
+        'cases':a.cases,'paired_actual_worker_check':a.pair,'controller_files':runtime.controller_files(repo),
+        'limits':{'runs':len(a.cases)+(2 if a.pair else 0),'run_seconds':120,'fixed_no_retries':True},
         'expected':{'actual-*':'complete usage, exact serialized prompt, identical runtime and access',
             'partial-usage':'observed 25, total null','partial-no-usage':'observed null, total null',
             'done-only':'usage incomplete','after-send-before-ack':'observed send, no ack, usage missing',
@@ -159,7 +178,7 @@ def main():
         evidence=manifest['execution_evidence']
         passed=manifest.get('stop_confirmed') and (manifest.get('network_cleanup') or {}).get('confirmed')
         if case.startswith('actual-'): passed=passed and normalized['usage_complete'] and normalized['input_reached']
-        else: passed=passed and (not normalized['usage_complete'] or case=='controller-loss75')
+        else: passed=passed and not normalized['usage_complete']
         if case=='partial-usage': passed=passed and normalized['observed_tokens']==25 and normalized['total_tokens'] is None
         if case in ('partial-no-usage','done-only','after-send-before-ack','write-failure'):
             passed=passed and normalized['total_tokens'] is None
@@ -185,6 +204,28 @@ def main():
         util.write_json_atomic(batch/'progress.json',{'results':results,'complete':False})
         print(json.dumps({'case':case,'passed':result['passed'],'root':str(run_root)}),flush=True)
         if not result['passed']: raise RuntimeError('Finite mock case failed; no replacement: '+str(root))
+    if a.pair:
+        root=batch/'actual-worker-pair'; fixtures=root/'fixtures'; fixtures.mkdir(parents=True)
+        (fixtures/'gateway.py').write_text(GATEWAY,encoding='utf-8')
+        util.write_new_json(root/'plan.json',{'purpose':'technical paired worker overlap and barrier','real_model_calls':0})
+        with (root/'controller.log').open('xb') as output:
+            code=subprocess.run([sys.executable,__file__,'--repo',str(repo),'--child',str(root),
+                '--case','actual-explore','--pair'],cwd=repo,env=child_environment(),
+                stdout=output,stderr=subprocess.STDOUT,timeout=180).returncode
+        if code: raise RuntimeError('Actual-worker pair failed; retained '+str(root))
+        manifests=[util.read_json(root/('MS1-CONT-A-'+arm+'-001')/'manifest.json') for arm in ('explore','preload')]
+        from datetime import datetime
+        begin=max(datetime.fromisoformat(m['started_at']) for m in manifests)
+        end=min(datetime.fromisoformat(m['ended_at']) for m in manifests)
+        overlap=max(0,(end-begin).total_seconds())
+        decision=util.read_json(root/'pair-result.json')
+        passed=overlap>0 and len(pair_execution.state(root/'_control/pair-journal.jsonl')['results'])==2
+        passed=passed and decision['reason']=='pair_publication_restore_cleanup_required'
+        result={'case':'actual-worker-pair','passed':passed,'overlap_seconds':overlap,
+            'real_model_calls':0,'run_instances':[m['run_instance_id'] for m in manifests],
+            'postprocess_boundary':util.read_lines(root/'heavy-boundary.jsonl'),'decision':decision}
+        util.write_new_json(root/'result.json',result); results.append(result)
+        if not passed: raise RuntimeError('Actual-worker pair boundary failed; no replacement')
     util.write_new_json(batch/'result.json',{'passed':all(r['passed'] for r in results),'results':results,
         'real_model_calls':0,'directory':str(batch)})
     print(str(batch)); return 0

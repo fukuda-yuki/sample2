@@ -133,5 +133,17 @@ class RecordingRepairTests(unittest.TestCase):
         self.assertIn('/inputs/legacy-source',prompt)
         self.assertEqual(context['common_sha256'],util.sha256_bytes(prompt.encode()))
 
+    def test_foreign_instance_responses_cannot_prove_this_instance_called_model(self):
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t); raw=self.fixture(root)
+            for name in ('started.jsonl','events.jsonl'):
+                rows=util.read_lines(raw/name)
+                for row in rows: row['session_id']='another-instance'
+                (raw/name).write_text(''.join(json.dumps(row)+'\n' for row in rows),encoding='utf-8')
+            evidence=live_usage.execution_evidence(root)
+            self.assertIsNone(evidence['model_called'])
+            self.assertEqual(evidence['attributed_saved_response_count'],0)
+            self.assertIn('identity_mismatch',evidence['issues'])
+
 
 if __name__ == '__main__': unittest.main()

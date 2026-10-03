@@ -19,7 +19,8 @@ def execution_evidence(root):
                if (e.get('run_id'), e.get('session_id')) == identity]
     wrong = len(records) != len(starts + ends + sends)
     responses = [p.name for p in raw.glob('*.response.sse') if p.stat().st_size]
-    observed = bool(responses or any(e.get('send_evidence') == 'observed_send'
+    attributed_responses = set(responses) & {e.get('response_file') for e in records}
+    observed = bool(attributed_responses or any(e.get('send_evidence') == 'observed_send'
                     or e.get('http_status') is not None for e in records))
     runtime_path = root / 'runtime.json'
     state = util.read_json(runtime_path) if runtime_path.exists() else {}
@@ -31,6 +32,7 @@ def execution_evidence(root):
             'model_called': True if observed else None if uncertain else False,
             'provider_acknowledged': any(e.get('http_status') is not None for e in records),
             'saved_response_count': len(responses), 'started_count': len(starts),
+            'attributed_saved_response_count': len(attributed_responses),
             'terminal_count': len(ends), 'issues': errors,
             'raw_sha256': {p.name: util.sha256_file(p) for p in sorted(raw.glob('*')) if p.is_file()}}
 

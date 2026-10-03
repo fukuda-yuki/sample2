@@ -144,3 +144,106 @@ python outer/verify/technical-pair-live.py --mode prepare --repo <integrated-rep
 The corresponding `--mode execute` is exclusively the predeclared technical
 test, using the existing Windows User credential through gateway stdin. It is
 not a new-study command and cannot resume the old catalog cohort.
+
+## Recorded ordinary-worker acceptance
+
+The final integrated ordinary OpenCode mock campaign is retained at
+`runs/_rm35/result.json` in `work/repair-integration-20261003`. It passed all
+ten fixed Runs at integration HEAD `35e4ab9464d79cc472abaacf01c086aab19b69df`;
+the result SHA256 is
+`952537b2da8cd19f0b974bf64a248286435032afbc0f6a7a71ae3d542d02eeef`.
+All cases used the normal worker; only the upstream/credential bootstrap was
+replaced, with zero real model calls. The original too-long output-directory
+failure is retained separately and occurred before any worker/model dispatch.
+The short-root correction retained the same fixed cases and expectations.
+
+The absent-controller case preserved 75 responses, attributed model activity,
+1850 observed tokens and an incomplete total (`null`). Partial usage preserved
+25 observed tokens with total `null`; partial/no-usage, DONE-only and send-before-
+ack did not invent totals. The storage failure remained unknown rather than a
+false zero. The paired actual workers overlapped by 8.255555 seconds, retained
+their own instance-bound originals, and both stopped before serial boundary
+postprocessing. That boundary probe did not run the evaluator or external gate.
+
+`runs/_rm35/serializer-comparison.json` proves the actual first upstream prompt:
+explore transmitted zero source blocks, preload transmitted all seven; common
+public request SHA256 was
+`5362605e020d7490611cfcfcae89d299879377965beccf48c8c72587f77d3112`.
+Model, tools, permissions, read scope, compaction and retention were common.
+The diagnostic mock budget was 120 seconds, whereas the separately frozen live
+technical budget remains 1800 seconds. Serialization proves bytes reached the
+request, not model understanding or distribution equivalence.
+
+Recorded evaluator infrastructure/cleanup faults retain the durable row and
+hold subsequent processing. Recovery rechecks the same failure state, and the
+publication gate rejects such rows even when both results exist. A product
+quality failure with completed scoring remains a valid observation.
+
+The separate education scorer may explicitly declare
+`migration_contract.import_input="legacy-school.sqlite"`. Only that public raw
+file is mounted read-only into `/inputs/existing-business`; its private target
+database and oracle are not mounted at that input path. The existing music-store
+default remains `initial-store.sqlite`. Unknown/escaping names and absent files
+are rejected before Docker is invoked. This extension is prepared separately
+and does not change the frozen four-slot music-store technical cohort.
+
+## Fixed live campaign outcome
+
+The frozen live plan at integration HEAD
+`e792f643c33f4c3100e6d52b4bfbfc5d257f23f2` is retained in
+`runs/_tl03a/plan.json` (SHA256
+`a93388c71950ca9c2eb551ba461e33869f3e3d13469af76e9b9fe37df098a7a5`).
+The finite campaign stopped after two of four maximum dispatches. Explore and
+preload both completed implementation, confirmed owned stop/network cleanup,
+retained stopped raw/snapshot receipts, and reported complete usage:
+
+| Serial Run | Implementation seconds | Calls | Reported total tokens |
+| --- | ---: | ---: | ---: |
+| MS1-CONT-A-explore-9001 | 932.562 | 84 | 4,379,390 |
+| MS1-CONT-A-preload-9001 | 738.615 | 61 | 4,922,510 |
+
+The first ordinary scorer returned `evaluator_fault`: the browser collector
+could not load the host `playwright` module. The durable failed scoring/result
+was preserved, subsequent processing was held, and neither paired slot was
+dispatched. No model retry, replacement or additional trial was made. Preload
+remains unscored in the original campaign. `runs/_tl03a/result.json` has SHA256
+`53f77d26a5c862591dc41add5eac51b69110230f90363ab1d126ac099db5a11c`.
+`owned-stop-proof.json` confirms no owned running worker/gateway or remaining
+network; original stopped containers and all Run directories are retained.
+
+Serial implementation makespan was 1675.581535 seconds; the partial local
+block including its first failed postprocessing was 1720.881566 seconds.
+Peak observed HTTP concurrency was two within the serial Run regime; Run
+concurrency and native HTTP concurrency are separate measurements. Paired
+elapsed improvement and distribution equivalence are unmeasured. External
+publication time/acceptance remains `not_run`. This campaign does not complete
+#20 and cannot justify paired scientific adoption. It is retained separately
+from both historical data and the prospective study.
+
+`image-equivalence.json` binds the original mock and live worker/gateway image
+identities: all filesystem layers and runtime config (including in-memory Env
+equality) match. Changed image IDs are retained as metadata differences; no Env
+values or Env hashes were recorded. Thus the ordinary-worker serialization
+proof is reusable without another passing mock/model attempt.
+
+## Stage clocks after the frozen campaign
+
+The separate subsequent implementation adds `postprocess-timing.jsonl`:
+scoring, monitor import including any build, and archive packaging including
+compression (or existing archive verification) each have their own durable
+start/terminal clock. Run/instance/assignment identities bind each event. An
+existing scoring result is retained and recorded as reused with duration
+`null`; missing clocks are never synthesized as zero. Terminal rows bind the
+timing receipt SHA256. These clocks do not retroactively measure the failed
+live campaign and do not change its implementation budget.
+
+`machine.timed_stage(receipt, stage, operation, binding=...)` also clocks the
+ordinary local-public-gate adapter with plan/cohort/pair/instance bindings.
+It records only exception type on failure, retains the started event, and
+does not record arguments or returned payloads. Publication, independent
+download/restore, socket-blocked extraction and owned cleanup still require
+the actual normal gate receipts; a clock cannot satisfy that gate.
+
+Stop reconciliation preserves the original unconfirmed implementation receipt
+and creates a new final raw/manifest/snapshot hash binding, referencing the
+original receipt by path and SHA256. The reader rejects a changed baseline.

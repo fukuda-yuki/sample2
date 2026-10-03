@@ -75,8 +75,8 @@ def stage(repo, bundle_path, number, destination):
     copy(repo / 'research/sharing/THIRD-PARTY-NOTICES.md', 'THIRD-PARTY-NOTICES.md')
     for name in ('MS-PL.txt', 'OpenCode-MIT.txt'):
         copy(repo / 'research/sharing/LICENSES' / name, 'LICENSES/' + name)
-    namespace = 'migration-assets-v2' if family == 'music-store-continuity' else 'education-assets-v1'
-    source_root = repo / 'artifacts' / namespace / pair['task'] / 'inputs/legacy-source'
+    task_assets = (repo / task_profile['evaluation']['catalog_path']).parents[1]
+    source_root = task_assets / 'inputs/legacy-source'
     for name in ('readme.txt', 'README.md', 'LICENSE', 'LICENSE.txt'):
         attribution = source_root / name
         if attribution.is_file(): copy(attribution, 'UPSTREAM/' + name)

@@ -79,3 +79,30 @@ are retained; they are not regenerated merely to change receipt identity.
 The final receipt also binds all controller source files, the runtime lock,
 calibration driver and candidate register, in addition to the executable and
 per-case assets. Human review remains `not_run`.
+
+Final corrective receipt:
+`artifacts/eval21-v5-long-path/calibration-receipt.json`, SHA-256
+`b7f457e24836905dfe98876086eb4485188498d5c290d17c7edbdafa087a2785`.
+All six unchanged predeclared expectations matched on integration commit
+`464f0b1583c17db329de8701158216eb10150c14`, SDK 8.0.425, evaluator image
+`sha256:b834cdeb66fe6467a385cb005fd92ce868ed053d332bd08352fe883dececdea3`,
+DLL SHA-256 `1feb0576a73e8633a06bc3a03b7698f230ae2193abb271d9e7f4b3301af17e14`.
+The three allowed implementations scored 100. Wrong-pricing B scored 83.87 and
+`fail_critical`, with complete browser coverage; unsupported A remained unknown;
+collector failure retained the confirmed critical product failure. No case
+called a model. Human acceptance remains unperformed.
+
+`artifacts/eval21-v5-long-path/joint-calibration-acceptance.json` binds both
+receipts and records dependency-specific reuse of the six retained v4 cases.
+Each retained browser capture satisfies both the old strict and new structural
+preconditions. Post-action judgement, HTTP/SQLite checks, cleanup and aggregation
+logic are unchanged; their source hashes are recorded. The failed v4 calibration
+is retained. Names beginning `withheld-` refer to their initial preparation;
+after the observed v4 diagnosis they are calibration controls, not fresh
+withheld tests. They are never a held-out research application.
+
+The ordinary cleanup created and verified an intent file whose Windows path is
+267 characters. The receipt must be read through Win32 extended paths where
+ordinary `Path.is_file()` may incorrectly report absence. Relevant final tests
+passed: 56 evaluate/browser/cleanup tests, followed by 13 browser regression
+tests and a zero-warning, zero-error evaluator build after the corrective change.

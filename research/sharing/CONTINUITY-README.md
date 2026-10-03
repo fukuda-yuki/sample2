@@ -1,11 +1,14 @@
 # Continuity study: one allocated pair
 
-This is a selected public slice of one assigned pair in the prospective
-MusicStore continuity study. Both arms, failures, partial usage and unassessed
-outcomes remain included. The two semantic variants belong to one source family;
-they are not independent applications. `STUDY.json` retains the complete plan,
-128 assignments, source commit and original local bundle hash. This slice is
-not the complete research corpus or proof of quality maintenance.
+This is a selected public slice of one assigned pair in the frozen two-family
+source-information study, or an explicitly labeled technical sharing fixture.
+Both arms, failures, partial usage and unassessed outcomes remain included.
+Music Store and ContosoUniversity are two distinct source families; the two
+semantic variants within each family are not independent applications.
+`STUDY.json` retains the plan, assignments, source commit and original local
+bundle hash. A research bundle contains 128 assignments. A technical fixture
+is separately labeled and does not count toward research acquisition.
+This slice is not the complete research corpus or proof of quality maintenance.
 
 `MANIFEST.json` lists original and public hashes, exclusions and transformations.
 Local home paths are replaced only as explicitly recorded. Request/response

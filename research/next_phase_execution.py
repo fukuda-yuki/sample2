@@ -1,13 +1,56 @@
 """Exact-bundle start gate and one-pair-at-a-time continuity acquisition."""
 from pathlib import Path
+import json
 
 from outer.harness import util
 from research import next_phase
 
 
+def provider_metadata(root, expected_model):
+    """Read saved response originals; alias metadata is not provider internals."""
+    models = set()
+    for path in (Path(root) / 'usage/raw').glob('*.response.sse'):
+        for line in path.read_bytes().splitlines():
+            if not line.startswith(b'data:'): continue
+            payload = line[5:].strip()
+            if payload == b'[DONE]': continue
+            try: value = json.loads(payload)
+            except (ValueError, UnicodeError): continue
+            if isinstance(value, dict) and isinstance(value.get('model'), str):
+                models.add(value['model'])
+    return {'provider_reported_models': sorted(models), 'expected_request_model': expected_model,
+        'reported_metadata_state': 'reported' if models else 'not_reported',
+        'unexpected_reported_model': bool(models - {expected_model}),
+        'limitation': 'Reported alias metadata does not prove an unchanged internal model or provider distribution.'}
+
+
+def guarded_implementation(repo, batch, run_id):
+    from outer.harness import machine
+    root = Path(batch) / run_id
+    receipt = machine.implement(repo, batch, run_id)
+    condition = util.read_json(root / 'condition.json')
+    metadata = provider_metadata(root, condition['runtime']['model_id'])
+    util.write_new_json(root / 'provider-metadata-receipt.json', metadata)
+    if metadata['unexpected_reported_model']:
+        return {**receipt, 'error_type': 'unexpected_provider_reported_model'}
+    return receipt
+
+
 def execution_plan(bundle, bundle_path):
     return {'plan_sha256': util.sha256_file(bundle_path), 'cohort': bundle['cohort'],
         'runtime': bundle['runtime_id']}
+
+
+def browser_postprocess(bundle):
+    """The checked pin must reach the ordinary collector, not just preflight."""
+    from outer.harness import machine
+    from research import catalog_environment
+    def postprocess(repo, batch, run_id, archive):
+        if not bundle.get('browser'):
+            raise ValueError('Pinned browser environment is required for scoring')
+        with catalog_environment.activated(bundle['browser']['record'], repo):
+            return machine.postprocess(repo, batch, run_id, archive)
+    return postprocess
 
 
 def execute(repo, bundle_path, approval_path):
@@ -47,7 +90,8 @@ def execute(repo, bundle_path, approval_path):
                 raise ValueError('Launch receipt differs from approved bundle')
         else:
             util.write_new_json(launch, record)
-        return pair_execution.execute_pair(plan, pair['cases'], batch, repo=repo, concurrency=1)
+        return pair_execution.execute_pair(plan, pair['cases'], batch, repo=repo, concurrency=1,
+            implement=guarded_implementation, postprocess=browser_postprocess(bundle))
     return {'status': 'complete', 'assigned_slots': bundle['plan']['allocation']['runs'],
         'model_dispatched': False, 'all_pair_gates_complete': True}
 
@@ -57,7 +101,8 @@ def recover(repo, bundle_path):
     next_phase.validate_plan(bundle['plan'])
     batch = next_phase.inside(repo, bundle['cohort'], 'runs')
     from research import pair_execution
-    return pair_execution.recover_pair(execution_plan(bundle, bundle_path), batch, repo=repo)
+    return pair_execution.recover_pair(execution_plan(bundle, bundle_path), batch, repo=repo,
+        postprocess=browser_postprocess(bundle))
 
 
 def resume(repo, bundle_path, approval_path):
@@ -86,4 +131,5 @@ def resume(repo, bundle_path, approval_path):
         if manifest['condition_sha256'] != binding['condition_sha256'] or manifest['prompt_sha256'] != binding['input_sha256']:
             raise ValueError('Reserved unsent input changed')
     return pair_execution.resume_pair(execution_plan(bundle, bundle_path), batch, authorization,
-        repo=repo, verify=verify)
+        repo=repo, verify=verify, implement=guarded_implementation,
+        postprocess=browser_postprocess(bundle))

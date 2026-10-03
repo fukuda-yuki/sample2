@@ -1,5 +1,7 @@
 """Pin the researcher-side browser dependencies before any pilot dispatch."""
 import json
+from contextlib import contextmanager
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -31,6 +33,9 @@ def capture(probe_file, repo):
         'dependency_hashes': {name: util.tree_hashes(Path(env['NODE_PATH']) / name)
                               for name in ('playwright', 'playwright-core')},
         'collector_sha256': util.sha256_file(Path(repo) / 'inner/browser/cart-review.cjs'),
+        'collector_hashes': {name: util.sha256_file(Path(repo) / name) for name in
+            ('inner/browser/cart-review.cjs', 'inner/browser/education-review.cjs')
+            if (Path(repo) / name).is_file()},
         'probe_file': str(probe_file), 'probe_sha256': util.sha256_file(probe_file)}
     validate(record, repo)
     return record
@@ -46,9 +51,26 @@ def validate(record, repo):
         raise ValueError('Pinned Node or browser changed')
     if util.sha256_file(Path(repo) / 'inner/browser/cart-review.cjs') != record['collector_sha256']:
         raise ValueError('Browser collector changed')
+    for name, digest in record.get('collector_hashes', {}).items():
+        if name not in ('inner/browser/cart-review.cjs', 'inner/browser/education-review.cjs') or util.sha256_file(Path(repo) / name) != digest:
+            raise ValueError('Pinned family browser collector changed')
     for name, files in record['dependency_hashes'].items():
         if not files or util.tree_hashes(Path(env['NODE_PATH']) / name) != files:
             raise ValueError('Pinned browser module changed: ' + name)
     if util.sha256_file(record['probe_file']) != record['probe_sha256']:
         raise ValueError('Browser probe changed')
     return env
+
+
+@contextmanager
+def activated(record, repo):
+    """Forward only validated browser dependency paths during serial scoring."""
+    env = validate(record, repo)
+    before = {name: os.environ.get(name) for name in KEYS}
+    try:
+        os.environ.update(env)
+        yield
+    finally:
+        for name, value in before.items():
+            if value is None: os.environ.pop(name, None)
+            else: os.environ[name] = value

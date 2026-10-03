@@ -5,7 +5,7 @@ import math
 from pathlib import Path
 
 
-def calculate(pairs=64, variants=2, repetitions=32):
+def calculate(pairs=64, variants=2, repetitions=32, families=1):
     if pairs != variants * repetitions or min(pairs, variants, repetitions) <= 0:
         raise ValueError('Pair count must equal variants times repetitions')
     rows = []
@@ -35,7 +35,7 @@ def calculate(pairs=64, variants=2, repetitions=32):
                         'ci95_half_width_in_units_of_arm_mean_normal':
                             1.96 * cv * math.sqrt(2 * (1 - rho) * deff / observed)})
     return {'schema_version': 1, 'model_called': False, 'historical_outcomes_used': False,
-        'selected_pairs': pairs, 'source_families': 1, 'semantic_variants': variants,
+        'selected_pairs': pairs, 'source_families': families, 'semantic_variants': variants,
         'repetitions_per_variant': repetitions, 'assigned_runs': 2 * pairs,
         'quality_precision_scenarios': rows, 'token_precision_scenarios': token_rows,
         'quality_distribution_free_iid_hoeffding_half_width': math.sqrt(2 * math.log(40) / pairs),
@@ -43,7 +43,7 @@ def calculate(pairs=64, variants=2, repetitions=32):
         'notes': ['Normal approximations describe assumed precision, not power or a guarantee.',
             'Missingness reduces the complete-pair sample and can cause selection bias; these rows do not identify the all-assigned token contrast.',
             'Session ICC is a sensitivity assumption; four-pair sessions are an operational analysis grouping, not four new independent applications.',
-            'Variants nested within one source family cannot estimate between-application heterogeneity.',
+            'The selected fixed families and nested variants do not justify population inference across unselected applications.',
             'There is no noninferiority/equivalence margin or maintenance claim.'],
         'feasibility': {'implementation_wall_clock_cap_hours_serial': 2 * pairs * 1800 / 3600,
             'historical_twelve_minute_reference_hours_serial': 2 * pairs * 12 / 60,

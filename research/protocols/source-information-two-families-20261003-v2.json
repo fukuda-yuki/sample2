@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "plan_id": "source-information-two-families-20261003-v2",
+  "cohort_kind": "prospective_exploratory_source_information",
+  "research_start_authorized": false,
+  "protocol_acceptance": "candidate awaiting exact technical receipts and basic human confirmation; supersedes the one-family allocation before any research dispatch",
+  "question": "For the four fixed semantic variants of two independent source families, how does initial presentation of the permitted source assets change full-contract migration quality and provider-reported whole-Run tokens under serial execution?",
+  "independent_source_family_count": 2,
+  "task_ids": [
+    "MS1-CONT-A",
+    "MS1-CONT-B",
+    "CU1-ENR-C",
+    "CU1-ENR-D"
+  ],
+  "variant_weights": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+  ],
+  "arms": [
+    "explore",
+    "preload"
+  ],
+  "primary_contrast": "preload minus explore",
+  "intervention": "Initial source-asset presentation only; both arms retain identical readable source/data and tool access. No self-verification or retention intervention is combined.",
+  "primary_outcomes": [
+    "all-assigned full migration-pass probability difference",
+    "all-assigned mean provider-reported input-plus-output tokens per Run difference"
+  ],
+  "secondary_outcomes": [
+    "critical product-failure probability",
+    "requirement-level observed failures and coverage",
+    "complete-pair token difference",
+    "cache/read and reasoning subdivisions",
+    "implementation elapsed time",
+    "postprocessing and publication-gate elapsed time"
+  ],
+  "claim": "Estimate differences conditional on the two selected fixed source families and their two variants, equally weighted by family and variant, under the observed provider/day/session regime. No quality-maintenance, noninferiority, universal migration, billing-truth or mechanism-proof claim.",
+  "quality_loss_margin": null,
+  "experimental_unit": "Assigned Run with immutable instance; presentation arm is assigned within each paired block.",
+  "analysis_unit": "Within-variant paired block, equal weight across source families and across each family's two fixed semantic variants. Repeated Runs and same-family variants are not new independent source applications.",
+  "regime": {
+    "pair_concurrency": 1,
+    "run_internal_concurrency": 1,
+    "between_pair_overlap": false,
+    "pair_completion_gate": "Reviewed public subset, verified independent download/restore and owned scratch cleanup before next pair.",
+    "cache_policy": "Fresh Run workspace/state/session; retain provider-side cache as naturally encountered on the unchanged account. No cache purge or account rotation.",
+    "interference_limit": "Serial execution avoids simultaneous arm load but does not remove carry-over provider cache, quota, day or session effects. Balanced random order estimates the effect under this policy, not under a no-cache counterfactual. Paired technical evidence is separate and never pooled."
+  },
+  "allocation": {
+    "pairs": 64,
+    "runs": 128,
+    "repetitions_per_variant": 16,
+    "randomization_seed": 2026100302,
+    "attempt_start": 4001,
+    "balanced_order_per_variant": true,
+    "analysis_session_group_pairs": 4,
+    "selection_rule": "Frozen before all new research model outcomes. Two materially independent source families selected for executed source/data continuity, not model-success screening. Four variants nested in those families receive 16 paired repetitions each, 64 pairs total. The overall normal half-width is approximately 0.173 at discordance 0.5 under independent paired observations; per-variant half-width is approximately 0.346. Two fixed families do not establish representativeness or estimate a random across-application population reliably."
+  },
+  "development_and_heldout": {
+    "model_outcome_screening": false,
+    "new_cohort_used_for_task_selection": false,
+    "development_family": "music-store-continuity",
+    "heldout_research_family": "contoso-enrollment",
+    "heldout_definition": "Reserved before comparative model outcomes. Source, independently derived oracle and compatibility references are inspected and finite-calibrated for basic apparatus acceptance. This is outcome-held-out research-family membership, not sealed source/oracle secrecy or a claim of contamination elimination. No task/profile adaptation after research outcomes.",
+    "same_family_semantic_variants_are_not_independent_holdout_applications": true,
+    "independent_task_confirmation": "fixed-family exploratory comparison; no universal population confirmation"
+  },
+  "settings": {
+    "provider": "opencode-go",
+    "model_id": "deepseek-v4.1-flash",
+    "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+    "opencode_version": "1.17.11",
+    "dotnet_sdk": "8.0.425",
+    "target_framework": "net8.0",
+    "run_budget_seconds": 1800,
+    "provider_timeout_seconds": 600,
+    "model_context_tokens": 1000000,
+    "model_output_tokens": 32768,
+    "compaction": {
+      "auto": true,
+      "prune": false
+    },
+    "subagents": false,
+    "auxiliary_model_same_as_main": true,
+    "runtime_profile": "deepseek-research-v2",
+    "evaluator_version_by_task": {
+      "MS1-CONT-A": "1.3.0",
+      "MS1-CONT-B": "1.3.0",
+      "CU1-ENR-C": "education-1.0.0",
+      "CU1-ENR-D": "education-1.0.0"
+    }
+  },
+  "measurement": {
+    "usage_boundary": "All gateway-observed main/auxiliary model calls within an assigned Run. Input plus output once; cached input remains within input and reasoning within output.",
+    "time_boundary": "Implementation starts with ordinary controller execution and ends with confirmed owned worker/gateway stop. Barrier waiting/postprocessing/publication are separately recorded and never reset or added to the 1800-second budget.",
+    "provider_truth": "Provider-reported token counts, not independently known internal accounting or monetary cost."
+  },
+  "missingness": {
+    "assigned_denominator": "All 128 slots, including undispatched, uncertain, infrastructure failure, product failure, timeout, evaluator fault and incomplete coverage. Report state counts per arm/variant and actual dispatch count.",
+    "quality": "A confirmed critical/product failure is a failure even when other coverage is incomplete. Full pass requires complete frozen HTTP/browser/data checks. Otherwise unknown, not zero/failure/pass. Report per-arm pass bounds and paired-contrast identification bounds by propagating unknown binary values.",
+    "usage": "Complete totals are null unless complete inventory and provider input/output accounting are established. Preserve deduplicated observed partial amounts separately. Call/Run totals are not established by saved response or DONE alone.",
+    "partial_lower_bound": "Label a lower bound only if receipt verifies nonnegative cumulative token semantics, unique-call identity, monotonic reported usage and complete reconciliation for every included call. Otherwise call it an observed partial amount only.",
+    "all_assigned_token_identification": "Without complete totals or an externally justified upper bound, the all-assigned mean token contrast is not identified. Wall-clock/output context settings do not impose a valid whole-Run token upper bound. Report this explicitly.",
+    "sensitivity": "As labeled assumptions only, impute each missing arm/variant total as 0.5, 1 or 2 times that arm/variant observed complete-Run mean. Show the full crossed-arm scenario range. If no complete mean exists, do not compute that scenario. Complete-pair and success-only estimates remain secondary; no replacement Runs."
+  },
+  "analysis": {
+    "weighting": "Equal variant weight, then equal assigned pair weight within variant.",
+    "uncertainty": "Report per-variant and per-fixed-family paired estimates, overall family/variant weighted estimate and 95% paired uncertainty. Fully observed binary outcomes use a conservative Hoeffding interval under stated independence plus normal session ICC sensitivity 0,0.1,0.3. Four consecutive assigned pairs define sessions; retain actual dates/timestamps. The two selected fixed source families do not identify a general application population or a reliable random-family variance.",
+    "multiplicity": "Descriptive co-primary estimates; no joint success flag or significance-based selection. Any interval excluding zero supports only the named outcome under its assumptions.",
+    "provider_change": "Record model/HTTP/model-metadata changes. Unexpected model stops dispatch; changed provider behavior creates an amendment/new cohort rather than unlabelled pooling."
+  },
+  "stop_rules": {
+    "maximum_pairs": 64,
+    "maximum_dispatches": 128,
+    "completion": "Stop after all assigned slots reach documented terminal/uncertain states and completed-pair gates; no outcome-driven N change.",
+    "infrastructure": "Pause new dispatch on provider/auth/storage/identity/serialization/ownership/stop-confirmation fault. Preserve all evidence and reconcile affected instances. Do not resend an uncertain or previously dispatched slot.",
+    "product_failure": "Retain as a valid observation; it does not justify replacement or extra Runs.",
+    "quota": "Use existing account/no-paid-overage policy; pause on unavailability, no model/account fallback and no guarantee of completion within a billing period.",
+    "resume": "Only unsent slots after explicit recovery, unchanged plan/assets and exact-plan user start authorization. A partial pair is not an excuse to replay its sent slot."
+  },
+  "historical_data": {
+    "old_100_pairs": "Preserve original protocol, raw records, verdicts, assignments and ZIP; exploratory/diagnostic role only.",
+    "old_320_remaining_slots": "Never started by this protocol.",
+    "technical_cohorts": "Distinct IDs and storage; excluded from all research estimates."
+  },
+  "start_conditions": [
+    "#21 exact-chain technical calibration accepted",
+    "#22 selected reference/oracle/data contract accepted for this narrow scope",
+    "#22 materially independent task set and pre-outcome development/held-out memberships accepted",
+    "#21 and #22 basic human review passed on exact bound assets",
+    "#23 actual-worker evidence/usage/stop contract accepted",
+    "Serial regime explicitly adopted",
+    "Immutable final code/runtime/input/evaluator/browser/environment and assignments bound in new bundle",
+    "No-model preflight passes without credential read or model dispatch",
+    "Separate user start instruction bound to exact frozen plan"
+  ],
+  "supersedes": "research/protocols/continuity-initial-information-20261003-v1.json",
+  "source_families": [
+    "music-store-continuity",
+    "contoso-enrollment"
+  ],
+  "task_hierarchy": {
+    "MS1-CONT-A": {
+      "family": "music-store-continuity",
+      "variant": "A",
+      "membership": "development_and_calibration"
+    },
+    "MS1-CONT-B": {
+      "family": "music-store-continuity",
+      "variant": "B",
+      "membership": "development_and_calibration"
+    },
+    "CU1-ENR-C": {
+      "family": "contoso-enrollment",
+      "variant": "C",
+      "membership": "heldout_research_family_with_declared_reference_calibration"
+    },
+    "CU1-ENR-D": {
+      "family": "contoso-enrollment",
+      "variant": "D",
+      "membership": "heldout_research_family_with_declared_reference_calibration"
+    }
+  },
+  "selection_amendment_basis": "A second independent education family was added to implement the current Issue #22 scope after the parent explicitly required completing the task set. Selection uses source provenance, meaningful source/data continuity and reference feasibility. No new research outcomes exist, and technical outcomes are not used to select tasks or increase the fixed 64-pair/128-slot cap."
+}

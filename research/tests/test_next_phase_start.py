@@ -7,10 +7,21 @@ from unittest.mock import patch
 
 from outer.harness import util
 from research import next_phase
-from research.next_phase_execution import execute
+from research.next_phase_execution import execute, provider_metadata
 
 
 class ProspectiveStartTests(unittest.TestCase):
+    def test_provider_metadata_is_recorded_and_unexpected_alias_pauses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw = root / 'usage/raw'
+            raw.mkdir(parents=True)
+            self.assertEqual(provider_metadata(root, 'expected')['reported_metadata_state'], 'not_reported')
+            (raw / 'call.response.sse').write_text('data: {"model":"expected"}\n\ndata: [DONE]\n')
+            self.assertFalse(provider_metadata(root, 'expected')['unexpected_reported_model'])
+            (raw / 'call.response.sse').write_text('data: {"model":"changed"}\n\ndata: [DONE]\n')
+            self.assertTrue(provider_metadata(root, 'expected')['unexpected_reported_model'])
+
     def plan(self):
         return util.read_json(next_phase.REPO / next_phase.PLAN)
 
@@ -21,8 +32,8 @@ class ProspectiveStartTests(unittest.TestCase):
         self.assertEqual(len({c['run_id'] for p in assigned for c in p['cases']}), 128)
         for task in plan['task_ids']:
             selected = [p for p in assigned if p['task'] == task]
-            self.assertEqual(len(selected), 32)
-            self.assertEqual(sum(p['cases'][0]['condition'] == 'preload' for p in selected), 16)
+            self.assertEqual(len(selected), 16)
+            self.assertEqual(sum(p['cases'][0]['condition'] == 'preload' for p in selected), 8)
         self.assertEqual(assigned, next_phase.assignments(plan))
 
     def test_old_protocol_or_paired_regime_cannot_enter_new_controller(self):

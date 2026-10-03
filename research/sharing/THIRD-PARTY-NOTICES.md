@@ -8,6 +8,7 @@ cleared for distribution.
 |---|---|---|
 | MVC Music Store legacy source, reproduced excerpts/catalog material and derivative generated application source | `chack411/MVC-Music-Store` commit `2967afb9d69488641df0d154e2ad5827a7820e71`; the original `readme.txt` identifies Microsoft Public License (Ms-PL) | Original attribution/readme retained; full `LICENSES/MS-PL.txt` included. Ms-PL applies to reproduced source and derivative portions. |
 | OpenCode system prompt and tool descriptions recorded in provider requests | OpenCode 1.17.11, copyright (c) 2025 opencode, MIT | Full upstream `LICENSES/OpenCode-MIT.txt` included for reproduced portions. |
+| ContosoUniversity legacy source, selected Student/Course/Enrollment excerpts and derivative application source | `jbogard/ContosoUniversity` commit `5c4e4ec11395172f82606f95ec520f0a93508541`, Apache License 2.0 | The task's exact upstream `LICENSE` and `README.md` are retained under `UPSTREAM/` for education pairs. Source modifications and synthetic operational data are identified in the frozen task profile and source pin. |
 | Tutorial PDF | Upstream readme identifies Creative Commons Attribution 3.0 | PDF excluded. No tutorial-document reproduction is claimed. |
 | Legacy script/image/database packages, .NET/NuGet native and managed binaries, evaluator bundle, browser/worker images | Separate component terms have not been fully inventoried for this rehearsal | Omitted. Pin references remain; this prevents a self-contained environment replay. |
 | Playwright trace containers, screenshots, HTTP logs and evaluator output | Output of the frozen local research workflow; trace resources inspected as generated local HTML/CSS, synthetic responses and viewport images | Retained, with local-home-path replacements in trace text. No Playwright/browser executables are included. |
@@ -22,6 +23,8 @@ The gateway DBs contain usage/trace metadata, not a complete conversation or
 unobserved internal reasoning. Provider request/response and native event files
 are supplied separately. Synthetic Music Store names, catalog entries, test
 email addresses and localhost cart/session identifiers are part of the workload.
+Education student, enrollment and department fixtures are synthetic operational
+assets; their variant-specific grade labels derive from the pinned source enum.
 Saved browser logs also include failed `local.adguard.org` extension requests;
 these are retained observations, not a reason to alter the recorded verdicts.
 

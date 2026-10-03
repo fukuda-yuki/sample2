@@ -133,9 +133,10 @@ app.MapPost("/Checkout/AddressAndPayment", async (HttpContext context) =>
         return Html(context, Pages.CheckoutForm(fields, "We're sorry, but the promo code you entered is not valid."), "Address And Payment");
     }
 
-    if (new[] { "FirstName", "LastName", "Address", "City", "State", "PostalCode", "Country", "Phone", "Email" }.Any(name => !fields.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value)))
+    var missingField = new[] { "FirstName", "LastName", "Address", "City", "State", "PostalCode", "Country", "Phone", "Email" }.FirstOrDefault(name => !fields.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value));
+    if (missingField is not null)
     {
-        return Html(context, Pages.CheckoutForm(fields, "The FirstName field is required."), "Address And Payment");
+        return Html(context, Pages.CheckoutForm(fields, $"The {missingField} field is required."), "Address And Payment");
     }
 
     var orderId = store.CreateOrder(CartId(context), fields);

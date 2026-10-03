@@ -12,7 +12,7 @@ import time
 import uuid
 import urllib.request
 
-from . import runtime, util, browser_cleanup, ownership
+from . import runtime, util, browser_cleanup, ownership, browser_prerequisite
 from .security import child_environment
 
 OBSERVED = 'agent_observed_C-015_C-016'
@@ -187,6 +187,13 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
                 or condition['evaluation']['spec_sha256'] != spec_hash):
             raise ValueError('Browser target/baseline identity mismatch')
         baseline_bound = True
+        if version == '1.3.0' and browser_prerequisite.save_if_unpublished(
+                condition, frozen, baseline, published, assets, out, instance,
+                version=version, requirement_id='R-001', build_check='C-001',
+                coverage_field='browserCartCoverage'):
+            code = 0
+            intent['coverage'] = 'not_run_product_prerequisite'
+            return code
         migration = util.read_json(assets/'requirements.json').get('migrationContract')
         if migration:
             import shutil

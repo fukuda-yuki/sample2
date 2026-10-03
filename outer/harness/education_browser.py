@@ -9,7 +9,7 @@ import urllib.request
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from . import browser_cleanup, ownership, runtime, util
+from . import browser_cleanup, ownership, runtime, util, browser_prerequisite
 from .security import child_environment
 
 VERSION = 'education-1.0.0'
@@ -152,6 +152,13 @@ def complete_evaluation(repo, condition, frozen, baseline, published, assets, ou
                     or original.get('evaluationVersion') != VERSION or condition['evaluation']['spec_sha256'] != spec_hash):
                 raise ValueError('School browser target/baseline mismatch')
             bound = True
+            if browser_prerequisite.save_if_unpublished(
+                    condition, frozen, baseline, published, assets, out, instance,
+                    version=VERSION, requirement_id='EDU-R-001', build_check='E-001',
+                    coverage_field='browserReviewCoverage'):
+                code = 0
+                intent['coverage'] = 'not_run_product_prerequisite'
+                return code
             review = out/'browser-school'; review.mkdir()
             state = out/'browser-state'; state.mkdir()
             shutil.copyfile(assets/'initial-store.sqlite', state/'school.sqlite')

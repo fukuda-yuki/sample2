@@ -34,7 +34,7 @@ model='deepseek-v4.1-flash'
 class Upstream(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def do_POST(self):
-        self.rfile.read(int(self.headers['Content-Length']))
+        request=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         self.server.calls+=1
         if mode=='after-send-before-ack':
             time.sleep(2); self.connection.close(); return
@@ -42,8 +42,16 @@ class Upstream(BaseHTTPRequestHandler):
         if mode=='done-only': self.wfile.write(b'data: [DONE]\n\n'); return
         item={'id':'mock-'+uuid.uuid4().hex,'model':model,'object':'chat.completion.chunk','created':1,
               'choices':[{'index':0,'delta':{'role':'assistant','content':'synthetic complete'},'finish_reason':None}]}
+        if mode=='controller-loss75':
+            assert any(t.get('function',{}).get('name')=='bash' for t in request.get('tools',[]))
+            command=('touch /workspace/responses-ready; sleep 20' if self.server.calls==75
+                     else 'printf synthetic-recording-fixture-'+str(self.server.calls))
+            item['choices'][0]['delta']={'role':'assistant','tool_calls':[{'index':0,
+                'id':'fixture-tool-'+str(self.server.calls),'type':'function',
+                'function':{'name':'bash','arguments':json.dumps({'command':command,
+                    'description':'Deterministic harmless recording fixture','timeout':30000})}}]}
         self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode()); self.wfile.flush()
-        item['choices']=[{'index':0,'delta':{},'finish_reason':'stop'}]
+        item['choices']=[{'index':0,'delta':{},'finish_reason':'tool_calls' if mode=='controller-loss75' else 'stop'}]
         if mode!='partial-no-usage' and not (mode=='controller-loss75' and self.server.calls==75):
             item['usage']={'prompt_tokens':20,'completion_tokens':5,'total_tokens':25}
         self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode()); self.wfile.flush()
@@ -80,7 +88,7 @@ if mode=='controller-loss75':
 '''
 
 
-def child(root,case,repo,paired=False):
+def child(root,case,repo,paired=False,synthetic_worker=False):
     root,repo=Path(root),Path(repo)
     old_docker=runtime.docker
     resolver=profiles.resolve
@@ -99,7 +107,7 @@ def child(root,case,repo,paired=False):
                 rid=args[args.index('--run-id')+1]
                 args=args[:at]+['--entrypoint','python3',*runtime.mount(root/'fixtures','/fixtures',True),
                     lock['images']['gateway'],'/fixtures/gateway.py',case,rid,instance]
-            elif name.startswith('s2-worker-') and not case.startswith('actual-'):
+            elif name.startswith('s2-worker-') and synthetic_worker and not case.startswith('actual-'):
                 at=args.index(lock['images']['worker'])
                 args=args[:at]+[*runtime.mount(root/'fixtures','/fixtures',True),lock['images']['worker'],
                     'python3','/fixtures/worker.py',case]
@@ -132,14 +140,16 @@ def main():
     p.add_argument('--child',type=Path)
     p.add_argument('--case',choices=CASES)
     p.add_argument('--pair',action='store_true')
+    p.add_argument('--synthetic-worker',action='store_true',help='Diagnostic fallback only; not ordinary-worker acceptance')
     p.add_argument('--cases',nargs='+',choices=CASES,default=CASES)
     a=p.parse_args()
-    if a.child: child(a.child,a.case,a.repo,a.pair); return 0
+    if a.child: child(a.child,a.case,a.repo,a.pair,a.synthetic_worker); return 0
     repo=a.repo.resolve()
     batch=a.out or repo/'runs'/('_recording-repair-mock-'+uuid.uuid4().hex[:12])
     batch.mkdir(parents=True,exist_ok=False)
     util.write_new_json(batch/'plan.json',{'cohort':'technical-recording-mock','real_model_calls':0,
-        'cases':a.cases,'paired_actual_worker_check':a.pair,'controller_files':runtime.controller_files(repo),
+        'cases':a.cases,'paired_actual_worker_check':a.pair,'ordinary_worker':not a.synthetic_worker,
+        'controller_files':runtime.controller_files(repo),
         'limits':{'runs':len(a.cases)+(2 if a.pair else 0),'run_seconds':120,'fixed_no_retries':True},
         'expected':{'actual-*':'complete usage, exact serialized prompt, identical runtime and access',
             'partial-usage':'observed 25, total null','partial-no-usage':'observed null, total null',
@@ -154,7 +164,8 @@ def main():
         rid='MS1-CONT-A-'+('preload' if case=='actual-preload' else 'explore')+'-001'
         run_root=root/rid
         with (root/'controller.log').open('xb') as output:
-            process=subprocess.Popen([sys.executable,__file__,'--repo',str(repo),'--child',str(root),'--case',case],
+            process=subprocess.Popen([sys.executable,__file__,'--repo',str(repo),'--child',str(root),'--case',case,
+                *(['--synthetic-worker'] if a.synthetic_worker else [])],
                 cwd=repo,env=child_environment(),stdout=output,stderr=subprocess.STDOUT)
             try:
                 if case=='controller-loss75':
@@ -190,6 +201,7 @@ def main():
         starts=util.read_lines(run_root/'usage/raw/started.jsonl')
         first=util.read_json(run_root/'usage/raw'/starts[0]['request_file']) if starts else {}
         result={'case':case,'passed':bool(passed and safe),'real_model_calls':0,
+            'ordinary_opencode_worker':not a.synthetic_worker,
             'run_id':rid,'run_instance_id':manifest['run_instance_id'],'root':str(run_root),
             'model_called':manifest['model_called'],'execution_evidence':evidence,
             'usage_complete':normalized['usage_complete'],'observed_tokens':normalized['observed_tokens'],

@@ -16,15 +16,17 @@ class CatalogEnvironmentTests(unittest.TestCase):
         def ordinary(repo, batch, rid, archive):
             self.assertEqual(os.environ['NODE_PATH'], 'pinned-modules')
             self.assertEqual(os.environ['SAMPLE2_BROWSER_EXECUTABLE'], 'pinned-browser')
+            self.assertEqual(os.environ['SAMPLE2_NODE'], 'pinned-node')
             actual = child_environment({k: os.environ[k] for k in env})
             self.assertNotIn('fixture-secret', actual.values())
             raise RuntimeError('scorer fault must restore host paths')
-        with patch.dict(os.environ, {'NODE_PATH': 'before', 'SAMPLE2_BROWSER_EXECUTABLE': 'before-browser',
+        with patch.dict(os.environ, {'NODE_PATH': 'before', 'SAMPLE2_BROWSER_EXECUTABLE': 'before-browser', 'SAMPLE2_NODE': 'before-node',
                 'OPENCODE_GO_API_KEY': 'fixture-secret'}), patch('research.catalog_environment.validate', return_value=env), patch('outer.harness.machine.postprocess', side_effect=ordinary):
-            callback = browser_postprocess({'browser': {'record': {'fixture': True}}})
+            callback = browser_postprocess({'browser': {'record': {'fixture': True, 'node_path': 'pinned-node'}}})
             with self.assertRaises(RuntimeError): callback('.', '.', 'fixture', '.')
             self.assertEqual(os.environ['NODE_PATH'], 'before')
             self.assertEqual(os.environ['SAMPLE2_BROWSER_EXECUTABLE'], 'before-browser')
+            self.assertEqual(os.environ['SAMPLE2_NODE'], 'before-node')
 
     def test_pinned_dependency_change_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

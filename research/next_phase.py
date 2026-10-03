@@ -19,7 +19,7 @@ from outer.harness.security import child_environment
 from research import next_phase_design
 
 REPO = Path(__file__).resolve().parents[1]
-PLAN = 'research/protocols/source-information-two-families-20261003-v2.json'
+PLAN = 'research/protocols/source-information-two-families-20261003-v3.json'
 PREREQUISITES = ('evaluation_chain', 'selected_task_scope', 'independent_task_set',
                  'execution_evidence', 'serialized_intervention')
 
@@ -46,7 +46,7 @@ def validate_plan(plan):
     old = plan.get('plan_id') == 'continuity-initial-information-20261003-v1'
     tasks = ['MS1-CONT-A', 'MS1-CONT-B'] if old else ['MS1-CONT-A', 'MS1-CONT-B', 'CU1-ENR-C', 'CU1-ENR-D']
     if (plan.get('plan_id') not in ('continuity-initial-information-20261003-v1',
-            'source-information-two-families-20261003-v2')
+            'source-information-two-families-20261003-v2', 'source-information-two-families-20261003-v3')
             or plan.get('task_ids') != tasks
             or plan.get('arms') != ['explore', 'preload']
             or plan.get('variant_weights') != ([0.5, 0.5] if old else [0.25] * 4)
@@ -54,6 +54,8 @@ def validate_plan(plan):
             or plan['allocation'].get('runs') != 128
             or plan['allocation'].get('repetitions_per_variant') != (32 if old else 16)
             or plan.get('regime', {}).get('pair_concurrency') != 1
+            or (plan.get('plan_id') == 'source-information-two-families-20261003-v3'
+                and plan.get('settings', {}).get('collection_policy') != 'workspace-static-db-v2')
             or plan.get('quality_loss_margin') is not None
             or plan.get('research_start_authorized') is not False):
         raise ValueError('Unsupported or changed scientific protocol; create a reviewed amendment')
@@ -110,7 +112,7 @@ def acceptance_scopes(pins):
         name.startswith(('inner/evaluator/', 'inner/browser/'))
         or (name.startswith('inner/spec/') and ('1.3.0' in name or 'education' in name))
         or name in ('outer/harness/evaluate.py', 'outer/harness/browser_cart.py',
-            'outer/harness/browser_prerequisite.py',
+            'outer/harness/browser_prerequisite.py', 'outer/harness/util.py', 'outer/harness/run.py',
             'outer/harness/browser_cleanup.py', 'outer/harness/aggregate.py',
             'outer/harness/browser_review.py', 'outer/harness/education_browser.py')}
     execution = {name: digest for name, digest in pins.items() if
@@ -219,6 +221,9 @@ def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
                     failures.append('evaluation_version_mismatch:' + task)
                 if condition['environment']['sdk'] != settings['dotnet_sdk']:
                     failures.append('sdk_version_mismatch:' + task)
+                if (plan.get('settings', {}).get('collection_policy') == 'workspace-static-db-v2'
+                        and condition.get('collection_policy') != 'workspace-static-db-v2'):
+                    failures.append('collection_policy_mismatch:' + task)
         except (OSError, ValueError, KeyError) as exc:
             failures.append('runtime_not_prepared:' + task + ':' + type(exc).__name__)
     browser = None
@@ -230,7 +235,7 @@ def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
         'source_commit': git(repo, 'rev-parse', 'HEAD'), 'source_clean': not bool(git(repo, 'status', '--porcelain')),
         'repo': str(repo), 'plan': plan, 'plan_reference': reference(repo / PLAN),
         'assignments': assignments(plan), 'runtime_id': runtime_id,
-        'cohort': 'runs/source-info-v2', 'pinned_files': pins,
+        'cohort': 'runs/source-info-v3', 'pinned_files': pins,
         'runtime_locks': chain, 'acceptance_ledger': ledger, 'acceptance_scopes': acceptance_scopes(pins),
         'acceptance_ledger_reference': reference(ledger_path), 'browser': browser,
         'python': {'path': str(Path(sys.executable).resolve()), 'sha256': util.sha256_file(sys.executable),
@@ -251,6 +256,8 @@ def check(repo, bundle_path, *, environment=True):
     reasons = list(bundle.get('preparation_failures', []))
     if bundle['plan']['plan_id'] == 'continuity-initial-information-20261003-v1':
         reasons.append('historical_one_family_candidate_not_authorized_for_acquisition')
+    if bundle['plan']['plan_id'] == 'source-information-two-families-20261003-v2':
+        reasons.append('historical_collection_candidate_not_authorized_for_acquisition')
     if bundle['runtime_id'] != bundle['plan']['settings'].get('runtime_profile', bundle['runtime_id']):
         reasons.append('research_runtime_profile_mismatch')
     if bundle.get('kind') != 'continuity_prospective_bundle': raise ValueError('Not a new study bundle')

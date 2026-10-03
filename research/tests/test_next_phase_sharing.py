@@ -58,6 +58,10 @@ class SharingRecoveryTests(unittest.TestCase):
                 util.write_new_json(batch / binding['run_id'] / 'usage/normalized.json',
                     {'run_id': binding['run_id'], 'run_instance_id': binding['run_instance_id'],
                      'usage_complete': False, 'total_tokens': None, 'fixture': True})
+                static = batch / binding['run_id'] / 'frozen/App_Data'
+                static.mkdir(parents=True)
+                for name in ('submitted.sqlite3', 'submitted.db'):
+                    (static / name).write_bytes(b'independent static database fixture')
                 return manifest
             def implement(repo, batch, rid):
                 manifest = util.read_json(batch / rid / 'manifest.json')
@@ -72,6 +76,16 @@ class SharingRecoveryTests(unittest.TestCase):
                 prepare=prepare, implement=implement, postprocess=postprocess)
             work = root / 'artifacts/continuity-sharing-v1/technical-fixture'
             sharing.stage(root, bundle_path, 1, work)
+            staged = util.read_json(work / 'public/MANIFEST.json')
+            omitted = [entry for entry in staged['excluded'] if
+                entry['path'].endswith(('submitted.sqlite3', 'submitted.db'))]
+            self.assertEqual(len(omitted), 4)
+            for entry in omitted:
+                source = root / entry['path']
+                self.assertTrue(source.is_file())
+                self.assertEqual(entry['sha256'], util.sha256_file(source))
+                self.assertFalse((work / 'public' / entry['path']).exists())
+                self.assertIn('does not provide runnable application', entry['reason'])
             original = {c['run_id']: sharing.catalog_share.inventory(batch / c['run_id']) for c in pair['cases']}
             review = work / 'exact-review.json'
             util.write_new_json(review, {'publication_approved': True,

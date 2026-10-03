@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "register_id": "migration-candidates-20261003-v1",
+  "selection_frozen_before_model_results": true,
+  "model_runs_used_for_selection": 0,
+  "selected_family_ids": ["music-store-continuity"],
+  "independent_selected_family_count": 1,
+  "six_task_allocation_adopted": false,
+  "candidates": [
+    {
+      "family_id": "music-store-continuity",
+      "status": "selected_for_apparatus_and_conditional_exploration_only",
+      "independence": "One source family; A/B are nested semantic variants, not independent applications.",
+      "source": {"repository": "chack411/MVC-Music-Store", "branch": "net48", "commit": "2967afb9d69488641df0d154e2ad5827a7820e71", "availability": "public", "license": "Upstream readme declares code Ms-PL; no upstream LICENSE file."},
+      "overlay": "Researcher-authored operational pricing policy and synthetic existing-business SQLite installation. These are not evidence of a deployed customer system.",
+      "known_solutions": "The upstream tutorial and sample2's reference/alternative are public. This repair adds a compatibility reference. Contamination has not been eliminated.",
+      "target": ".NET 8 SQLite storefront with source-defined unit pricing, existing identifiers/rows and temporal order continuity",
+      "existing_assets": ["246 albums with nonuniform prices", "genres/artists and their relationships", "customer 301", "historical order 7001", "details 9101/9102 with historical prices", "retained cart 5001"],
+      "preserved": ["catalog and customer identifiers/relationships", "historical headers/details/unit prices", "quantity aggregation", "session isolation", "restart continuity"],
+      "corrected_legacy_defects": ["Missing cart-line removal must not crash or alter another cart", "Malformed/missing address fields must not create an order", "Ordinary removal UI must update all current values"],
+      "excluded": ["login/account migration", "administration", "external integration", "concurrency/performance", "maintenance-effort inference"],
+      "dependencies": [".NET SDK 8+", "Microsoft.Data.Sqlite 8.0.31", "ordinary evaluator/browser runtime for integrated calibration"],
+      "feasibility": {"reference_workflows": 2, "model_time_limit_seconds_proposal": 1200, "model_repetitions": "coordinator chooses prospectively; not selected from model success", "reference_minutes": "measure finite execution receipt rather than assume"},
+      "human_confirmation": "not_run"
+    },
+    {"family_id": "independent-data-entry-workflow", "status": "unselected_design_candidate", "source": null, "independence": "Would require a materially different real source application, provenance and executable existing-data workflow.", "reference_execution": "not_run", "held_out": false, "reason": "No authenticated source/reference has been prepared; it contributes zero tasks to the present allocation."},
+    {"family_id": "independent-scheduling-workflow", "status": "unselected_design_candidate", "source": null, "independence": "Would require a materially different real scheduling application with independent business rules.", "reference_execution": "not_run", "held_out": false, "reason": "Not obtained or executed; it contributes zero tasks to the present allocation."}
+  ],
+  "remaining_acceptance": ["Basic human confirmation of expected arithmetic and ordinary workflow", "Materially independent executed source applications", "Held-out independent task reservation before a confirmatory study"]
+}

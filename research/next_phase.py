@@ -1,11 +1,13 @@
 """Prepare/check a new continuity cohort without sending a model request.
 
-Execution is a separate explicit mode, bound to immutable assets, basic human
-review, and an exact-bundle user start instruction. Old catalog plans are never
-accepted. Preparation can retain a blocked bundle for an inspectable handoff.
+Execution is a separate explicit mode, bound to immutable assets, the review
+policy fixed in the prospective protocol, and an exact-bundle user start
+instruction. Old catalog plans are never accepted. Preparation can retain a
+blocked bundle for an inspectable handoff.
 """
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import platform
@@ -19,7 +21,17 @@ from outer.harness.security import child_environment
 from research import next_phase_design
 
 REPO = Path(__file__).resolve().parents[1]
-PLAN = 'research/protocols/source-information-two-families-20261003-v3.json'
+V3_PLAN = 'research/protocols/source-information-two-families-20261003-v3.json'
+PLAN = 'research/protocols/source-information-two-families-20261003-v4.json'
+V4_ID = 'source-information-two-families-20261003-v4'
+LEAD_REVIEW_POLICY = 'delegated-research-lead-v1'
+AI_ACTORS = ('ai', 'codex')
+USER_DELEGATION_INSTRUCTION = 'あなたが研究責任者として、責任をもって研究を開始できる状態にしなさい。'
+V3_SHA256 = 'bdd9212b78fcadab9f1e876400fb27c5219be335ed396479e1ef825979b8f15c'
+SCIENTIFIC_SHA256 = '41d9c5d5c8f2ac21c20785d0b42ca29e8afff53c15968aafa1813ccbd9a4849e'
+ADMINISTRATIVE_FIELDS = ('plan_id', 'protocol_acceptance', 'start_conditions', 'supersedes',
+                         'protocol_revision', 'acceptance_review_policy', 'acceptance_amendment')
+REVIEW_ROLES = ('user_delegation', 'research_lead_decision', 'independent_methodological_review')
 PREREQUISITES = ('evaluation_chain', 'selected_task_scope', 'independent_task_set',
                  'execution_evidence', 'serialized_intervention')
 
@@ -46,7 +58,7 @@ def validate_plan(plan):
     old = plan.get('plan_id') == 'continuity-initial-information-20261003-v1'
     tasks = ['MS1-CONT-A', 'MS1-CONT-B'] if old else ['MS1-CONT-A', 'MS1-CONT-B', 'CU1-ENR-C', 'CU1-ENR-D']
     if (plan.get('plan_id') not in ('continuity-initial-information-20261003-v1',
-            'source-information-two-families-20261003-v2', 'source-information-two-families-20261003-v3')
+            'source-information-two-families-20261003-v2', 'source-information-two-families-20261003-v3', V4_ID)
             or plan.get('task_ids') != tasks
             or plan.get('arms') != ['explore', 'preload']
             or plan.get('variant_weights') != ([0.5, 0.5] if old else [0.25] * 4)
@@ -54,11 +66,26 @@ def validate_plan(plan):
             or plan['allocation'].get('runs') != 128
             or plan['allocation'].get('repetitions_per_variant') != (32 if old else 16)
             or plan.get('regime', {}).get('pair_concurrency') != 1
-            or (plan.get('plan_id') == 'source-information-two-families-20261003-v3'
+            or (plan.get('plan_id') in ('source-information-two-families-20261003-v3', V4_ID)
                 and plan.get('settings', {}).get('collection_policy') != 'workspace-static-db-v2')
             or plan.get('quality_loss_margin') is not None
             or plan.get('research_start_authorized') is not False):
         raise ValueError('Unsupported or changed scientific protocol; create a reviewed amendment')
+    if plan.get('plan_id') == V4_ID:
+        scientific = {key: value for key, value in plan.items() if key not in ADMINISTRATIVE_FIELDS}
+        digest = hashlib.sha256(json.dumps(scientific, sort_keys=True, separators=(',', ':'),
+            ensure_ascii=False).encode('utf-8')).hexdigest()
+        if (plan.get('acceptance_review_policy') != LEAD_REVIEW_POLICY
+                or plan.get('supersedes') != V3_PLAN
+                or plan.get('acceptance_amendment') != {
+                    'superseded_plan_sha256': V3_SHA256,
+                    'unchanged_scientific_parameters_sha256': SCIENTIFIC_SHA256,
+                    'research_dispatches_before_amendment': 0,
+                    'legacy_human_acceptance_relabelled': False}
+                or digest != SCIENTIFIC_SHA256):
+            raise ValueError('Unsupported review policy or changed v4 scientific parameters')
+    elif plan.get('acceptance_review_policy') not in (None, 'literal-human-v1'):
+        raise ValueError('Historical protocols retain the literal human review policy')
     return plan
 
 
@@ -100,7 +127,7 @@ def verify_reference(record):
     return util.sha256_file(record['path']) == record['sha256']
 
 
-def acceptance_scopes(pins):
+def acceptance_scopes(pins, plan=None):
     """Required byte scopes; a receipt cannot choose away a changed dependency."""
     task_files = {name: digest for name, digest in pins.items() if
         name.startswith(('inner/tasks/', 'outer/profiles/tasks/MS1-CONT', 'outer/profiles/tasks/CU1-ENR', 'research/tasks/'))
@@ -129,15 +156,124 @@ def acceptance_scopes(pins):
         or name in ('outer/harness/profiles.py', 'outer/harness/migration_input.py',
             'outer/profiles/runtimes/deepseek-migration-v1.json',
             'outer/profiles/runtimes/deepseek-research-v2.json', 'outer/harness/gateway.py')}
-    return {'evaluation_chain': {**evaluation, **task_assets,
+    scopes = {'evaluation_chain': {**evaluation, **task_assets,
             **{n:h for n,h in task_files.items() if n.startswith(('outer/profiles/tasks/', 'research/tasks/'))}},
         'selected_task_scope': {**task_files, **task_assets},
         'independent_task_set': {**task_files, **task_assets},
         'execution_evidence': execution, 'serialized_intervention': {**serializer, **task_files, **task_assets},
         'human_review': {**task_files, **task_assets, **{n: h for n, h in evaluation.items() if n.startswith('inner/spec/')}}}
+    if plan is not None and validate_plan(plan)['plan_id'] == V4_ID:
+        scopes['research_lead_review'] = {**scopes['human_review'],
+            **{name: digest for name, digest in pins.items() if name == PLAN}}
+    return scopes
 
 
-def ledger_reasons(ledger, chain=None, scopes=None):
+def utc_timestamp(value):
+    try:
+        date = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return date.utcoffset() is not None and date.utcoffset().total_seconds() == 0
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def named_reviewer(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def bound_review_json(record, label, reasons):
+    try:
+        if not verify_reference(record):
+            reasons.append(label + ':evidence_changed')
+            return None
+        data = util.read_json(record['path'])
+        if not isinstance(data, dict): raise ValueError('Review evidence must be an object')
+        return data
+    except (OSError, KeyError, TypeError, ValueError):
+        reasons.append(label + ':evidence_unavailable_or_invalid')
+        return None
+
+
+def lead_review_reasons(ledger, plan, scopes):
+    """A prospective delegated policy cannot relabel AI activity as human review."""
+    reasons = []
+    lead = ledger.get('research_lead_review', {})
+    if ledger.get('human_review', {}).get('status') != 'not_run':
+        reasons.append('human_review:must_remain_not_run_for_delegated_ai_review')
+    if (lead.get('status') != 'passed' or lead.get('actor') not in AI_ACTORS
+            or not named_reviewer(lead.get('reviewer')) or not utc_timestamp(lead.get('reviewed_at_utc'))):
+        reasons.append('research_lead_review:unbound_or_invalid_actor')
+    expected = (scopes or {}).get('research_lead_review', {})
+    plan_sha256 = expected.get(PLAN)
+    if not expected or not plan_sha256 or lead.get('asset_hashes') != expected:
+        reasons.append('research_lead_review:reviewed_asset_scope_mismatch')
+    evidence = lead.get('evidence', [])
+    if not isinstance(evidence, list): evidence = []
+    if not evidence: reasons.append('research_lead_review:evidence_missing')
+    for record in evidence:
+        try:
+            if not verify_reference(record): reasons.append('research_lead_review:evidence_changed')
+        except (OSError, KeyError, TypeError): reasons.append('research_lead_review:evidence_unavailable')
+    roles = lead.get('role_evidence', {})
+    if not isinstance(roles, dict): roles = {}
+    for role in REVIEW_ROLES:
+        label = 'research_lead_review:' + role
+        record = roles.get(role)
+        if not record or record not in evidence:
+            reasons.append(label + ':role_evidence_missing')
+            continue
+        data = bound_review_json(record, label, reasons)
+        if data is None: continue
+        if (data.get('role') != role or data.get('plan_id') != plan['plan_id']
+                or data.get('review_policy') != LEAD_REVIEW_POLICY
+                or data.get('plan_sha256') != plan_sha256):
+            reasons.append(label + ':wrong_role_or_protocol_binding')
+        if role == 'user_delegation':
+            if (data.get('kind') != 'research_lead_user_delegation' or data.get('actor') != 'human'
+                    or data.get('status') != 'delegated'
+                    or data.get('authorization_scope') != 'research_preparation_and_lead_acceptance'
+                    or data.get('user_instruction') != USER_DELEGATION_INSTRUCTION
+                    or data.get('research_start_authorized') is not False
+                    or not utc_timestamp(data.get('recorded_at_utc'))):
+                reasons.append(label + ':invalid_delegation')
+            continue
+        if (data.get('actor') not in AI_ACTORS or data.get('status') != 'accepted'
+                or not named_reviewer(data.get('reviewer')) or not utc_timestamp(data.get('reviewed_at_utc'))
+                or data.get('asset_hashes') != expected or not expected
+                or data.get('human_review_status') != 'not_run'
+                or data.get('ordinary_user_acceptance_claimed') is not False):
+            reasons.append(label + ':invalid_or_unbound_review')
+        if role == 'research_lead_decision':
+            if (data.get('kind') != 'research_lead_acceptance'
+                    or data.get('reviewer') != lead.get('reviewer')
+                    or not isinstance(data.get('coverage_limitations'), list)):
+                reasons.append(label + ':invalid_decision')
+            tasks = data.get('task_acceptance', {})
+            if not isinstance(tasks, dict): tasks = {}
+            if (set(tasks) != set(plan['task_ids']) or any(
+                    not isinstance(item, dict) or item.get('status') != 'accepted'
+                    or item.get('source_oracle_status') != 'matched'
+                    or item.get('workflow_basis') not in
+                        ('ordinary_browser_observation', 'unchanged_dependency_reuse')
+                    for item in tasks.values())):
+                reasons.append(label + ':task_acceptance_incomplete')
+            for key in ('ordinary_workflow_evidence', 'independent_source_oracle_evidence'):
+                records = data.get(key, [])
+                if not isinstance(records, list): records = []
+                if not records: reasons.append(label + ':' + key + '_missing')
+                for dependency in records:
+                    try:
+                        if not verify_reference(dependency): reasons.append(label + ':' + key + '_changed')
+                    except (OSError, KeyError, TypeError): reasons.append(label + ':' + key + '_unavailable')
+        else:
+            if (data.get('kind') != 'independent_methodological_review'
+                    or data.get('reviewer') == lead.get('reviewer')
+                    or not named_reviewer(data.get('independence_declaration'))
+                    or data.get('amendment_is_prospective') is not True):
+                reasons.append(label + ':not_independent_or_prospective')
+    return reasons
+
+
+def ledger_reasons(ledger, chain=None, scopes=None, plan=None):
     reasons = []
     for key in PREREQUISITES:
         item = ledger.get(key, {})
@@ -150,17 +286,20 @@ def ledger_reasons(ledger, chain=None, scopes=None):
             try:
                 if not verify_reference(record): reasons.append(key + ':evidence_changed')
             except (OSError, KeyError, TypeError): reasons.append(key + ':evidence_unavailable')
-    human = ledger.get('human_review', {})
-    if human.get('status') != 'passed':
-        reasons.append('human_review:' + human.get('status', 'not_run'))
-    elif (human.get('actor') != 'human' or not human.get('reviewer')
-            or not human.get('reviewed_at_utc') or not human.get('evidence')):
-        reasons.append('human_review:unbound_or_not_human')
+    if plan is not None and validate_plan(plan)['plan_id'] == V4_ID:
+        reasons.extend(lead_review_reasons(ledger, plan, scopes))
     else:
-        for record in human['evidence']:
-            try:
-                if not verify_reference(record): reasons.append('human_review:evidence_changed')
-            except (OSError, KeyError, TypeError): reasons.append('human_review:evidence_unavailable')
+        human = ledger.get('human_review', {})
+        if human.get('status') != 'passed':
+            reasons.append('human_review:' + human.get('status', 'not_run'))
+        elif (human.get('actor') != 'human' or not human.get('reviewer')
+                or not human.get('reviewed_at_utc') or not human.get('evidence')):
+            reasons.append('human_review:unbound_or_not_human')
+        else:
+            for record in human['evidence']:
+                try:
+                    if not verify_reference(record): reasons.append('human_review:evidence_changed')
+                except (OSError, KeyError, TypeError): reasons.append('human_review:evidence_unavailable')
     if chain is not None:
         accepted = ledger.get('evaluation_chain', {}).get('chain', {})
         for task, lock in chain.items():
@@ -183,6 +322,8 @@ def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
         raise ValueError('Preparation must use a new local artifacts directory')
     destination.mkdir(parents=True, exist_ok=False)
     plan = validate_plan(util.read_json(repo / PLAN))
+    if plan['plan_id'] != V4_ID:
+        raise ValueError('Preparation requires the current prospective v4 protocol')
     ledger = util.read_json(ledger_path)
     pins = {}
     for name in git(repo, 'ls-files').splitlines():
@@ -235,8 +376,8 @@ def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
         'source_commit': git(repo, 'rev-parse', 'HEAD'), 'source_clean': not bool(git(repo, 'status', '--porcelain')),
         'repo': str(repo), 'plan': plan, 'plan_reference': reference(repo / PLAN),
         'assignments': assignments(plan), 'runtime_id': runtime_id,
-        'cohort': 'runs/source-info-v3', 'pinned_files': pins,
-        'runtime_locks': chain, 'acceptance_ledger': ledger, 'acceptance_scopes': acceptance_scopes(pins),
+        'cohort': 'runs/source-info-v4', 'pinned_files': pins,
+        'runtime_locks': chain, 'acceptance_ledger': ledger, 'acceptance_scopes': acceptance_scopes(pins, plan),
         'acceptance_ledger_reference': reference(ledger_path), 'browser': browser,
         'python': {'path': str(Path(sys.executable).resolve()), 'sha256': util.sha256_file(sys.executable),
         'version': platform.python_version()}, 'precision': next_phase_design.calculate(
@@ -274,9 +415,13 @@ def check(repo, bundle_path, *, environment=True):
         except OSError: reasons.append(key + ':unavailable')
     if util.read_json(bundle['plan_reference']['path']) != bundle['plan']:
         reasons.append('embedded_plan_changed')
-    scopes = acceptance_scopes(bundle['pinned_files'])
+    if util.read_json(bundle['acceptance_ledger_reference']['path']) != bundle['acceptance_ledger']:
+        reasons.append('embedded_acceptance_ledger_changed')
+    if bundle['plan']['plan_id'] == V4_ID and bundle['cohort'] != 'runs/source-info-v4':
+        reasons.append('v4_requires_distinct_prospective_cohort')
+    scopes = acceptance_scopes(bundle['pinned_files'], bundle['plan'])
     if scopes != bundle['acceptance_scopes']: reasons.append('acceptance_scope_changed')
-    reasons.extend(ledger_reasons(bundle['acceptance_ledger'], bundle['runtime_locks'], scopes))
+    reasons.extend(ledger_reasons(bundle['acceptance_ledger'], bundle['runtime_locks'], scopes, bundle['plan']))
     python = bundle['python']
     if (str(Path(sys.executable).resolve()) != python['path'] or platform.python_version() != python['version']
             or util.sha256_file(sys.executable) != python['sha256']): reasons.append('python_identity_changed')

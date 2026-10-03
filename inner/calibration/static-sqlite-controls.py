@@ -33,12 +33,15 @@ def main():
              'fixture_files':fixture_hashes,'cases':[]}
     util.write_new_json(out/'intent.json',receipt)
     runs=out/'runs'
-    manifest=run.create_run(repo,runs,condition['task_id'],'IDNEG',1,{},resolved_condition=copy.deepcopy(condition))
+    control_condition=copy.deepcopy(condition)
+    control_condition['condition_id']='IDNEG'
+    manifest=run.create_run(repo,runs,condition['task_id'],'IDNEG',1,{},resolved_condition=control_condition)
     root=runs/manifest['run_id']
     shutil.copytree(source_root/'evaluation-assets',root/'evaluation-assets')
     shutil.copytree(args.fixture.resolve(),root/'workspace')
     util.write_new_json(root/'profiles/control.json',{'scope':'Static database byte alteration after independent collection','model_called':False})
-    util.write_new_json(root/'context.json',{'technical_control':True,'model_called':False})
+    context=util.read_json(source_root/'context.json')
+    util.write_new_json(root/'context.json',{**context,'technical_control':True,'model_called':False})
     manifest.update(run_instance_id=uuid.uuid4().hex,profile_files=util.tree_hashes(root/'profiles'),
         assets_sha256=util.tree_hashes(root/'evaluation-assets'),input_files=util.tree_hashes(root/'inputs'),
         context_sha256=util.sha256_file(root/'context.json'),synthetic=True,model_called=False,

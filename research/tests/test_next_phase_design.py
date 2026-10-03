@@ -1,11 +1,39 @@
 import copy
+from pathlib import Path
+import tempfile
 import unittest
 
+from outer.harness import util
 from research.next_phase_design import calculate
-from research.next_phase_analysis import summarize, interval_sensitivity
+from research.next_phase_analysis import summarize, interval_sensitivity, terminal_row
 
 
 class NextPhaseMeasurementTests(unittest.TestCase):
+    def test_foreign_normalized_usage_and_changed_total_cannot_enter_terminal_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'usage/raw').mkdir(parents=True)
+            path = root / 'usage/normalized.json'
+            normalized = {'run_id': 'run', 'run_instance_id': 'instance',
+                'total_tokens': 100, 'raw_bindings': []}
+            util.write_new_json(path, normalized)
+            version = root / 'usage/derivations/version'
+            util.write_new_json(version / 'normalized.json', normalized)
+            util.write_new_json(version / 'binding.json', {**normalized,
+                'normalized_sha256': util.sha256_file(path), 'raw': []})
+            binding = {'run_id': 'run', 'run_instance_id': 'instance'}
+            row = {**binding, 'usage': {'total_tokens': 100}}
+            implementation = {'receipt': {'raw': {}}}
+            self.assertEqual(terminal_row(root, binding, {'row': row}, implementation, row), row)
+            changed = {**normalized, 'run_instance_id': 'foreign'}
+            util.write_json_atomic(path, changed)
+            with self.assertRaises(ValueError):
+                terminal_row(root, binding, {'row': row}, implementation, row)
+            util.write_json_atomic(path, normalized)
+            current = {**row, 'usage': {'total_tokens': 999}}
+            with self.assertRaises(ValueError):
+                terminal_row(root, binding, {'row': row}, implementation, current)
+
     def fixture(self):
         plan = {'plan_id': 'test', 'task_ids': ['A', 'B'], 'variant_weights': [0.5, 0.5],
             'arms': ['explore', 'preload'], 'allocation': {'runs': 4}}

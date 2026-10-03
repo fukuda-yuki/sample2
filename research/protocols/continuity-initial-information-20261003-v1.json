@@ -3,6 +3,7 @@
   "plan_id": "continuity-initial-information-20261003-v1",
   "cohort_kind": "prospective_exploratory_mechanism",
   "research_start_authorized": false,
+  "protocol_acceptance": "blocked_candidate: selected one-family technical scope is established, but #22 independent task-set acceptance and human confirmation are still mandatory. This candidate cannot be started merely by passing the human gate. A different task set requires a reviewed protocol/allocation amendment before acquisition.",
   "question": "For the two fixed continuity variants of this MusicStore source family, how does initial presentation of the permitted source assets change migration quality and provider-reported whole-Run tokens under serial execution?",
   "source_family": "music-store-continuity",
   "independent_source_family_count": 1,

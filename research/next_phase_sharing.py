@@ -69,8 +69,12 @@ def stage(repo, bundle_path, number, destination):
             'research/tasks/candidate-register.json', 'research/tasks/music-store-continuity/public-request.txt',
             'inner/spec/requirements-cont-A-1.3.0.json', 'inner/spec/requirements-cont-B-1.3.0.json'):
         copy(repo / name, name)
-    for name in ('README.md', 'THIRD-PARTY-NOTICES.md'):
-        copy(repo / 'research/sharing' / name, name)
+    copy(repo / 'research/sharing/CONTINUITY-README.md', 'README.md')
+    copy(repo / 'research/sharing/THIRD-PARTY-NOTICES.md', 'THIRD-PARTY-NOTICES.md')
+    for name in ('MS-PL.txt', 'OpenCode-MIT.txt'):
+        copy(repo / 'research/sharing/LICENSES' / name, 'LICENSES/' + name)
+    source_readme = repo / 'artifacts/migration-assets-v2' / pair['task'] / 'inputs/legacy-source/readme.txt'
+    if source_readme.is_file(): copy(source_readme, 'UPSTREAM-readme.txt')
     portable = public / 'STUDY.json'
     util.write_new_json(portable, {'plan': bundle['plan'], 'assignments': bundle['assignments'],
         'source_commit': bundle['source_commit'], 'original_bundle_sha256': util.sha256_file(bundle_path),

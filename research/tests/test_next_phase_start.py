@@ -72,5 +72,20 @@ class ProspectiveStartTests(unittest.TestCase):
             reasons = next_phase.ledger_reasons(ledger, scopes={'selected_task_scope': {'task/input.json': 'new-hash'}})
             self.assertIn('selected_task_scope:reviewed_asset_scope_mismatch', reasons)
 
+    def test_old_execution_review_cannot_cover_changed_new_adapter(self):
+        name = 'research/next_phase_execution.py'
+        scopes = next_phase.acceptance_scopes({name: 'new'})
+        self.assertEqual(scopes['execution_evidence'][name], 'new')
+        ledger = {'execution_evidence': {'status': 'passed', 'evidence': [],
+            'asset_hashes': {name: 'old'}}}
+        self.assertIn('execution_evidence:reviewed_asset_scope_mismatch',
+            next_phase.ledger_reasons(ledger, scopes=scopes))
+
+    def test_human_confirmation_cannot_replace_independent_task_acceptance(self):
+        reasons = next_phase.ledger_reasons({'human_review': {'status': 'passed',
+            'actor': 'human', 'reviewer': 'reviewer', 'reviewed_at_utc': next_phase.now(),
+            'evidence': []}})
+        self.assertIn('independent_task_set:not_run', reasons)
+
 
 if __name__ == '__main__': unittest.main()

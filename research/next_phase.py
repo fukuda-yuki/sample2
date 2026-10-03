@@ -20,7 +20,8 @@ from research import next_phase_design
 
 REPO = Path(__file__).resolve().parents[1]
 PLAN = 'research/protocols/continuity-initial-information-20261003-v1.json'
-PREREQUISITES = ('evaluation_chain', 'selected_task_scope', 'execution_evidence', 'serialized_intervention')
+PREREQUISITES = ('evaluation_chain', 'selected_task_scope', 'independent_task_set',
+                 'execution_evidence', 'serialized_intervention')
 
 
 def now():
@@ -99,7 +100,10 @@ def acceptance_scopes(pins):
     execution = {name: digest for name, digest in pins.items() if
         name.startswith('outer/runtime/') or name in tuple('outer/harness/' + n + '.py' for n in
             ('runtime', 'run', 'usage', 'live_usage', 'gateway', 'machine', 'profiles', 'security', 'ownership', 'util'))
-        or name == 'research/pair_execution.py'}
+        or name in ('research/pair_execution.py', 'research/next_phase.py',
+            'research/next_phase_execution.py', 'research/next_phase_sharing.py',
+            'research/next_phase_analysis.py', 'research/catalog_delivery.py',
+            'research/catalog_share.py', 'research/catalog_allocation_review.py')}
     serializer = {name: digest for name, digest in pins.items() if
         name.startswith(('outer/runtime/', 'outer/profiles/interventions/'))
         or name in ('outer/harness/profiles.py', 'outer/harness/migration_input.py',
@@ -107,7 +111,8 @@ def acceptance_scopes(pins):
     return {'evaluation_chain': {**evaluation, **task_assets,
             **{n:h for n,h in task_files.items() if n.startswith(('outer/profiles/tasks/', 'research/tasks/'))}},
         'selected_task_scope': {**task_files, **task_assets},
-        'execution_evidence': execution, 'serialized_intervention': {**serializer, **task_files},
+        'independent_task_set': {**task_files, **task_assets},
+        'execution_evidence': execution, 'serialized_intervention': {**serializer, **task_files, **task_assets},
         'human_review': {**task_files, **task_assets, **{n: h for n, h in evaluation.items() if n.startswith('inner/spec/')}}}
 
 

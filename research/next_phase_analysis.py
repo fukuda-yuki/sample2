@@ -157,6 +157,38 @@ def summarize(plan, assignments, rows, *, bindings, plan_sha256, cohort, measure
         'uncertainty_limit': 'Hoeffding intervals require independent paired observations; real day/session/provider dependence is retained and prespecified ICC sensitivity is required. Incomplete-pair identification bounds express missing-data uncertainty, not confidence coverage.'}
 
 
+def terminal_row(root, binding, result, implementation, current):
+    """Adopt an immutable terminal row only after verifying original usage bytes."""
+    row = result['row']
+    if row.get('run_id') != binding['run_id'] or row.get('run_instance_id') != binding['run_instance_id']:
+        raise ValueError('Terminal row belongs to another instance')
+    if any(current.get(k) != v for k, v in row.items() if k not in ('archive', 'network_cleanup')):
+        raise ValueError('Current aggregate differs from the immutable terminal row')
+    raw = Path(root) / 'usage/raw'
+    if util.tree_hashes(raw) != implementation['receipt']['raw']:
+        raise ValueError('Stopped gateway originals changed after implementation receipt')
+    path = Path(root) / 'usage/normalized.json'
+    if path.exists():
+        normalized = util.read_json(path)
+        if (normalized.get('run_id') != binding['run_id'] or
+                normalized.get('run_instance_id') != binding['run_instance_id']):
+            raise ValueError('Normalized usage belongs to another instance')
+        digest = util.sha256_file(path)
+        versions = Path(root) / 'usage/derivations'
+        matched = False
+        for version in versions.glob('*/binding.json'):
+            saved = util.read_json(version)
+            if (saved.get('run_id') == binding['run_id'] and
+                    saved.get('run_instance_id') == binding['run_instance_id'] and
+                    saved.get('normalized_sha256') == digest and
+                    util.sha256_file(version.parent / 'normalized.json') == digest and
+                    saved.get('raw') == normalized.get('raw_bindings')):
+                matched = True
+                break
+        if not matched: raise ValueError('Normalized usage has no matching immutable derivation')
+    return row
+
+
 def collect(bundle, bundle_path, repo):
     """Read normal dispatch/original/derived records; no unbound row import."""
     from outer.harness import aggregate, profiles
@@ -186,7 +218,12 @@ def collect(bundle, bundle_path, repo):
             if (util.sha256_file(Path(repo) / profile_path) != bundle['pinned_files'][profile_path]
                     or util.read_json(root / 'profiles' / (kind + '.json')) != util.read_json(Path(repo) / profile_path)):
                 raise ValueError('Run profile differs from the frozen bundle')
-        rows.append(aggregate.row_for(batch, rid))
+        # A dispatched slot without a terminal receipt remains in the assigned
+        # denominator as unknown. Mutable compatibility aggregates cannot replace
+        # the row committed by the single pair manager.
+        if rid in state['results']:
+            rows.append(terminal_row(root, binding, state['results'][rid],
+                state['implementations'][rid], aggregate.row_for(batch, rid)))
     measurement = {'evaluation_version': bundle['plan']['settings']['evaluator_version'],
         'evaluator_sha256': {task: lock['evaluator_sha256'] for task, lock in bundle['runtime_locks'].items()}}
     return summarize(bundle['plan'], bundle['assignments'], rows, bindings=state['dispatch'],

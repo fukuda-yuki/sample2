@@ -33,7 +33,9 @@ def main():
              'fixture_files':fixture_hashes,'cases':[]}
     util.write_new_json(out/'intent.json',receipt)
     runs=out/'runs'
-    manifest=run.create_run(repo,runs,condition['task_id'],'IDNEG',1,{},resolved_condition=copy.deepcopy(condition))
+    control_condition=copy.deepcopy(condition)
+    control_condition['condition_id']='IDNEG'
+    manifest=run.create_run(repo,runs,condition['task_id'],'IDNEG',1,{},resolved_condition=control_condition)
     root=runs/manifest['run_id']
     shutil.copytree(source_root/'evaluation-assets',root/'evaluation-assets')
     shutil.copytree(args.fixture.resolve(),root/'workspace')

@@ -51,8 +51,12 @@ grade failure. `inner/calibration/migration-chain.py --education` uses ordinary
 `score_run`, composition and aggregation. It records exact evaluator DLL/image,
 all code/input/ledger/public contract hashes, each case result, and actual owned
 cleanup confirmation. Preparation and final receipt paths are versioned rather
-than overwriting old evidence. Final integrated calibration is still pending
-until a receipt reports every predeclared expectation matched.
+than overwriting old evidence. The final joint receipt at
+`artifacts/edu21-v4-httpfault/joint-calibration-acceptance-v2.json` binds the
+original nine controls plus the later HTTP-fault control to their actual measured
+builds and the final unchanged dependencies. Normal C/D and invalid names were
+remeasured with the final Education DLL; the corrected HTTP-fault cleanup case
+was measured separately. Failed intermediate receipts remain available.
 
 Human review is **not_run**. Reference packages and B's independent 52-check
 HTTP/SQLite workflow are separate evidence, not human acceptance. The combined
@@ -80,3 +84,12 @@ normal C/D, invalid names (E-008/E-010 only), and an incorrect first-student gra
 followed by a later HTTP timeout (E-005 remains critical, observer fault remains
 incomplete). Other previously measured cases may be retained only with explicit
 code/data dependency witnesses; they are not described as all running one DLL.
+
+The versioned browser adapters also distinguish a product prerequisite from an
+observer fault. Only a task/artifact/spec/DLL-bound baseline with an explicit
+failed publish check (MusicStore C-001/R-001 or Education E-001/EDU-R-001) and no
+published entry application receives `not_run_product_prerequisite`. Its known
+failure remains bound to the HTTP baseline, browser coverage remains incomplete,
+and numeric quality is suppressed. Missing/ambiguous publish without a confirmed
+build failure, mismatched evidence, and actual observer dependency faults retain
+their fault classification. This does not repair or recollect a saved package.

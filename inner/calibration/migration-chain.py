@@ -93,7 +93,12 @@ def main():
             def cleanup(*a,**kw):
                 observed = original_cleanup(*a,**kw)
                 # Actual owned cleanup happens first, then inject the declared receipt fault.
-                return {**observed,'confirmed':False,'status':'injected_cleanup_receipt_failure'}
+                injected = {**observed,'confirmed':False,'status':'injected_cleanup_receipt_failure',
+                            'fault_injection':True,'actual_owned_cleanup_confirmed':observed['confirmed']}
+                target = Path(a[0])/'browser-cleanup-attempts'
+                util.write_new_json(target/('injected-'+uuid.uuid4().hex+'-result.json'),injected)
+                util.append_line(target/'index.jsonl',injected)
+                return injected
             browser_cleanup.cleanup = cleanup
         try:
             record = evaluate.score_run(repo,runs,manifest['run_id'])

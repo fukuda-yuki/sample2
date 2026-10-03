@@ -53,7 +53,8 @@ def source(repo, task):
     actual = command(['git', '-C', str(cache), 'rev-parse', 'FETCH_HEAD']).stdout.strip()
     if actual != revision:
         raise ValueError('Source commit mismatch')
-    data = subprocess.run(['git', '-C', str(cache), 'archive', '--format=tar', actual],
+    data = subprocess.run(['git', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf',
+                           '-C', str(cache), 'archive', '--format=tar', actual],
                           env=child_environment(), capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(data)) as archive:
         if any(m.issym() or m.islnk() or m.isdev() for m in archive.getmembers()):
@@ -61,6 +62,8 @@ def source(repo, task):
         dest.mkdir()
         archive.extractall(dest, filter='data')
     util.write_new_json(root / (revision + '.json'), {'source': url, 'commit': actual,
+                                                    'byte_basis': 'git_archive_without_autocrlf',
+                                                    'archive_configuration': {'core.autocrlf': False, 'core.eol': 'lf'},
                                                     'files': util.tree_hashes(dest)})
     return dest
 

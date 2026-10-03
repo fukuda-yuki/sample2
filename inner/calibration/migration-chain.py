@@ -22,6 +22,8 @@ def main():
     parser.add_argument('--evaluator-bundle', type=Path, required=True)
     parser.add_argument('--runtime-lock', type=Path, required=True)
     parser.add_argument('--browser-pin', type=Path, required=True)
+    parser.add_argument('--contract-root', type=Path,
+                        help='Task owner checkout with public request/profiles for upstream authority binding')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     repo, out = args.repo.resolve(), args.out.resolve()
@@ -53,6 +55,25 @@ def main():
             [repo/'outer/harness/evaluate.py',repo/'outer/harness/browser_cart.py',
              repo/'outer/harness/browser_cleanup.py',repo/'outer/harness/aggregate.py',
              repo/'inner/browser/cart-review.cjs']},'human_review':'not_run','cases':[]}
+    receipt['evaluator_source_files'] = {p.relative_to(repo).as_posix():util.sha256_file(p)
+        for p in (repo/'inner/evaluator/MusicStore.Evaluator').glob('*')
+        if p.suffix in ('.cs','.csproj')}
+    receipt['linked_contract_files'] = {}
+    receipt['linked_contract_scope'] = 'Upstream authority/input binding; model serialization is separately validated by Issue #23.'
+    if args.contract_root:
+        contract_root = args.contract_root.resolve()
+        relatives = ['research/tasks/music-store-continuity/public-request.txt',
+            'research/tasks/music-store-continuity/variants.json',
+            'research/tasks/music-store-continuity/task-register.json',
+            'research/migration_tasks.py',
+            'outer/profiles/tasks/MS1-CONT-A.json','outer/profiles/tasks/MS1-CONT-B.json']
+        for relative in relatives:
+            source = contract_root/relative
+            if source.is_file():
+                target = out/'linked-contract'/relative; target.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(source,target)
+                receipt['linked_contract_files'][relative] = util.sha256_file(target)
+    util.write_new_json(out/'calibration-intent.json',receipt)
     util.write_new_json(out/'predeclared-cases.json', cases)
     for index, case in enumerate(cases, 1):
         variant = case['variant']
@@ -76,7 +97,8 @@ def main():
         for name in ('catalog.json','initial-store.sqlite','migration-oracle.json'):
             shutil.copyfile(task_assets/name,assets/name)
         util.write_new_json(root/'profiles/calibration.json',{'case':case,'model_called':False})
-        util.write_new_json(root/'context.json',{'technical_case':case['name'],'model_called':False})
+        util.write_new_json(root/'context.json',{'technical_case':case['name'],'model_called':False,
+                                               'method':'explore','blocks':[]})
         shutil.copytree(Path(case['artifact_path']),root/'workspace',ignore=shutil.ignore_patterns('bin','obj','.git'))
         manifest.update(run_instance_id=uuid.uuid4().hex,profile_files=util.tree_hashes(root/'profiles'),
             assets_sha256=util.tree_hashes(assets),input_files=util.tree_hashes(root/'inputs'),

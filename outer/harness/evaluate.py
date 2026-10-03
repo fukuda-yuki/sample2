@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import run as run_mod
 from . import util
-from . import browser_cart, browser_cleanup
+from . import browser_review as browser_cart, browser_cleanup
 from .security import child_environment
 
 DEFAULT_EVALUATOR_DLL = 'inner/evaluator/MusicStore.Evaluator/bin/Release/net8.0/MusicStore.Evaluator.dll'
@@ -415,6 +415,8 @@ def _base_record(run_id, sequence, version, exit_code, independent_hash, spec_sh
         'verdict': (output or {}).get('verdict'),
         'browser_cart_coverage': (output or {}).get('browserCartCoverage', 'not_run_http_only'),
         'browser_cart_evidence_sha256': (output or {}).get('browserCartEvidenceSha256'),
+        'browser_review_coverage': (output or {}).get('browserReviewCoverage'),
+        'browser_review_evidence_sha256': (output or {}).get('browserReviewEvidenceSha256'),
         'research_status': (output or {}).get('researchStatus', 'incomplete'),
         'quality': (output or {}).get('quality'),
         'requirement_count': (output or {}).get('requirementCount'),
@@ -499,7 +501,8 @@ def _append_index(run_dir, record):
                         'scoring_state', 'adopted', 'evaluator_exit_code',
                         'evaluator_sha256', 'evaluator_sha256_pinned', 'verdict',
                         'quality', 'spec_sha256', 'artifact_sha256_outer', 'mismatches',
-                        'browser_cart_coverage', 'browser_cart_evidence_sha256', 'research_status',
+                        'browser_cart_coverage', 'browser_cart_evidence_sha256', 'browser_review_coverage',
+                        'browser_review_evidence_sha256', 'research_status',
                         'evaluation_sha256', 'operation_status',
                         'work_dir', 'recorded_at', 'directory') if key in record})
 

@@ -46,6 +46,24 @@ def release_prefix(bundle_path, bundle, phase=None):
     return prefix + '-' + digest[:12] + '-pair-'
 
 
+def phase_remote_identity(remote, tag, phase):
+    """Resolve actual remote tag objects before reusing a new-phase release."""
+    if (not remote or remote.get('draft') or remote.get('tag_name') != tag
+            or remote.get('target_commitish') != phase['source_commit']):
+        raise ValueError('Remote phase release source identity differs')
+    obj = json.loads(catalog_delivery.gh('api',
+        f'repos/{catalog_delivery.REPOSITORY}/git/ref/tags/{tag}'))['object']
+    for _ in range(5):
+        if obj.get('type') == 'commit':
+            if obj.get('sha') != phase['source_commit']:
+                raise ValueError('Actual remote tag points to a different phase commit')
+            return {'target_commitish': remote['target_commitish'], 'tag_commit': obj['sha']}
+        if obj.get('type') != 'tag': break
+        obj = json.loads(catalog_delivery.gh('api',
+            f'repos/{catalog_delivery.REPOSITORY}/git/tags/{obj["sha"]}'))['object']
+    raise ValueError('Remote phase tag cannot be resolved to its exact commit')
+
+
 def clocked(workspace, bundle_path, number, bundle, bindings, stage_name, operation, *, phase=None):
     phases = {b.get('phase_sha256') for b in bindings}
     if phase:
@@ -186,7 +204,11 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     prefix = release_prefix(bundle_path, bundle, phase)
     actual_transport = transfer is None and fetch is catalog_delivery.download
     if transfer is None:
-        transfer = lambda package, tag, commit: catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
+        def transfer(package, tag, commit):
+            if phase:
+                existing = catalog_delivery.release(tag)
+                if existing: phase_remote_identity(existing, tag, phase)
+            return catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
     urls = clocked(workspace, bundle_path, number, bundle, bindings, 'publication_and_remote_hash_check',
         lambda: transfer(workspace / 'package', prefix + f'{number:03d}',
                          phase['source_commit'] if phase else bundle['source_commit']))
@@ -203,8 +225,10 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
                 remote = catalog_delivery.release(prefix + f'{number:03d}')
                 if not remote or remote.get('draft'):
                     raise ValueError('Actual v5 release readback missing')
+                identity = phase_remote_identity(remote, prefix + f'{number:03d}', phase) if phase else {}
                 util.write_new_json(remote_path, {'tag_name': remote['tag_name'],
                     'release_id': remote['id'], 'html_url': remote['html_url'],
+                    **identity,
                     'assets': [{k: row[k] for k in ('id', 'name', 'size', 'digest', 'browser_download_url')}
                         for row in remote['assets']]})
             publication['actual_remote_readback'] = next_phase.reference(remote_path)

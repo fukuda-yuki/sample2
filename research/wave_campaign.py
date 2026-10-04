@@ -155,7 +155,8 @@ class Health:
                        if not current['implementations'].get(b['run_id'], {}).get('receipt', {}).get('submission_fixed')}
             pairs, retained = len(unfixed), 0
         else:
-            blocks = 2 if self.escalate and current['waves'] and resource['escalation_healthy'] else 1
+            blocks = 2 if (d.phase.get('maximum_pairs', 4) >= 4 and self.escalate
+                           and current['waves'] and resource['escalation_healthy']) else 1
             pairs = sum(len(b) for b in d.phase['two_pair_blocks'][current['block_cursor']:current['block_cursor'] + blocks])
             retained = remaining * cost
         required = (retained + pairs * policy['scratch_bytes_per_next_or_unfixed_wave_pair']
@@ -227,6 +228,9 @@ class Health:
     def decide_escalation(self):
         """One prospective operational decision; never use outcomes or tokens."""
         d = self.dispatcher
+        if d.phase.get('maximum_pairs', 4) <= 2:
+            self.escalate = False
+            return False
         path = d.phase_control / 'escalation-decision.json'
         if path.exists():
             saved = util.read_json(path)
@@ -320,6 +324,9 @@ def run_campaign(repo, phase_path, approval_path, *, mode='run', recovery_approv
             or not next_phase.verify_reference(approval['authorization_reference'])):
         raise ValueError('Verified exact-phase user authorization required')
     preflight(repo, phase)
+    if phase.get('kind') == wave_plan.V2_KIND:
+        escalate = False
+        wave_dispatch.handoff_v2(repo, phase_path, approval)
     Monitor = load_monitor(phase)
     preparation = phase.get('preparation_view')
     adapters = wave_execution.HarnessAdapters(repo, phase,

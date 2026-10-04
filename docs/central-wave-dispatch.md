@@ -83,3 +83,34 @@ Local test fixtures exercise bounded concurrency and crash boundaries without
 Docker, credentials, API requests, scoring or remote publication. Dispatch-to-
 confirmed-stop peak is reported separately from actual HTTP overlap; a local
 fixture cannot establish real provider or host acceptance.
+
+## Probe-only successor phase
+
+`wave_plan.build_v2` admits only the fully closed v1 boundary at pairs 6–11.
+It holds the canonical cohort lease while freezing the predecessor phase, journal
+and six gate references, verifies all original 22 instances stopped and fixed,
+and checks raw/snapshot bytes against their original implementation receipts.
+Missing gates, uncertain sends or changed evidence reject the handoff. Old
+source pins remain historical; the new phase pins its own clean source commit.
+
+The v2 manifest retains the original bundle and all 200 identities, assignments,
+inputs, budgets, evaluation criteria, preparation view and operational policy.
+Only original pairs 12–100 remain eligible, preserving their original order,
+priority and responsibility owners. Waves contain the fixed blocks 12/13,
+14/15 and so on, with pair 100 last; maximum concurrency is four Runs and
+escalation is disabled. No wave refill or replacement instance is supported.
+
+Only the private probe implementation may change. The monitor bytes must retain
+the predecessor hash at a separate path. A hash-bound nonlive acceptance receipt
+(`resource_probe_only_v2_nonlive_acceptance`) binds both probe hashes, unchanged
+monitor and policy hashes, `fail_closed_unchanged=true`, `model_called=false` and
+`run_created=false`. The controller does not infer acceptance from Run outcomes.
+
+`wave_dispatch.handoff_v2(repo, phase_path, approval)` exclusively creates
+`_control/phase-handoff-v2.json`, references the unchanged original handoff file,
+and requires exact new-phase user authorization. Existing different handoffs
+cannot be overwritten. Current-version entrypoints reject the old phase permit
+after the successor handoff. The v2 journal is separate at
+`_control/central-wave-pair12-100-v2/wave-journal.jsonl`; v1 remains readable and
+byte-identical. Serial publication retains original plan bindings and adds the
+new phase hash and predecessor phase/journal hashes to public metadata.

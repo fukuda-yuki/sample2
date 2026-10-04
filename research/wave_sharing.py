@@ -52,8 +52,13 @@ class Publisher:
             'wave_pair_numbers': current['waves'][-1]['pairs'],
             'configured_wave_run_cap': current['waves'][-1]['run_cap'],
             'operational_policy_sha256': d.phase['operational_policy']['sha256'],
+            **({'predecessor_phase_sha256': d.phase['predecessor_phase']['sha256'],
+                'predecessor_journal_sha256': d.phase['predecessor_journal']['sha256'],
+                'resource_probe_sha256': d.phase['resource_probe']['sha256']}
+               if d.phase.get('predecessor_phase') else {}),
             'evaluator_diagnostics': d.phase.get('evaluator_diagnostics'),
-            'limitation': 'Shared resource/provider concurrency is a separate execution condition; historical first-five outcomes are not rescored or represented as this phase.'}
+            'limitation': 'Shared resource/provider concurrency is a separate execution condition; historical pairs1–'
+                + str(max(d.phase['completed_pairs'])) + ' and their earlier execution phases are preserved without rescoring.'}
 
     def ready(self, number, current):
         d = self.dispatcher

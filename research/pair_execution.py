@@ -31,8 +31,22 @@ def exclusive(control, *, phase_permit=None):
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             handoff = control / 'phase-handoff.json'
+            if (control / 'phase-handoff-v2.json').exists() and not handoff.exists():
+                raise ValueError('Missing immutable predecessor handoff')
             if handoff.exists():
                 marker = util.read_json(handoff)
+                successor = control / 'phase-handoff-v2.json'
+                if successor.exists():
+                    changed = util.read_json(successor)
+                    baseline = changed.get('previous_handoff', {})
+                    phase = changed.get('new_phase', {})
+                    if (changed.get('kind') != 'central_fixed_wave_successor_handoff_v2'
+                            or Path(baseline.get('path', '')).resolve() != handoff.resolve()
+                            or baseline.get('sha256') != util.sha256_file(handoff)
+                            or changed.get('previous_phase_sha256') != marker.get('phase_sha256')
+                            or not phase.get('path') or util.sha256_file(phase['path']) != phase.get('sha256')):
+                        raise ValueError('Invalid or changed immutable successor handoff')
+                    marker = {'kind': 'central_fixed_wave_handoff_v1', 'phase_sha256': phase['sha256']}
                 if (marker.get('kind') != 'central_fixed_wave_handoff_v1'
                         or not marker.get('phase_sha256')
                         or marker.get('phase_sha256') != phase_permit):

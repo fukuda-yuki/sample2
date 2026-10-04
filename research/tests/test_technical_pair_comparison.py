@@ -81,6 +81,33 @@ class SeparatePreparationPlanTests(unittest.TestCase):
         self.assertEqual([c['slot'] for p in new for c in p['cases']],[1,2,3,4])
         self.assertEqual([c['attempt'] for p in new for c in p['cases']],[90061,90061,90062,90062])
 
+    def test_authorized_30m_plan_has_new_instances_and_keeps_old_limits(self):
+        old_cohort, old = technical.comparison_assignments('monitorfix-20261004',['explore','preload'])
+        new_cohort, new = technical.comparison_assignments('go30m-20261004',['explore','preload'])
+        self.assertNotEqual(new_cohort, old_cohort)
+        self.assertFalse({c['run_instance_id'] for p in old for c in p['cases']} &
+                         {c['run_instance_id'] for p in new for c in p['cases']})
+        self.assertEqual([c['attempt'] for p in new for c in p['cases']], [90071,90071,90072,90072])
+        self.assertEqual(technical.comparison_limits('monitorfix-20261004'),technical.LIMITS)
+        self.assertEqual(technical.comparison_limits('go30m-20261004')['reported_observed_tokens_stop'],30_000_000)
+        self.assertEqual(technical.comparison_limits('go30m-20261004')['comparison_wall_clock_stop_seconds'],9000)
+        self.assertEqual(technical.LIMITS['reported_observed_tokens_stop'],20_000_000)
+
+    def test_additional_plan_requires_exact_current_authorization(self):
+        path=self.root/'unauthorized.json'
+        util.write_new_json(path, {'kind':'explicit_user_additional_four_run_authorization',
+                                  'additional_runs':4,'model_id':'deepseek-v4.1-flash'})
+        with self.assertRaisesRegex(ValueError,'Explicit additional four-Run authorization'):
+            technical.verify_additional_authorization(next_phase.reference(path))
+
+    def test_wall_limit_includes_both_pairs_and_publication_wait(self):
+        start=datetime.now(timezone.utc)
+        util.write_new_json(self.root/'_control/execute-start-1.json', {'at':start.isoformat()})
+        fixed=technical.comparison_limits('go30m-20261004')
+        self.assertFalse(technical.comparison_wall_expired(self.root,fixed,start+timedelta(seconds=8999)))
+        self.assertTrue(technical.comparison_wall_expired(self.root,fixed,start+timedelta(seconds=9000)))
+        self.assertFalse(technical.comparison_wall_expired(self.root,technical.LIMITS,start+timedelta(days=1)))
+
     def test_historical_prepare_cannot_recreate_initial_in_another_checkout(self):
         with self.assertRaisesRegex(ValueError,'historical read-only'):
             technical.prepare(self.root,self.root/'artifacts/new',None,None,None)

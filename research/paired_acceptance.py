@@ -87,6 +87,12 @@ def validate(comparison,plan,scopes):
     limits={'maximum_dispatches':4,'run_seconds':1800,'provider_timeout_seconds':600,
         'maximum_accumulated_run_seconds':7200,'gateway_started_calls_stop':600,
         'reported_observed_tokens_stop':20_000_000}
+    if fixed.get('comparison_version') == 'go30m-20261004':
+        from research.technical_pair_comparison import verify_additional_authorization
+        verify_additional_authorization(fixed['additional_authorization'])
+        if fixed.get('total_actual_dispatch_upper_bound_across_plans') != 8:
+            raise ValueError('Additional technical cumulative bound changed')
+        limits.update(reported_observed_tokens_stop=30_000_000, comparison_wall_clock_stop_seconds=9000)
     if (any(type(fixed.get(k)) is not int or fixed[k]!=v for k,v in limits.items())
             or fixed.get('order')!=[1,2] or fixed.get('no_retries_or_replacements') is not True
             or fixed.get('settings')!=plan['settings'] or fixed.get('execution_asset_hashes')!=execution
@@ -232,6 +238,9 @@ def validate(comparison,plan,scopes):
             or run_seconds>=fixed['maximum_accumulated_run_seconds']):
         raise ValueError('Technical safety cap reached')
     if intervals[1][0]<intervals[0][1]: raise ValueError('Second pair began before first actual gate')
+    if ('comparison_wall_clock_stop_seconds' in fixed and
+            (intervals[1][1]-intervals[0][0]).total_seconds() >= fixed['comparison_wall_clock_stop_seconds']):
+        raise ValueError('Total technical comparison wall-clock cap reached')
     if durations[1]>=durations[0]: raise ValueError('Observed paired total elapsed time did not improve')
     return {'accepted':True,'serial_total_seconds':durations[0],'paired_total_seconds':durations[1],
         'actual_dispatches':4,'gateway_calls':calls_total,'provider_reported_tokens':tokens_total,

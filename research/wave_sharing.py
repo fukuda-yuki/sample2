@@ -43,7 +43,7 @@ class Publisher:
         d = self.dispatcher
         current = d.current()
         soak_phase = d.phase
-        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND):
+        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND):
             soak_phase = util.read_json(soak_phase['predecessor_phase']['path'])
         return {'phase_id': d.phase['phase_id'], 'phase_sha256': d.digest,
             'source_commit': d.phase['source_commit'],
@@ -62,11 +62,11 @@ class Publisher:
             **({'ancestor_phase_sha256s': [r['sha256'] for r in wave_plan.ancestor_references(d.phase)],
                 'cause_condition_acceptance_sha256': soak_phase['resource_collector_acceptance']['sha256'],
                 'actual_soak_verification_sha256': d.phase['actual_soak_verification']['sha256']}
-               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND) else {}),
+               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND) else {}),
             **({'probe_repair_acceptance_sha256': d.phase['resource_collector_acceptance']['sha256'],
                 'soak_binding': 'Historical ancestor v3 probe only; does not authorize current v'
                     + str(d.phase['schema_version']) + ' probe bytes'}
-               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND) else {}),
+               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND) else {}),
             'evaluator_diagnostics': d.phase.get('evaluator_diagnostics'),
             'limitation': 'Shared resource/provider concurrency is a separate execution condition; historical pairs1–'
                 + str(max(d.phase['completed_pairs'])) + ' and their earlier execution phases are preserved without rescoring.'}

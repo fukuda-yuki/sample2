@@ -280,3 +280,30 @@ permission. The HOLD itself is not a new authorization. Exact source review,
 freeze/preflight and the inherited completion authority remain required before
 the central owner can start. Formal acquisition must not serve as repair testing.
 Historical183 soak evidence remains attributed only to its original v3 helper.
+
+## Prospective v6: pace the remaining bounded pipe acquisition attempts
+
+The preserved V5 fault exhausted8 opens in0.0649412seconds, before its1second
+logical acquisition deadline, with zero HTTP bytes sent. Original logs do not
+contain individual call durations or identify the competing pipe client.
+V6 changes only the native constructor: retain the first immediate Wait retry,
+then pace subsequent prewrite231 attempts before Wait by the remaining time
+divided by remaining attempts plus one (bounded below by10ms and above by the
+remaining deadline). The8-open cap,1second logical deadline, whole-probe10second
+timeout, exact monitor, thresholds, identity and postwrite fail-closed behavior
+remain unchanged. Native API/scheduler return overhead can exceed1second;
+there is no strict wall-time or historical recovery guarantee.
+
+V6 retains49 gates and98 sent/stopped/fixed originals, including the completed
+fourth fault-wave Run and three individually acknowledged operator stops.
+Only original pairs50-100/102 UUIDs are eligible; no resend or refill is allowed.
+The four-Run cap/internal1, model, inputs, criteria and all budgets are inherited.
+`build_v6` requires the closed V5 journal, original boundary/stop/ACK references,
+finite16 safety cases, all35 native comparison leaves and their predeclared
+plan/fixture/runner, actual independent acceptance with its scope limits,
+standing completion authority and the received limited recovery instruction.
+Repair results must be shared before adoption. Technical acceptance supplies no
+new acquisition permission. Source integration, freeze and preflight remain
+required. All earlier phase markers and STOP evidence stay intact;
+`handoff_v6` appends one marker under the cohort lease and fences old permits.
+Historical183 soak evidence remains bound only to the original V3 helper.

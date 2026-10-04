@@ -81,6 +81,11 @@ class SeparatePreparationPlanTests(unittest.TestCase):
         self.assertEqual([c['slot'] for p in new for c in p['cases']],[1,2,3,4])
         self.assertEqual([c['attempt'] for p in new for c in p['cases']],[90061,90061,90062,90062])
 
+    def test_historical_prepare_cannot_recreate_initial_in_another_checkout(self):
+        with self.assertRaisesRegex(ValueError,'historical read-only'):
+            technical.prepare(self.root,self.root/'artifacts/new',None,None,None)
+        self.assertFalse((self.root/'artifacts/new').exists())
+
     def test_unchanged_original_unsent_preparation_fault_is_verified(self):
         technical.verify_preparation_failure(next_phase.reference(self.proof))
 
@@ -310,11 +315,19 @@ class DriverTests(unittest.TestCase):
             'technical_plan':{'sha256':'fixed'},'assignments':[{'pair':n,'cases':[
                 {'pair':n,'run_id':f'{n}-{arm}','run_instance_id':str(n*2+i)*32} for i,arm in enumerate(('a','b'))]}
                 for n in (1,2)]}
-        self.batch=self.repo/self.bundle['cohort']; self.fixed={**technical.LIMITS,'conditions':{}}
+        self.batch=self.repo/self.bundle['cohort']; self.fixed={**technical.LIMITS,'conditions':{},
+            'comparison_version':'monitorfix-20261004'}
         self.current={'gates':{},'reserved':{}}
         self.enterContext(patch.object(technical,'check',return_value=(self.bundle,self.fixed)))
         self.enterContext(patch.object(pair_execution,'state',return_value=self.current))
         self.enterContext(patch.object(technical,'browser_postprocess',return_value=lambda *a:None))
+
+    def test_historical_execute_is_read_only_even_in_a_new_checkout(self):
+        self.fixed.pop('comparison_version')
+        with patch.object(pair_execution,'execute_pair') as send:
+            self.assertEqual(technical.execute(self.repo,self.path)['reason'],'historical_comparison_read_only')
+            send.assert_not_called()
+        self.assertFalse(self.batch.exists())
 
     def test_fault_then_preservation_gate_still_cannot_start_second_block(self):
         with patch.object(pair_execution,'execute_pair',return_value={'status':'held','reason':'implementation_fault'}) as send:

@@ -241,6 +241,8 @@ def rebind_serializer(repo, prior_bundle, witness, output):
 
 def prepare(repo, destination, browser_pin, serializer_witness, authorization, *,
             comparison_version='initial', preparation_failure=None):
+    if comparison_version != 'monitorfix-20261004':
+        raise ValueError('Initial technical comparison is historical read-only; never recreate it')
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if not destination.is_relative_to(repo / 'artifacts') or destination.exists():
         raise ValueError('Use a new owned technical preparation directory')
@@ -388,6 +390,8 @@ def next_block(bundle, current):
 def execute(repo, bundle_path):
     repo = Path(repo).resolve()
     bundle, fixed = check(repo,bundle_path)
+    if fixed.get('comparison_version', 'initial') != 'monitorfix-20261004':
+        return {'status':'held','reason':'historical_comparison_read_only','model_dispatched':False}
     batch = next_phase.inside(repo,bundle['cohort'],'runs')
     current = pair_execution.state(batch / '_control/pair-journal.jsonl')
     selected, reason = next_block(bundle,current)

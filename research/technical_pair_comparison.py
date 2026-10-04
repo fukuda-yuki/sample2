@@ -35,8 +35,10 @@ COMPARISONS = {
                      90071, 'technical-go30m-20261004'),
     'go30m-guardianfix-20261004': ('runs/_technical-sharing-v5-100p2-go30m-guardianfix-20261004',
                      90081, 'technical-go30m-guardianfix-20261004'),
+    'go30m-pathfix-20261004': ('runs/_technical-sharing-v5-30m-pf-20261004',
+                     90091, 'technical-go30m-pathfix-20261004'),
 }
-ADDITIONAL_COMPARISONS = ('go30m-20261004', 'go30m-guardianfix-20261004')
+ADDITIONAL_COMPARISONS = ('go30m-20261004', 'go30m-guardianfix-20261004', 'go30m-pathfix-20261004')
 
 
 def comparison_limits(version):
@@ -66,6 +68,41 @@ def verify_unsent_guardian_failure(reference):
             or proof['safety_stop'].get('error_type') != 'PermissionError'
             or inventory != proof['inventory']):
         raise ValueError('Stopped zero-send guardian preparation differs')
+    return proof
+
+
+def verify_unsent_input_failure(reference):
+    """A fully observed pre-reservation copy failure has no model identity."""
+    proof = paired_acceptance.read_reference(reference)
+    original = paired_acceptance.read_reference(proof['original_bundle'])
+    batch = Path(proof['cohort']).resolve()
+    current = pair_execution.state(batch/'_control/pair-journal.jsonl')
+    inventory = {p.relative_to(batch).as_posix():{'sha256':util.sha256_file(p),
+        'bytes':p.stat().st_size} for p in batch.rglob('*') if p.is_file()}
+    prior_fixed = paired_acceptance.read_reference(original['technical_plan'])
+    verify_unsent_guardian_failure(prior_fixed['preparation_failure'])
+    start = paired_acceptance.read_reference(proof['execute_start'])
+    original_repo = Path(proof['original_bundle']['path']).parents[2]
+    if (start.get('pair') != 1 or start.get('bundle_sha256') != proof['original_bundle']['sha256']
+            or start.get('technical_plan_sha256') != original['technical_plan']['sha256']):
+        raise ValueError('Preserved input-failure launch intent differs')
+    for name in ('research/pair_execution.py','outer/harness/profiles.py','outer/harness/run.py'):
+        if util.sha256_file(original_repo/name) != original['pinned_files'][name]:
+            raise ValueError('Pre-reservation input-copy ordering source changed')
+    if (proof.get('kind') != 'v5_unsent_input_copy_preparation_fault'
+            or original['cohort'] != 'runs/_technical-sharing-v5-100p2-go30m-guardianfix-20261004'
+            or batch.name != Path(original['cohort']).name
+            or original['source_commit'] != proof['source_commit']
+            or any(current[k] for k in ('reserved','dispatch','implementations','results','gates'))
+            or any(batch.glob('*/manifest.json')) or any(batch.glob('*/runtime.json'))
+            or any(batch.glob('*/usage'))
+            or proof['safety_stop'] != util.read_json(batch/'_control/safety-stop.json')
+            or proof['safety_stop'].get('reason') != 'technical_block_exception'
+            or proof['safety_stop'].get('error_type') != 'Error'
+            or inventory != proof['inventory']
+            or proof.get('pre_reservation_copy_failure_verified') is not True
+            or proof.get('real_model_sends') != 0):
+        raise ValueError('Stopped zero-send input preparation differs')
     return proof
 
 
@@ -339,10 +376,11 @@ def prepare(repo, destination, browser_pin, serializer_witness, authorization, *
     if comparison_version in ADDITIONAL_COMPARISONS:
         additional_reference = next_phase.reference(authorization)
         verify_additional_authorization(additional_reference)
-        if comparison_version == 'go30m-guardianfix-20261004':
+        if comparison_version in ('go30m-guardianfix-20261004','go30m-pathfix-20261004'):
             if preparation_failure is None: raise ValueError('Preserved unsent guardian fault required')
             failure_reference = next_phase.reference(preparation_failure)
-            verify_unsent_guardian_failure(failure_reference)
+            (verify_unsent_input_failure if comparison_version == 'go30m-pathfix-20261004'
+             else verify_unsent_guardian_failure)(failure_reference)
         elif preparation_failure is not None: raise ValueError('Additional campaign is not unsent-fault relabelling')
     elif comparison_version != 'initial':
         if preparation_failure is None: raise ValueError('Preserved unsent fault evidence required')
@@ -389,7 +427,7 @@ def prepare(repo, destination, browser_pin, serializer_witness, authorization, *
     if comparison_version in ADDITIONAL_COMPARISONS:
         fixed.update(comparison_version=comparison_version, additional_authorization=additional_reference,
                      total_actual_dispatch_upper_bound_across_plans=8, separate_plan_not_resume=True)
-        if comparison_version == 'go30m-guardianfix-20261004':
+        if comparison_version in ('go30m-guardianfix-20261004','go30m-pathfix-20261004'):
             fixed['preparation_failure'] = failure_reference
     elif comparison_version != 'initial':
         fixed.update(comparison_version=comparison_version, preparation_failure=failure_reference,
@@ -433,6 +471,8 @@ def check(repo, bundle_path, *, environment=True):
         verify_additional_authorization(fixed['additional_authorization'])
         if version == 'go30m-guardianfix-20261004':
             verify_unsent_guardian_failure(fixed['preparation_failure'])
+        elif version == 'go30m-pathfix-20261004':
+            verify_unsent_input_failure(fixed['preparation_failure'])
     elif version != 'initial':
         if (fixed.get('total_actual_dispatch_upper_bound_across_plans') != 4
                 or fixed.get('separate_plan_not_resume') is not True):

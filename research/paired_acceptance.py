@@ -87,11 +87,13 @@ def validate(comparison,plan,scopes):
     limits={'maximum_dispatches':4,'run_seconds':1800,'provider_timeout_seconds':600,
         'maximum_accumulated_run_seconds':7200,'gateway_started_calls_stop':600,
         'reported_observed_tokens_stop':20_000_000}
-    if fixed.get('comparison_version') in ('go30m-20261004','go30m-guardianfix-20261004'):
-        from research.technical_pair_comparison import verify_additional_authorization,verify_unsent_guardian_failure
+    if fixed.get('comparison_version') in ('go30m-20261004','go30m-guardianfix-20261004','go30m-pathfix-20261004'):
+        from research.technical_pair_comparison import verify_additional_authorization,verify_unsent_guardian_failure,verify_unsent_input_failure
         verify_additional_authorization(fixed['additional_authorization'])
         if fixed.get('comparison_version') == 'go30m-guardianfix-20261004':
             verify_unsent_guardian_failure(fixed['preparation_failure'])
+        elif fixed.get('comparison_version') == 'go30m-pathfix-20261004':
+            verify_unsent_input_failure(fixed['preparation_failure'])
         if fixed.get('total_actual_dispatch_upper_bound_across_plans') != 8:
             raise ValueError('Additional technical cumulative bound changed')
         limits.update(reported_observed_tokens_stop=30_000_000, comparison_wall_clock_stop_seconds=9000)
@@ -137,7 +139,7 @@ def validate(comparison,plan,scopes):
                 raise ValueError('Technical assignment/instance changed')
         control=journal.parent
         if (control/'safety-stop.json').exists(): raise ValueError('Technical safety/monitor fault retained')
-        if fixed.get('comparison_version') in ('go30m-20261004','go30m-guardianfix-20261004'):
+        if fixed.get('comparison_version') in ('go30m-20261004','go30m-guardianfix-20261004','go30m-pathfix-20261004'):
             started=util.read_json(control/'wall-guardian-start.json')
             completed_guard=util.read_json(control/'wall-guardian-completed.json')
             supervisor=util.read_json(control/'wall-supervisor-completed.json')

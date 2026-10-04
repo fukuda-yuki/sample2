@@ -99,6 +99,13 @@ class SeparatePreparationPlanTests(unittest.TestCase):
         self.assertEqual([c['attempt'] for p in fixed for c in p['cases']],[90081,90081,90082,90082])
         self.assertEqual(technical.comparison_limits('go30m-guardianfix-20261004'),
                          technical.comparison_limits('go30m-20261004'))
+        short_cohort,short=technical.comparison_assignments('go30m-pathfix-20261004',['explore','preload'])
+        self.assertLess(len(short_cohort),len(fixed_cohort))
+        self.assertFalse({c['run_instance_id'] for p in short for c in p['cases']} &
+                         {c['run_instance_id'] for p in fixed for c in p['cases']})
+        self.assertEqual([c['attempt'] for p in short for c in p['cases']],[90091,90091,90092,90092])
+        self.assertEqual(technical.comparison_limits('go30m-pathfix-20261004'),
+                         technical.comparison_limits('go30m-20261004'))
 
     def test_additional_plan_requires_exact_current_authorization(self):
         path=self.root/'unauthorized.json'

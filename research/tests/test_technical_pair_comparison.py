@@ -52,6 +52,53 @@ class PreparationVisibilityTests(unittest.TestCase):
         self.assertEqual(list(self.monitor.manifests()), [])
 
 
+class SeparatePreparationPlanTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.batch = self.root / '_technical-sharing-v5-100p2-20261003'
+        util.write_new_json(self.batch / '_control/safety-stop.json',
+                            {'reason':'safety_monitor_fault','error_type':'KeyError'})
+        util.write_new_json(self.batch / 'A/manifest.json',
+                            {'model_called':False,'started_at':None})
+        original = self.root / 'original-bundle.json'
+        util.write_new_json(original, {'cohort':'runs/'+self.batch.name,'source_commit':'old'})
+        self.proof = self.root / 'proof.json'
+        util.write_new_json(self.proof, {'cohort':str(self.batch),
+            'original_bundle':next_phase.reference(original),'original_code_commit':'old',
+            'counts':{'technical_actual_dispatched_runs':0,'technical_dispatch_records':0},
+            'safety_stop':util.read_json(self.batch/'_control/safety-stop.json'),
+            'inventory':{p.relative_to(self.batch).as_posix():{'sha256':util.sha256_file(p),
+                'bytes':p.stat().st_size} for p in self.batch.rglob('*') if p.is_file()}})
+
+    def test_separate_fixed_identities_do_not_replace_initial_slots(self):
+        old_cohort, old = technical.comparison_assignments('initial',['explore','preload'])
+        new_cohort, new = technical.comparison_assignments('monitorfix-20261004',['explore','preload'])
+        self.assertNotEqual(old_cohort,new_cohort)
+        old_ids={c['run_instance_id'] for p in old for c in p['cases']}
+        new_ids={c['run_instance_id'] for p in new for c in p['cases']}
+        self.assertFalse(old_ids & new_ids); self.assertEqual(len(new_ids),4)
+        self.assertEqual([c['slot'] for p in new for c in p['cases']],[1,2,3,4])
+        self.assertEqual([c['attempt'] for p in new for c in p['cases']],[90061,90061,90062,90062])
+
+    def test_unchanged_original_unsent_preparation_fault_is_verified(self):
+        technical.verify_preparation_failure(next_phase.reference(self.proof))
+
+    def test_changed_original_or_new_dispatch_cannot_expand_total_bound(self):
+        (self.batch/'A/manifest.json').write_text('{"model_called":true}')
+        with self.assertRaisesRegex(ValueError,'Stopped original changed'):
+            technical.verify_preparation_failure(next_phase.reference(self.proof))
+
+    def test_ambiguous_runtime_exists_is_rejected_even_with_updated_inventory(self):
+        util.write_new_json(self.batch/'A/runtime.json',{'ambiguous':True})
+        proof=util.read_json(self.proof)
+        proof['inventory']={p.relative_to(self.batch).as_posix():{'sha256':util.sha256_file(p),
+            'bytes':p.stat().st_size} for p in self.batch.rglob('*') if p.is_file()}
+        util.write_json_atomic(self.proof,proof)
+        with self.assertRaisesRegex(ValueError,'send/start ambiguity'):
+            technical.verify_preparation_failure(next_phase.reference(self.proof))
+
+
 class StopLatchTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)

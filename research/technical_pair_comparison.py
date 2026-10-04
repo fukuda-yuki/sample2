@@ -25,6 +25,54 @@ LIMITS = {'maximum_dispatches': 4, 'run_seconds': 1800,
     'gateway_started_calls_stop': 600, 'reported_observed_tokens_stop': 20_000_000,
     'no_retries_or_replacements': True, 'order': [1, 2]}
 
+COMPARISONS = {
+    'initial': ('runs/_technical-sharing-v5-100p2-20261003', 90051, 'technical'),
+    'monitorfix-20261004': ('runs/_technical-sharing-v5-100p2-monitorfix-20261004',
+                          90061, 'technical-monitorfix-20261004'),
+}
+
+
+def comparison_assignments(version, arms):
+    cohort, first_attempt, namespace = COMPARISONS[version]
+    return cohort, [{'pair': pair, 'task': 'MS1-CONT-A', 'cases': [
+        {'pair': pair, 'block': pair, 'slot': (pair - 1) * 2 + pos,
+         'position': pos, 'task': 'MS1-CONT-A', 'condition': arm,
+         'attempt': first_attempt + pair - 1,
+         'run_id': f'MS1-CONT-A-{arm}-{first_attempt + pair - 1}',
+         'run_instance_id': uuid.uuid5(uuid.NAMESPACE_URL,
+             next_phase.V5_SCIENTIFIC_SHA256 + f'/{namespace}/{pair}/{arm}').hex}
+        for pos, arm in enumerate(arms, 1)]} for pair in (1, 2)]
+
+
+def verify_preparation_failure(reference):
+    """A separate fixed plan is allowed only while the stopped original is unsent.
+
+    Never clears its latch, edits its bundle, resumes or replaces a sent Run.
+    This correspondence is rechecked before every new block and adoption.
+    """
+    proof = paired_acceptance.read_reference(reference)
+    batch = Path(proof['cohort']).resolve()
+    original = paired_acceptance.read_reference(proof['original_bundle'])
+    if (batch.name != '_technical-sharing-v5-100p2-20261003'
+            or original['cohort'] != 'runs/' + batch.name
+            or original['source_commit'] != proof['original_code_commit']
+            or proof['counts']['technical_actual_dispatched_runs'] != 0
+            or proof['counts']['technical_dispatch_records'] != 0
+            or proof['safety_stop'] != util.read_json(batch / '_control/safety-stop.json')
+            or proof['safety_stop']['reason'] != 'safety_monitor_fault'):
+        raise ValueError('Separate comparison requires the preserved unsent preparation fault')
+    current = pair_execution.state(batch / '_control/pair-journal.jsonl')
+    inventory = {p.relative_to(batch).as_posix(): {'sha256': util.sha256_file(p),
+                 'bytes': p.stat().st_size} for p in batch.rglob('*') if p.is_file()}
+    if current['dispatch'] or inventory != proof['inventory']:
+        raise ValueError('Stopped original changed or dispatched; never extend four-send bound')
+    for path in batch.glob('*/manifest.json'):
+        manifest = util.read_json(path)
+        if (manifest.get('model_called') is not False or manifest.get('started_at') is not None
+                or (path.parent / 'runtime.json').exists() or (path.parent / 'usage').exists()):
+            raise ValueError('Original send/start ambiguity bars separate comparison')
+    return proof
+
 
 class StopLatch:
     """Stop admission first; notify every owned root before waiting for stops."""
@@ -191,13 +239,21 @@ def rebind_serializer(repo, prior_bundle, witness, output):
     return {'bound':True,'receipt':next_phase.reference(output),'model_called':False,'credential_read':False}
 
 
-def prepare(repo, destination, browser_pin, serializer_witness, authorization):
+def prepare(repo, destination, browser_pin, serializer_witness, authorization, *,
+            comparison_version='initial', preparation_failure=None):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if not destination.is_relative_to(repo / 'artifacts') or destination.exists():
         raise ValueError('Use a new owned technical preparation directory')
     if next_phase.git(repo, 'status', '--porcelain'):
         raise ValueError('Commit final code before freezing the technical comparison')
     plan = next_phase.validate_plan(util.read_json(repo / next_phase.V5_PLAN))
+    cohort, assignments = comparison_assignments(comparison_version, plan['arms'])
+    if comparison_version != 'initial':
+        if preparation_failure is None: raise ValueError('Preserved unsent fault evidence required')
+        failure_reference = next_phase.reference(preparation_failure)
+        verify_preparation_failure(failure_reference)
+    elif preparation_failure is not None:
+        raise ValueError('Initial comparison cannot be relabelled as post-fault')
     browser = util.read_json(browser_pin)
     catalog_environment.validate(browser, repo)
     serializer_applicability(repo,util.read_json(serializer_witness),plan)
@@ -220,16 +276,6 @@ def prepare(repo, destination, browser_pin, serializer_witness, authorization):
     for generated_root in generated_roots:
         for asset in generated_root.rglob('*'):
             if asset.is_file(): pins[asset.relative_to(repo).as_posix()] = util.sha256_file(asset)
-    assignments = []
-    for pair, attempt in ((1, 90051), (2, 90052)):
-        cases = [{'pair': pair, 'block': pair, 'slot': (pair - 1) * 2 + pos,
-            'position': pos, 'task': task, 'condition': arm, 'attempt': attempt,
-            'run_id': f'{task}-{arm}-{attempt}',
-            'run_instance_id': uuid.uuid5(uuid.NAMESPACE_URL,
-                next_phase.V5_SCIENTIFIC_SHA256 + f'/technical/{pair}/{arm}').hex}
-            for pos, arm in enumerate(plan['arms'], 1)]
-        assignments.append({'pair': pair, 'task': task, 'cases': cases})
-    cohort = 'runs/_technical-sharing-v5-100p2-20261003'
     if (repo / cohort).exists():
         raise ValueError('Technical cohort already exists; no replay or replacement')
     destination.mkdir(parents=True)
@@ -244,6 +290,10 @@ def prepare(repo, destination, browser_pin, serializer_witness, authorization):
         'minimum_next_pair_free_bytes':8_000_000_000,
         'total_time_boundary': 'execute-start through actual public/restore/cleanup pair-gate timestamp',
         'adoption': 'No control/original/usage/load defects; actual different-Run HTTP overlap; paired total time strictly less than serial; no quality/distribution-equivalence requirement.'}
+    if comparison_version != 'initial':
+        fixed.update(comparison_version=comparison_version, preparation_failure=failure_reference,
+                     total_actual_dispatch_upper_bound_across_plans=4,
+                     separate_plan_not_resume=True)
     util.write_new_json(destination / 'fixed-comparison-plan.json', fixed)
     bundle = {'kind': 'continuity_sharing_technical_fixture', 'source_commit': fixed['source_commit'],
         'plan': plan, 'plan_reference': fixed['plan_reference'], 'assignments': assignments,
@@ -272,12 +322,20 @@ def check(repo, bundle_path, *, environment=True):
     bundle = util.read_json(bundle_path)
     next_phase.validate_plan(bundle['plan'])
     fixed = paired_acceptance.read_reference(bundle['technical_plan'])
+    version = fixed.get('comparison_version', 'initial')
+    if version not in COMPARISONS: raise ValueError('Unknown fixed technical comparison version')
+    cohort, assignments = comparison_assignments(version, bundle['plan']['arms'])
+    if version != 'initial':
+        if (fixed.get('total_actual_dispatch_upper_bound_across_plans') != 4
+                or fixed.get('separate_plan_not_resume') is not True):
+            raise ValueError('Separate comparison cannot extend or resume the stopped original')
+        verify_preparation_failure(fixed['preparation_failure'])
     if (fixed.get('python') != {'path':sys.executable,'version':sys.version,'sha256':util.sha256_file(sys.executable)}
             or fixed.get('minimum_next_pair_free_bytes') != 8_000_000_000
             or shutil.disk_usage(repo).free < fixed['minimum_next_pair_free_bytes']):
         raise ValueError('Technical Python identity or next-pair storage admission failed')
     if (bundle.get('kind') != 'continuity_sharing_technical_fixture'
-            or bundle.get('cohort') != 'runs/_technical-sharing-v5-100p2-20261003'
+            or bundle.get('cohort') != cohort or fixed['assignments'] != assignments
             or fixed.get('kind') != 'finite_v5_technical_comparison_plan'
             or any(fixed.get(k)!=v for k,v in LIMITS.items())
             or paired_acceptance.read_reference(bundle['plan_reference']) != bundle['plan']
@@ -499,6 +557,8 @@ def main():
     parser.add_argument('--serializer-witness',type=Path)
     parser.add_argument('--authorization',type=Path)
     parser.add_argument('--prior-bundle',type=Path)
+    parser.add_argument('--comparison-version', choices=tuple(COMPARISONS), default='initial')
+    parser.add_argument('--preparation-failure',type=Path)
     args=parser.parse_args()
     if args.mode=='rebind-serializer':
         if not all((args.out,args.prior_bundle,args.serializer_witness)):
@@ -507,7 +567,8 @@ def main():
     elif args.mode=='prepare':
         if not all((args.out,args.browser,args.serializer_witness,args.authorization)):
             parser.error('prepare requires --out --browser --serializer-witness --authorization')
-        result=prepare(args.repo,args.out,args.browser,args.serializer_witness,args.authorization)
+        result=prepare(args.repo,args.out,args.browser,args.serializer_witness,args.authorization,
+            comparison_version=args.comparison_version,preparation_failure=args.preparation_failure)
     else:
         if not args.bundle: parser.error('--bundle required')
         if args.mode=='execute': result=execute(args.repo,args.bundle)

@@ -127,11 +127,12 @@ class Dispatcher:
                 'phase_path': str(self.phase_path), 'old_journal': self.phase['old_journal'],
                 'original_bundle': self.phase['original_bundle'], 'approval': self.approval}
             handoff = self.control / 'phase-handoff.json'
-            if self.phase['kind'] == wave_plan.V2_KIND:
-                successor = util.read_json(self.control / 'phase-handoff-v2.json')
+            if self.phase['kind'] in (wave_plan.V2_KIND, wave_plan.V3_KIND):
+                version = self.phase['schema_version']
+                successor = util.read_json(self.control / ('phase-handoff-v' + str(version) + '.json'))
                 if (successor.get('new_phase') != {'path': str(self.phase_path), 'sha256': self.digest}
                         or successor.get('approval') != self.approval):
-                    raise ValueError('Explicit immutable v2 handoff required')
+                    raise ValueError('Explicit immutable successor handoff required')
             elif handoff.exists():
                 if util.read_json(handoff) != marker: raise ValueError('Different durable phase owner')
             else: util.write_new_json(handoff, marker)
@@ -428,29 +429,41 @@ class Dispatcher:
 
 
 def handoff_v2(repo, phase_path, approval):
-    """Append one successor under the original cohort lease; never edits v1."""
+    return _handoff(repo, phase_path, approval, 2)
+
+
+def handoff_v3(repo, phase_path, approval):
+    return _handoff(repo, phase_path, approval, 3)
+
+
+def _handoff(repo, phase_path, approval, version):
+    """Append a successor under the original cohort lease; never edits ancestors."""
     repo, phase_path = Path(repo).resolve(), Path(phase_path).resolve()
     phase = util.read_json(phase_path); digest = util.sha256_file(phase_path)
-    if phase.get('kind') != wave_plan.V2_KIND: raise ValueError('Explicit v2 successor phase required')
+    if phase.get('kind') != (wave_plan.V2_KIND if version == 2 else wave_plan.V3_KIND):
+        raise ValueError('Explicit versioned successor phase required')
     if (approval.get('approved_by') != 'user' or approval.get('authorized') is not True
             or approval.get('phase_sha256') != digest or not approval.get('authorization_reference')):
-        raise ValueError('Exact-new-phase authorization required for v2 handoff')
-    control = Path(phase['batch']) / '_control'; target = control / 'phase-handoff-v2.json'
+        raise ValueError('Exact-new-phase authorization required for successor handoff')
+    control = Path(phase['batch']) / '_control'; target = control / ('phase-handoff-v' + str(version) + '.json')
     predecessor = phase['predecessor_phase']['sha256']
     with pair.exclusive(control, phase_permit=digest if target.exists() else predecessor):
         wave_plan.validate(phase, repo=repo)
-        marker_path = control / 'phase-handoff.json'; marker = util.read_json(marker_path)
-        if (marker.get('phase_sha256') != predecessor
-                or Path(marker['phase_path']).resolve() != Path(phase['predecessor_phase']['path']).resolve()
-                or marker.get('original_bundle') != phase['original_bundle']):
+        marker_path = control / ('phase-handoff.json' if version == 2 else 'phase-handoff-v2.json')
+        marker = util.read_json(marker_path)
+        owner = {'sha256': marker.get('phase_sha256'), 'path': marker.get('phase_path')} if version == 2 else marker['new_phase']
+        previous_phase = util.read_json(phase['predecessor_phase']['path'])
+        if (owner['sha256'] != predecessor
+                or Path(owner['path']).resolve() != Path(phase['predecessor_phase']['path']).resolve()
+                or previous_phase['original_bundle'] != phase['original_bundle']):
             raise ValueError('Original immutable predecessor owner differs')
-        receipt = {'kind': 'central_fixed_wave_successor_handoff_v2',
+        receipt = {'kind': 'central_fixed_wave_successor_handoff_v' + str(version),
             'previous_handoff': {'path': str(marker_path.resolve()), 'sha256': util.sha256_file(marker_path)},
             'previous_phase_sha256': predecessor, 'predecessor_journal': phase['predecessor_journal'],
             'predecessor_gates': phase['predecessor_gates'],
             'new_phase': {'path': str(phase_path), 'sha256': digest}, 'approval': approval}
         if target.exists():
-            if util.read_json(target) != receipt: raise ValueError('Immutable v2 handoff cannot be overwritten')
+            if util.read_json(target) != receipt: raise ValueError('Immutable successor handoff cannot be overwritten')
         else: util.write_new_json(target, receipt)
     return {'status': 'handed_off', 'phase_sha256': digest, 'old_phase_edited': False,
         'receipt_path': str(target), 'model_dispatched': False}

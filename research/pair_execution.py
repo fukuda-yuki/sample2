@@ -31,25 +31,39 @@ def exclusive(control, *, phase_permit=None):
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             handoff = control / 'phase-handoff.json'
-            if (control / 'phase-handoff-v2.json').exists() and not handoff.exists():
+            successors = [(version, control / ('phase-handoff-v' + str(version) + '.json'))
+                          for version in (2, 3)]
+            if any(path.exists() for _, path in successors) and not handoff.exists():
                 raise ValueError('Missing immutable predecessor handoff')
             if handoff.exists():
                 marker = util.read_json(handoff)
-                successor = control / 'phase-handoff-v2.json'
-                if successor.exists():
+                owner, owner_path = marker.get('phase_sha256'), marker.get('phase_path')
+                parent_marker = handoff
+                for version, successor in successors:
+                    if not successor.exists():
+                        if any(path.exists() for later, path in successors if later > version):
+                            raise ValueError('Missing immutable intermediate handoff')
+                        continue
                     changed = util.read_json(successor)
-                    baseline = changed.get('previous_handoff', {})
-                    phase = changed.get('new_phase', {})
-                    if (changed.get('kind') != 'central_fixed_wave_successor_handoff_v2'
-                            or Path(baseline.get('path', '')).resolve() != handoff.resolve()
-                            or baseline.get('sha256') != util.sha256_file(handoff)
-                            or changed.get('previous_phase_sha256') != marker.get('phase_sha256')
+                    baseline, phase = changed.get('previous_handoff', {}), changed.get('new_phase', {})
+                    if (changed.get('kind') != 'central_fixed_wave_successor_handoff_v' + str(version)
+                            or Path(baseline.get('path', '')).resolve() != parent_marker.resolve()
+                            or baseline.get('sha256') != util.sha256_file(parent_marker)
+                            or changed.get('previous_phase_sha256') != owner
                             or not phase.get('path') or util.sha256_file(phase['path']) != phase.get('sha256')):
                         raise ValueError('Invalid or changed immutable successor handoff')
-                    marker = {'kind': 'central_fixed_wave_handoff_v1', 'phase_sha256': phase['sha256']}
+                    successor_phase = util.read_json(phase['path'])
+                    previous = successor_phase.get('predecessor_phase', {})
+                    if (successor_phase.get('kind') != 'source_info_v5_central_fixed_wave_phase_v' + str(version)
+                            or previous.get('sha256') != owner
+                            or not owner_path or Path(previous.get('path', '')).resolve() != Path(owner_path).resolve()
+                            or successor_phase.get('original_bundle') != marker.get('original_bundle')
+                            or changed.get('predecessor_journal') != successor_phase.get('predecessor_journal')
+                            or changed.get('predecessor_gates') != successor_phase.get('predecessor_gates')):
+                        raise ValueError('Successor does not preserve immutable ancestor chain')
+                    owner, owner_path, parent_marker = phase['sha256'], phase['path'], successor
                 if (marker.get('kind') != 'central_fixed_wave_handoff_v1'
-                        or not marker.get('phase_sha256')
-                        or marker.get('phase_sha256') != phase_permit):
+                        or not owner or owner != phase_permit):
                     raise ValueError('Cohort handed off to central wave dispatcher; legacy entrypoint fenced')
             yield
         finally:

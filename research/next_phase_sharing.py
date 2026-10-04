@@ -136,7 +136,7 @@ def stage(repo, bundle_path, number, destination, *, context=None, phase=None):
             '\n## Prospectively amended execution phase\n\n'
             'The original v5 allocation and its first five pairs remain historical records. '
             'This pair belongs to the separately approved central fixed-wave phase for '
-            + ('original pairs 12–100: two pairs/four Runs under unchanged operational health criteria. '
+            + ('original pairs ' + str(max(phase['completed_earlier_pairs']) + 1) + '–100: two pairs/four Runs under unchanged operational health criteria. '
                if phase.get('maximum_pairs') == 2 else
                'original pairs 6–100: initially two pairs/four Runs, optionally four pairs/eight Runs under predeclared operational health criteria. ')
             + 'Internal Run concurrency '

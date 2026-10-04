@@ -11,6 +11,9 @@ from research import next_phase, pair_execution
 
 KIND = 'source_info_v5_central_fixed_wave_phase_v1'
 V2_KIND = 'source_info_v5_central_fixed_wave_phase_v2'
+V3_KIND = 'source_info_v5_central_fixed_wave_phase_v3'
+V3_PROBE_SHA = '5efb52edd48f37713b623df46d01ebbd89e2e3321c6548fe1ac2982bd97c9354'
+MONITOR_SHA = 'fcd37689e47423e5f9400ace9080ec2315ba3ad79df6a715f264547dc30f5a67'
 HEALTH_FLAGS = ('host_healthy', 'resource_healthy', 'journal_healthy',
                 'http_healthy', 'provider_healthy')
 RESOURCE_LIMITS = ('host_memory_available_min_bytes', 'docker_memory_available_min_bytes',
@@ -63,6 +66,8 @@ def build(original_bundle, old_journal, batch, *, thresholds, source_commit, sou
 
 
 def validate(phase, *, repo=None):
+    if phase.get('kind') == V3_KIND:
+        return validate_v3(phase, repo=repo)
     if phase.get('kind') == V2_KIND:
         return validate_v2(phase, repo=repo)
     if (phase.get('kind') != KIND or phase.get('schema_version') != 1
@@ -146,19 +151,21 @@ def predecessor_state(phase):
     if not next_phase.verify_reference(ref) or not next_phase.verify_reference(journal):
         raise ValueError('Predecessor phase/journal bytes changed')
     previous = util.read_json(ref['path'])
-    if previous.get('kind') != KIND: raise ValueError('Only a fully closed v1 predecessor is supported')
+    expected_kind = V2_KIND if phase.get('kind') == V3_KIND else KIND
+    if previous.get('kind') != expected_kind: raise ValueError('Successor must retain the exact preceding phase version')
     original = validate(previous)
     for key in ('resource_monitor', 'resource_probe', 'resource_collector_acceptance'):
         if not next_phase.verify_reference(previous[key]): raise ValueError('Historical collector proof changed: ' + key)
     expected_journal = Path(previous['batch']) / '_control' / previous['phase_id'] / 'wave-journal.jsonl'
     if Path(journal['path']).resolve() != expected_journal.resolve(): raise ValueError('Wrong predecessor journal location')
     current = wave_dispatch.state(journal['path'], previous, ref['sha256'])
-    expected = {c['run_id']: c for p in original['assignments'][5:11] for c in p['cases']}
+    prior_pairs = range(12, 14) if expected_kind == V2_KIND else range(6, 12)
+    expected = {c['run_id']: c for p in original['assignments'] if p['pair'] in prior_pairs for c in p['cases']}
     if (current['pending'] or set(current['dispatch']) != set(expected) or set(current['reserved']) != set(expected)
             or set(current['implementations']) != set(expected) or set(current['results']) != set(expected)
-            or set(current['gates']) != set(range(6, 12))
+            or set(current['gates']) != set(prior_pairs)
             or any(current['dispatch'][rid]['run_instance_id'] != c['run_instance_id'] for rid, c in expected.items())):
-        raise ValueError('All and only predecessor pairs6-11 must be stopped/fixed/scored/gated before transition')
+        raise ValueError('All and only predecessor boundary pairs must be stopped/fixed/scored/gated before transition')
     gates = {str(n): {'path': gate['receipt_path'], 'sha256': gate['receipt_sha256']} for n, gate in current['gates'].items()}
     if phase['predecessor_gates'] != gates: raise ValueError('Exact predecessor gate references changed')
     old = pair_execution.state(previous['old_journal']['path'])
@@ -242,6 +249,211 @@ def validate_v2(phase, *, repo=None):
             if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v2 source pin changed: ' + name)
     return original
 
+
+
+def _checked_json(phase, key):
+    reference = phase.get(key)
+    if not isinstance(reference, dict) or not next_phase.verify_reference(reference):
+        raise ValueError('Required final v3 acceptance reference missing or changed: ' + key)
+    return util.read_json(reference['path'])
+
+
+def _utc_timestamp(value):
+    from datetime import datetime, timezone
+    stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if stamp.tzinfo is None: raise ValueError('Evidence timestamp must retain timezone')
+    return stamp.astimezone(timezone.utc)
+
+
+def _validate_v3_acceptance(phase, previous):
+    """Technical success alone cannot close the retained formal-dispatch hold."""
+    finite = _checked_json(phase, 'finite_acceptance')
+    soak = _checked_json(phase, 'actual_soak_verification')
+    review = _checked_json(phase, 'post_soak_independent_review')
+    boundary = _checked_json(phase, 'post_v2_boundary')
+    hold_boundary = _checked_json(phase, 'hold_boundary')
+    _checked_json(phase, 'revised_hold_instruction')
+    decision = _checked_json(phase, 'resource_collector_acceptance')
+    probe, monitor = phase['resource_probe']['sha256'], phase['resource_monitor']['sha256']
+    if (finite.get('candidate', {}).get('sha256') != probe
+            or finite.get('unchanged_monitor', {}).get('sha256') != monitor
+            or finite.get('all_native_expected_decisions_passed') is not True):
+        raise ValueError('Exact candidate finite acceptance required')
+    for reference in (finite['candidate'], finite['unchanged_monitor']):
+        if not next_phase.verify_reference(reference): raise ValueError('Finite candidate bytes changed')
+    if (boundary.get('kind') != 'quiescent_pre_v3_boundary'
+            or boundary.get('phase') != phase['predecessor_phase']
+            or boundary.get('journal') != phase['predecessor_journal']
+            or boundary.get('gates') != phase['predecessor_gates']
+            or boundary.get('actual_sent') != 26 or boundary.get('all_stopped_fixed') is not True
+            or boundary.get('active_run_containers_at_final_recovery_sample') != 0
+            or boundary.get('recovery_controller_exit_code') != 0):
+        raise ValueError('Exact quiescent26-instance/13-gate boundary required')
+    _utc_timestamp(boundary['at'])
+    if (hold_boundary.get('kind') != 'quiescent_post_v2_recurrence_boundary'
+            or hold_boundary.get('phase') != phase['predecessor_phase']
+            or hold_boundary.get('journal') != phase['predecessor_journal']
+            or hold_boundary.get('gates') != phase['predecessor_gates']
+            or hold_boundary.get('total_actual_sent') != 26 or hold_boundary.get('remaining_original_unsent') != 174
+            or hold_boundary.get('all26_stopped_fixed') is not True or hold_boundary.get('all13_gates_complete') is not True
+            or hold_boundary.get('new_research_dispatch_held') is not True):
+        raise ValueError('Original immutable post-v2 hold boundary required')
+    hold_at = _utc_timestamp(hold_boundary['at'])
+    if (soak.get('kind') != 'actual_nonmodel_soak_bounded_evidence_verification'
+            or soak.get('scheduled_samples') != 180 or soak.get('controlled_stop_observations') != 3
+            or soak.get('owned_fixtures_created_started_stopped_removed') != 8
+            or soak.get('all_original_references_checked_unchanged') is not True
+            or soak.get('original_research_sent_runs') != 26 or soak.get('remaining_original_unsent') != 174
+            or soak.get('formal_research_resume_authorized') is not False
+            or soak.get('historical_cause_resolved') is not False or soak.get('model_called') is not False):
+        raise ValueError('Completed independently verified actual180+3 nonmodel soak required')
+    for field in ('result', 'protocol', 'attempt', 'ownership', 'command_ledger'):
+        if not next_phase.verify_reference(soak[field]): raise ValueError('Actual soak evidence changed')
+    result, protocol = util.read_json(soak['result']['path']), util.read_json(soak['protocol']['path'])
+    if (result.get('status') != 'passed' or result.get('completed_scheduled_samples') != 180
+            or len(result.get('transition_observations', [])) != 3 or result.get('cleanup_errors') != []
+            or result.get('model_called') is not False or result.get('research_dispatched') is not False
+            or result.get('protocol_sha256') != soak['protocol']['sha256']
+            or protocol.get('probe', {}).get('sha256') != probe or protocol.get('monitor', {}).get('sha256') != monitor
+            or protocol.get('original_bundle') != phase['original_bundle']
+            or protocol.get('source', {}).get('commit') != soak.get('source_commit')
+            or not soak.get('source_commit')
+            or protocol.get('scheduled_samples') != 180 or protocol.get('cadence_seconds') != 10):
+        raise ValueError('Actual soak result/protocol does not bind exact reviewed candidate')
+    if (review.get('kind') != 'actual_nonmodel_soak_independent_evidence_review_v3'
+            or review.get('operational_soak_verified') is not True
+            or review.get('historical_cause_resolved') is not False
+            or review.get('formal_174_hold_remains') is not True
+            or review.get('actual_verification') != phase['actual_soak_verification']
+            or review.get('protocol') != soak['protocol'] or review.get('result') != soak['result']):
+        raise ValueError('Exact advisory post-soak review must preserve unresolved historical cause and174 hold')
+    bindings = {'source_commit': phase['source_commit'], 'original_bundle_sha256': phase['original_bundle']['sha256'],
+        'post_v2_boundary': phase['post_v2_boundary'], 'hold_boundary': phase['hold_boundary'],
+        'revised_hold_instruction': phase['revised_hold_instruction'], 'predecessor_journal_sha256': phase['predecessor_journal']['sha256'],
+        'resource_probe_sha256': probe, 'resource_monitor_sha256': monitor,
+        'operational_policy_sha256': previous['operational_policy']['sha256'],
+        'finite_acceptance': phase['finite_acceptance'], 'actual_soak_verification': phase['actual_soak_verification'],
+        'post_soak_independent_review': phase['post_soak_independent_review']}
+    if (decision.get('kind') != 'prospective_resource_fault_recovery_decision_v3'
+            or decision.get('formal_remaining_dispatch_authorized') is not True
+            or decision.get('cause_condition_satisfied') is not True
+            or type(decision.get('historical_cause_resolved')) is not bool
+            or any(decision.get(k) != v for k, v in bindings.items())):
+        raise ValueError('Explicit exact-source cause-condition recovery decision required; soak alone cannot authorize')
+    mode = decision.get('acceptance_mode')
+    if mode not in ('verified_mechanism_resolution', 'parent_explicit_revised_condition'):
+        raise ValueError('Unsupported cause-condition acceptance mode')
+    if mode == 'verified_mechanism_resolution' or decision['historical_cause_resolved']:
+        evidence = decision.get('mechanism_resolution')
+        if not decision['historical_cause_resolved'] or not evidence or not next_phase.verify_reference(evidence):
+            raise ValueError('Historical mechanism resolution must have exact affirmative evidence')
+        proof = util.read_json(evidence['path'])
+        if (proof.get('kind') != 'verified_resource_transport_mechanism_resolution'
+                or proof.get('historical_cause_resolved') is not True
+                or proof.get('predecessor_journal_sha256') != phase['predecessor_journal']['sha256']
+                or proof.get('resource_probe_sha256') != probe):
+            raise ValueError('Mechanism evidence does not resolve this retained historical failure')
+        evidence, independent = proof.get('causal_evidence'), proof.get('independent_review')
+        if not evidence or not independent or not next_phase.verify_reference(evidence) or not next_phase.verify_reference(independent):
+            raise ValueError('Separate genuine affirmative independent mechanism evidence required')
+        checked = util.read_json(independent['path'])
+        if (checked.get('kind') != 'verified_resource_transport_mechanism_independent_review'
+                or checked.get('status') != 'passed' or checked.get('historical_cause_resolved') is not True
+                or checked.get('causal_evidence') != evidence
+                or checked.get('predecessor_journal_sha256') != phase['predecessor_journal']['sha256']
+                or checked.get('resource_probe_sha256') != probe):
+            raise ValueError('Advisory false post-soak facts cannot substitute for affirmative mechanism review')
+    if mode == 'parent_explicit_revised_condition':
+        instruction_ref = decision.get('parent_instruction')
+        if not instruction_ref or not next_phase.verify_reference(instruction_ref):
+            raise ValueError('New exact parent instruction required; existing hold is not permission')
+        instruction = util.read_json(instruction_ref['path'])
+        if (instruction.get('kind') != 'parent_explicit_revised_resource_fault_condition_instruction'
+                or instruction.get('authority') != 'parent' or instruction.get('received_after_hold_boundary') is not True
+                or instruction.get('hold_boundary') != phase['hold_boundary']
+                or instruction.get('revised_hold_instruction') != phase['revised_hold_instruction']
+                or instruction_ref == phase['revised_hold_instruction']
+                or instruction.get('revises_existing_hold') is not True
+                or instruction.get('formal_remaining_instances') != 174
+                or instruction.get('original_bundle_sha256') != phase['original_bundle']['sha256']
+                or instruction.get('predecessor_journal_sha256') != phase['predecessor_journal']['sha256']
+                or type(instruction.get('message')) is not str or not instruction['message']
+                or instruction['message'] != decision.get('parent_instruction_verbatim')
+                or _utc_timestamp(instruction['received_at']) <= hold_at):
+            raise ValueError('Received parent authority/new timestamp/verbatim revised-condition provenance required')
+    return decision
+
+
+def build_v3(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+             resource_monitor, resource_probe, finite_acceptance, actual_soak_verification,
+             post_soak_independent_review, post_v2_boundary, hold_boundary, revised_hold_instruction, recovery_decision):
+    """Future-only builder; never supplies a missing cause-condition decision."""
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V2_KIND: raise ValueError('Exact v2 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        from research import wave_dispatch
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        phase = {**previous, 'schema_version': 3, 'kind': V3_KIND, 'phase_id': 'central-wave-pair14-100-v3',
+            'source_commit': source_commit, 'source_pins': source_pins,
+            'completed_pairs': list(range(1, 14)), 'assignments': previous['assignments'][2:],
+            'shards': {k: v for k, v in previous['shards'].items() if int(k) >= 14},
+            'responsibility_counts': [21, 22, 22, 22],
+            'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(14, 101, 2)],
+            'predecessor_phase': next_phase.reference(predecessor_phase),
+            'predecessor_journal': next_phase.reference(predecessor_journal),
+            'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n, g in current['gates'].items()},
+            'resource_monitor': resource_monitor, 'resource_probe': resource_probe,
+            'finite_acceptance': finite_acceptance, 'actual_soak_verification': actual_soak_verification,
+            'post_soak_independent_review': post_soak_independent_review, 'post_v2_boundary': post_v2_boundary,
+            'hold_boundary': hold_boundary, 'revised_hold_instruction': revised_hold_instruction,
+            'resource_collector_acceptance': recovery_decision}
+        validate_v3(phase)
+        return phase
+
+
+def validate_v3(phase, *, repo=None):
+    previous, original, _ = predecessor_state(phase)
+    if (phase.get('schema_version') != 3 or phase.get('phase_id') != 'central-wave-pair14-100-v3'
+            or phase.get('completed_pairs') != list(range(1, 14))
+            or phase.get('assignments') != original['assignments'][13:]
+            or phase.get('responsibility_counts') != [21, 22, 22, 22]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(14, 101, 2)]
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v3 future-only174-instance amendment')
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks', 'predecessor_phase',
+        'predecessor_journal', 'predecessor_gates', 'resource_monitor', 'resource_probe', 'resource_collector_acceptance'}
+    if any(phase.get(k) != v for k, v in previous.items() if k not in mutable):
+        raise ValueError('V3 cannot alter model/input/criteria/budgets/policy or four-Run cap')
+    inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 14}
+    if phase.get('shards') != inherited: raise ValueError('Original responsibility owners changed')
+    for key in ('resource_monitor', 'resource_probe'):
+        if not next_phase.verify_reference(phase[key]): raise ValueError('New collector reference changed: ' + key)
+    if (phase['resource_monitor']['sha256'] != previous['resource_monitor']['sha256']
+            or phase['resource_monitor']['sha256'] != MONITOR_SHA or phase['resource_probe']['sha256'] != V3_PROBE_SHA):
+        raise ValueError('V3 admits only exact reviewed5efb probe and unchanged monitor')
+    monitor, probe = Path(phase['resource_monitor']['path']).resolve(), Path(phase['resource_probe']['path']).resolve()
+    if (probe != monitor.with_name('wave_resource_probe.py')
+            or monitor == Path(previous['resource_monitor']['path']).resolve()
+            or probe == Path(previous['resource_probe']['path']).resolve()):
+        raise ValueError('Prospective helper paths cannot replace predecessor originals')
+    _validate_v3_acceptance(phase, previous)
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v3 source pin changed: ' + name)
+    return original
+
+
+def ancestor_references(phase):
+    result = []
+    while phase.get('predecessor_phase'):
+        reference = phase['predecessor_phase']
+        result.append(reference)
+        phase = util.read_json(reference['path'])
+    return list(reversed(result))
 
 def healthy(snapshot, thresholds):
     """Allowlist only operational inputs. Quality/arm/token outcomes cannot enter."""

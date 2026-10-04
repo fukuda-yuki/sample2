@@ -7,7 +7,7 @@ called here, and no legacy pair journal or recursive cohort lock is used.
 from pathlib import Path
 
 from outer.harness import util
-from research import catalog_share, next_phase_sharing, pair_execution
+from research import catalog_share, next_phase_sharing, pair_execution, wave_plan
 
 
 class Publisher:
@@ -56,6 +56,10 @@ class Publisher:
                 'predecessor_journal_sha256': d.phase['predecessor_journal']['sha256'],
                 'resource_probe_sha256': d.phase['resource_probe']['sha256']}
                if d.phase.get('predecessor_phase') else {}),
+            **({'ancestor_phase_sha256s': [r['sha256'] for r in wave_plan.ancestor_references(d.phase)],
+                'cause_condition_acceptance_sha256': d.phase['resource_collector_acceptance']['sha256'],
+                'actual_soak_verification_sha256': d.phase['actual_soak_verification']['sha256']}
+               if d.phase['kind'] == wave_plan.V3_KIND else {}),
             'evaluator_diagnostics': d.phase.get('evaluator_diagnostics'),
             'limitation': 'Shared resource/provider concurrency is a separate execution condition; historical pairs1–'
                 + str(max(d.phase['completed_pairs'])) + ' and their earlier execution phases are preserved without rescoring.'}

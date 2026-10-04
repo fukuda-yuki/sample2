@@ -81,6 +81,33 @@ class SeparatePreparationPlanTests(unittest.TestCase):
         self.assertEqual([c['slot'] for p in new for c in p['cases']],[1,2,3,4])
         self.assertEqual([c['attempt'] for p in new for c in p['cases']],[90061,90061,90062,90062])
 
+    def test_authorized_30m_plan_has_new_instances_and_keeps_old_limits(self):
+        old_cohort, old = technical.comparison_assignments('monitorfix-20261004',['explore','preload'])
+        new_cohort, new = technical.comparison_assignments('go30m-20261004',['explore','preload'])
+        self.assertNotEqual(new_cohort, old_cohort)
+        self.assertFalse({c['run_instance_id'] for p in old for c in p['cases']} &
+                         {c['run_instance_id'] for p in new for c in p['cases']})
+        self.assertEqual([c['attempt'] for p in new for c in p['cases']], [90071,90071,90072,90072])
+        self.assertEqual(technical.comparison_limits('monitorfix-20261004'),technical.LIMITS)
+        self.assertEqual(technical.comparison_limits('go30m-20261004')['reported_observed_tokens_stop'],30_000_000)
+        self.assertEqual(technical.comparison_limits('go30m-20261004')['comparison_wall_clock_stop_seconds'],9000)
+        self.assertEqual(technical.LIMITS['reported_observed_tokens_stop'],20_000_000)
+
+    def test_additional_plan_requires_exact_current_authorization(self):
+        path=self.root/'unauthorized.json'
+        util.write_new_json(path, {'kind':'explicit_user_additional_four_run_authorization',
+                                  'additional_runs':4,'model_id':'deepseek-v4.1-flash'})
+        with self.assertRaisesRegex(ValueError,'Explicit additional four-Run authorization'):
+            technical.verify_additional_authorization(next_phase.reference(path))
+
+    def test_wall_limit_includes_both_pairs_and_publication_wait(self):
+        start=datetime.now(timezone.utc)
+        util.write_new_json(self.root/'_control/execute-start-1.json', {'at':start.isoformat()})
+        fixed=technical.comparison_limits('go30m-20261004')
+        self.assertFalse(technical.comparison_wall_expired(self.root,fixed,start+timedelta(seconds=8999)))
+        self.assertTrue(technical.comparison_wall_expired(self.root,fixed,start+timedelta(seconds=9000)))
+        self.assertFalse(technical.comparison_wall_expired(self.root,technical.LIMITS,start+timedelta(days=1)))
+
     def test_historical_prepare_cannot_recreate_initial_in_another_checkout(self):
         with self.assertRaisesRegex(ValueError,'historical read-only'):
             technical.prepare(self.root,self.root/'artifacts/new',None,None,None)
@@ -341,6 +368,39 @@ class DriverTests(unittest.TestCase):
         self.enterContext(patch.object(technical,'check',return_value=(self.bundle,self.fixed)))
         self.enterContext(patch.object(pair_execution,'state',return_value=self.current))
         self.enterContext(patch.object(technical,'browser_postprocess',return_value=lambda *a:None))
+
+    def test_guardian_start_receipt_alone_never_means_live(self):
+        control=self.batch/'_control'; control.mkdir(parents=True)
+        now=datetime.now(timezone.utc)
+        identity={'bundle_sha256':'fixture','guardian_id':'g','pid':123}
+        util.write_new_json(control/'wall-guardian-start.json',{'at':now.isoformat(),**identity})
+        self.assertFalse(technical.guardian_alive(control,'fixture',now))
+        util.write_json_atomic(control/'wall-guardian-heartbeat.json',{'at':now.isoformat(),**identity})
+        self.assertTrue(technical.guardian_alive(control,'fixture',now))
+        self.assertFalse(technical.guardian_alive(control,'fixture',now+timedelta(seconds=6)))
+        self.assertFalse(technical.guardian_alive(control,'other',now))
+        util.write_json_atomic(control/'wall-guardian-heartbeat.json',{'at':now.isoformat(),**identity,'guardian_id':'foreign'})
+        self.assertFalse(technical.guardian_alive(control,'fixture',now))
+
+    def test_guardian_covers_gate_interval_and_records_identity(self):
+        self.fixed.update(comparison_version='go30m-20261004',comparison_wall_clock_stop_seconds=9000)
+        waited=[]
+        def gate_wait():
+            self.assertTrue(technical.guardian_alive(self.batch/'_control',util.sha256_file(self.path)))
+            waited.append(True); self.current['gates']={1:{},2:{}}
+        result=technical.guard(self.repo,self.path,wait=gate_wait)
+        self.assertEqual(result['status'],'complete'); self.assertEqual(len(waited),1)
+        start=util.read_json(self.batch/'_control/wall-guardian-start.json')
+        end=util.read_json(self.batch/'_control/wall-guardian-completed.json')
+        self.assertEqual(start['guardian_id'],end['guardian_id'])
+        self.assertEqual(start['pid'],end['pid'])
+
+    def test_missing_live_guardian_blocks_additional_dispatch(self):
+        self.fixed.update(comparison_version='go30m-20261004',comparison_wall_clock_stop_seconds=9000)
+        with patch.object(pair_execution,'execute_pair') as send:
+            self.assertEqual(technical.execute(self.repo,self.path)['reason'],'wall_guardian_not_live')
+            send.assert_not_called()
+        self.assertFalse((self.batch/'_control/execute-start-1.json').exists())
 
     def test_historical_execute_is_read_only_even_in_a_new_checkout(self):
         self.fixed.pop('comparison_version')

@@ -87,9 +87,11 @@ def validate(comparison,plan,scopes):
     limits={'maximum_dispatches':4,'run_seconds':1800,'provider_timeout_seconds':600,
         'maximum_accumulated_run_seconds':7200,'gateway_started_calls_stop':600,
         'reported_observed_tokens_stop':20_000_000}
-    if fixed.get('comparison_version') == 'go30m-20261004':
-        from research.technical_pair_comparison import verify_additional_authorization
+    if fixed.get('comparison_version') in ('go30m-20261004','go30m-guardianfix-20261004'):
+        from research.technical_pair_comparison import verify_additional_authorization,verify_unsent_guardian_failure
         verify_additional_authorization(fixed['additional_authorization'])
+        if fixed.get('comparison_version') == 'go30m-guardianfix-20261004':
+            verify_unsent_guardian_failure(fixed['preparation_failure'])
         if fixed.get('total_actual_dispatch_upper_bound_across_plans') != 8:
             raise ValueError('Additional technical cumulative bound changed')
         limits.update(reported_observed_tokens_stop=30_000_000, comparison_wall_clock_stop_seconds=9000)
@@ -135,7 +137,7 @@ def validate(comparison,plan,scopes):
                 raise ValueError('Technical assignment/instance changed')
         control=journal.parent
         if (control/'safety-stop.json').exists(): raise ValueError('Technical safety/monitor fault retained')
-        if fixed.get('comparison_version') == 'go30m-20261004':
+        if fixed.get('comparison_version') in ('go30m-20261004','go30m-guardianfix-20261004'):
             started=util.read_json(control/'wall-guardian-start.json')
             completed_guard=util.read_json(control/'wall-guardian-completed.json')
             supervisor=util.read_json(control/'wall-supervisor-completed.json')
@@ -151,6 +153,25 @@ def validate(comparison,plan,scopes):
                     or supervisor.get('child_returncode')!=0
                     or supervisor.get('guardian_completion')!=next_phase.reference(control/'wall-guardian-completed.json')):
                 raise ValueError('Wall guardian completion not established')
+            heartbeat_ref=completed_guard['heartbeat_journal']
+            if not next_phase.verify_reference(heartbeat_ref):
+                raise ValueError('Guardian heartbeat journal changed')
+            heartbeats,heartbeat_errors=live_usage.journal(heartbeat_ref['path'])
+            if (heartbeat_errors or not heartbeats or any(
+                    h.get('sequence')!=i or h.get('guardian_id')!=started['guardian_id']
+                    or h.get('pid')!=started['pid'] or h.get('bundle_sha256')!=digest
+                    or h.get('technical_plan_sha256')!=reference['sha256']
+                    for i,h in enumerate(heartbeats))):
+                raise ValueError('Guardian heartbeat identities/sequence incomplete')
+            if any(not 0<=(utc(b['at'])-utc(a['at'])).total_seconds()<=5
+                   for a,b in zip(heartbeats,heartbeats[1:])):
+                raise ValueError('Guardian heartbeat coverage gap')
+            first_start=utc(util.read_json(control/'execute-start-1.json')['at'])
+            last_gate=utc(current['gates'][2]['at'])
+            if (not utc(heartbeats[0]['at'])<=first_start<=utc(heartbeats[-1]['at'])
+                    or abs((utc(heartbeats[-1]['at'])-last_gate).total_seconds())>5
+                    or not last_gate<=utc(completed_guard['at'])<=utc(supervisor['at'])):
+                raise ValueError('Guardian does not cover the full comparison/gate period')
         number=block['pair']; bindings=[b for b in current['dispatch'].values() if b['pair']==number]
         if len(bindings)!=2 or number not in current['gates']: raise ValueError('Both real terminal Runs and gate required')
         saved_gate=current['gates'][number]; gate=util.read_json(saved_gate['receipt'])

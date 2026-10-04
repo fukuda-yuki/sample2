@@ -257,3 +257,26 @@ instruction authorizes the remaining166 subset; this is not a new human reply.
 OS lease and preserves all earlier markers. Every earlier controller permit is
 fenced. Source integration, exact phase freezing, preflight, approval binding
 and actual dispatch remain the central owner's operations.
+
+## Prospective v5: bounded initial pipe acquisition races
+
+V4 pair20/21 stopped after WaitNamedPipe succeeded but another client acquired
+the available instance before CreateFile. V5 retains all42 stopped/fixed original
+Runs and21 preservation gates and covers only original pairs22-100/158 UUIDs.
+The exact490e helper repeats only initial zero-write ERROR_PIPE_BUSY acquisition,
+under one aggregate1second budget, at most8 opens and short bounded backoff.
+Whole-probe10seconds, monitoring cadence/staleness/thresholds, identity checks,
+four-Run cap/internal1, model/inputs/criteria/budgets and postwrite fail-closed
+behavior remain inherited. No model request may be retried or replaced.
+
+The explicit v5 builder/handoff preserve the cohort OS lease and all prior
+markers. Acceptance binds current parent HOLD verbatim, closedV4 journal and
+ACK/gates, finite16/CPUidentity31 results, independent review, and the predeclared
+native race repetitions:30 success/oneGET,10 attempt-limit/zeroGET,3 timeout/zeroGET.
+Every native case leaf and fixture/plan/runner reference is hash-verified.
+A separate receipt records that actual results and remaining158 counts were
+shared; that receipt is evidence of a completed conditional step, not new start
+permission. The HOLD itself is not a new authorization. Exact source review,
+freeze/preflight and the inherited completion authority remain required before
+the central owner can start. Formal acquisition must not serve as repair testing.
+Historical183 soak evidence remains attributed only to its original v3 helper.

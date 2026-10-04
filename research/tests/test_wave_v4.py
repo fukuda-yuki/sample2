@@ -89,7 +89,7 @@ class V4Tests(unittest.TestCase):
             'parent_revised_recovery_authority': self.authority4,
             'parent_instruction_verbatim': util.read_json(self.authority4['path'])['message']}
         self.acceptance4 = save('acceptance', self.acceptance_value)
-        self.phase = self.build()
+        self.phase = V4Tests.build(self)
         self.path = self.repo/'phase-v4.json'; util.write_new_json(self.path, self.phase); self.digest = util.sha256_file(self.path)
         self.approval = {**self.approval, 'phase_sha256': self.digest}
         self.sent.clear(); self.heavy.clear(); self.peak = 0

@@ -11,6 +11,47 @@ from research import next_phase, pair_execution, paired_acceptance as acceptance
 from research import technical_pair_comparison as technical
 
 
+class PreparationVisibilityTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.batch = Path(self.tmp.name)
+        self.case = {'run_id':'A', 'run_instance_id':'1'*32}
+        self.path = self.batch / 'A/manifest.json'
+        self.monitor = technical.PreparedRuns(self.batch)
+
+    def test_intermediate_manifest_is_not_ready_then_complete_identity_is_monitored(self):
+        util.write_new_json(self.path, {'run_id':'A', 'started_at':None, 'model_called':False})
+        with self.assertRaises(KeyError):
+            _ = util.read_json(self.path)['run_instance_id']  # Original race.
+        self.assertEqual(list(self.monitor.manifests()), [])
+        util.write_json_atomic(self.path, self.case)
+        self.monitor.register(self.case)
+        self.assertEqual(list(self.monitor.manifests()), [(self.path.parent,self.case,self.case)])
+
+    def test_incomplete_registration_is_rejected(self):
+        util.write_new_json(self.path, {'run_id':'A'})
+        with self.assertRaises(KeyError): self.monitor.register(self.case)
+        self.assertEqual(list(self.monitor.manifests()), [])
+
+    def test_missing_or_changed_registered_identity_remains_a_fault(self):
+        util.write_new_json(self.path, self.case); self.monitor.register(self.case)
+        util.write_json_atomic(self.path, {'run_id':'A'})
+        with self.assertRaises(KeyError): list(self.monitor.manifests())
+        util.write_json_atomic(self.path, {**self.case,'run_instance_id':'2'*32})
+        with self.assertRaisesRegex(ValueError,'Registered monitoring identity'): list(self.monitor.manifests())
+
+    def test_stop_during_preparation_notifies_both_roots_and_blocks_registration(self):
+        cases = [self.case, {'run_id':'B','run_instance_id':'2'*32}]
+        for case in cases: util.write_new_json(self.batch / case['run_id'] / 'manifest.json', {'run_id':case['run_id']})
+        latch = technical.StopLatch(self.batch,cases,stop=lambda root:self.fail('No runtime exists'))
+        latch.latch('preparation_fault')
+        self.assertTrue(all((self.batch/c['run_id']/'stop-request.json').exists() for c in cases))
+        util.write_json_atomic(self.path,self.case)
+        with self.assertRaisesRegex(RuntimeError,'admission stopped'):
+            with latch.admit(self.case): self.monitor.register(self.case)
+        self.assertEqual(list(self.monitor.manifests()), [])
+
+
 class StopLatchTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)

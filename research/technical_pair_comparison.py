@@ -74,6 +74,36 @@ class StopLatch:
             return list(pool.map(confirm, roots))
 
 
+class PreparedRuns:
+    """Observe only identities explicitly registered after complete preparation.
+
+    profiles.create publishes an intermediate manifest before adding its fixed
+    instance and frozen profile receipts. Directory existence is not readiness.
+    Once registered, missing or changed identity remains a hard monitor fault.
+    """
+    def __init__(self, batch):
+        self.batch, self.lock, self.ready = Path(batch), threading.Lock(), {}
+
+    def register(self, case):
+        manifest = util.read_json(self.batch / case['run_id'] / 'manifest.json')
+        if (manifest['run_id'] != case['run_id']
+                or manifest['run_instance_id'] != case['run_instance_id']):
+            raise ValueError('Prepared monitoring identity mismatch')
+        with self.lock:
+            self.ready[case['run_id']] = dict(case)
+
+    def manifests(self):
+        with self.lock:
+            cases = list(self.ready.values())
+        for case in cases:
+            root = self.batch / case['run_id']
+            manifest = util.read_json(root / 'manifest.json')
+            if (manifest['run_id'] != case['run_id']
+                    or manifest['run_instance_id'] != case['run_instance_id']):
+                raise ValueError('Registered monitoring identity mismatch')
+            yield root, case, manifest
+
+
 def resource_owners(batch, active):
     owners = []
     for root, case in active:
@@ -319,32 +349,35 @@ def execute(repo, bundle_path):
         'bundle_sha256':util.sha256_file(bundle_path),'technical_plan_sha256':bundle['technical_plan']['sha256']})
     done = threading.Event()
     latch = StopLatch(batch, selected['cases'])
+    prepared = PreparedRuns(batch)
+    # Previous gated blocks still contribute to the fixed cumulative limits.
+    for previous in bundle['assignments']:
+        if previous['pair'] not in current['gates']: continue
+        for case in previous['cases']:
+            profiles.validate_run(batch / case['run_id'])
+            machine.verify_conditions(batch / case['run_id'], fixed['conditions'], case['condition'])
+            prepared.register(case)
     resource_path = control / f'resource-samples-{number}.jsonl'
     def watch():
         next_sample = 0
         while not done.wait(1):
             active, total_tokens, count, seconds = [], 0, 0, 0
             fault = None
-            for pair in bundle['assignments']:
-                for case in pair['cases']:
-                    root = batch / case['run_id']
-                    if not (root / 'manifest.json').exists(): continue
-                    manifest = util.read_json(root / 'manifest.json')
-                    if manifest['run_instance_id'] != case['run_instance_id']: fault='identity_fault'
-                    starts,se = live_usage.journal(root / 'usage/raw/started.jsonl')
-                    ends,ee = live_usage.journal(root / 'usage/raw/events.jsonl')
-                    count += len(starts)
-                    if se or ee: fault='damaged_usage_journal'
-                    for event in ends:
-                        amounts=[(event.get('usage') or {}).get(k) for k in ('input_tokens','output_tokens')]
-                        total_tokens += sum(v for v in amounts if type(v) is int and v >= 0)
-                        if (any(type(v) is not int or v < 0 for v in amounts) or event.get('status') != 'completed'
-                                or event.get('session_id') != case['run_instance_id']): fault='provider_or_missing_usage'
-                    if (root / 'usage/raw/failure.jsonl').exists(): fault='provider_fault'
-                    if manifest.get('duration_seconds') is not None: seconds += manifest['duration_seconds']
-                    elif manifest.get('started_at'):
-                        seconds += (datetime.now(timezone.utc)-datetime.fromisoformat(manifest['started_at'])).total_seconds()
-                    if manifest.get('started_at') and not manifest.get('stop_confirmed'): active.append((root,case))
+            for root, case, manifest in prepared.manifests():
+                starts,se = live_usage.journal(root / 'usage/raw/started.jsonl')
+                ends,ee = live_usage.journal(root / 'usage/raw/events.jsonl')
+                count += len(starts)
+                if se or ee: fault='damaged_usage_journal'
+                for event in ends:
+                    amounts=[(event.get('usage') or {}).get(k) for k in ('input_tokens','output_tokens')]
+                    total_tokens += sum(v for v in amounts if type(v) is int and v >= 0)
+                    if (any(type(v) is not int or v < 0 for v in amounts) or event.get('status') != 'completed'
+                            or event.get('session_id') != case['run_instance_id']): fault='provider_or_missing_usage'
+                if (root / 'usage/raw/failure.jsonl').exists(): fault='provider_fault'
+                if manifest.get('duration_seconds') is not None: seconds += manifest['duration_seconds']
+                elif manifest.get('started_at'):
+                    seconds += (datetime.now(timezone.utc)-datetime.fromisoformat(manifest['started_at'])).total_seconds()
+                if manifest.get('started_at') and not manifest.get('stop_confirmed'): active.append((root,case))
             if count >= fixed['gateway_started_calls_stop']: fault='call_safety_limit'
             if total_tokens >= fixed['reported_observed_tokens_stop']: fault='token_safety_limit'
             if seconds >= fixed['maximum_accumulated_run_seconds']: fault='run_time_safety_limit'
@@ -382,6 +415,10 @@ def execute(repo, bundle_path):
         manifest=profiles.create(repo,batch,binding['task'],binding['condition'],binding['attempt'],
             bundle['runtime_id'],run_instance_id=binding['run_instance_id'],assignment=binding)
         machine.verify_conditions(batch/binding['run_id'],fixed['conditions'],binding['condition'])
+        # Stop admission and registration share the stop lock: a preparation
+        # finishing after a safety stop can never become dispatch-eligible.
+        with latch.admit(binding):
+            prepared.register(binding)
         return manifest
     def implement(repo, batch, rid):
         with latch.admit({'run_id':rid}):

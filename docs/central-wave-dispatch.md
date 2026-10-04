@@ -218,3 +218,42 @@ observations, then worker-stop, gateway-stop and all-stop. Current leaf hashes,
 raw/sample equality, monitor sequences/session and exact result transition
 references are rechecked on each validation. Hash reuse is confined to a single
 validation call; no earlier successful validation can hide a subsequent edit.
+# Future-only v4 pipe acquisition amendment
+
+`wave_plan.build_v4` accepts only a closed v3 predecessor with exactly eight
+dispatches and gates14–17. It recursively retains v1/v2/v3 evidence, including
+the historical183 observation hashes and independent review input references.
+The immutable v4 phase covers original pairs18–100 (166 untouched instances),
+inherits responsibility owners/counts, and keeps the four-Run cap, internal1,
+no refill and no escalation. Models, inputs, criteria, budgets and resource
+thresholds remain bound to the original bundle and predecessor.
+
+The offline builder arguments are `predecessor_phase`, `predecessor_journal`,
+`source_commit`, `source_pins`, `resource_monitor`, `resource_probe` and
+`resource_collector_acceptance`. The final acceptance receipt has kind
+`resource_probe_prewrite_pipe_busy_v4_acceptance` and these exact bindings:
+
+- Previous/new probe SHA, unchanged monitor SHA, operational policy SHA,
+  source commit, original bundle SHA and predecessor journal SHA.
+- `finite_acceptance`, `independent_acceptance`, `observed_resource_fault`,
+  `stop_acknowledgements`, `post_v3_boundary`, `standing_completion_authority`
+  and `parent_revised_recovery_authority`, each a path/SHA reference.
+- `prewrite_only:true`, `postwrite_retry:false`,
+  `whole_probe_deadline_seconds:10`, `fail_closed_unchanged:true`,
+  `historical_cause_resolved:false`, `remaining_original_instances:166`,
+  `maximum_runs:4`, `model_called:false`, `run_created:false`, and
+  `parent_instruction_verbatim` equal to the retained new parent instruction.
+
+The technical repair admits only the exact75f9 candidate: one bounded native
+pipe wait/acquire before any HTTP byte is written. Historical v3 soak evidence
+belongs to its original5efb helper and does not authorize v4 helper bytes.
+The actual failure must retain pipe_open/errno22/winerror231 and zero write/body
+bytes. All four owned gateway acknowledgements and worker stops must match.
+The post-v3 boundary must retain all34 stopped/fixed originals and17 gates.
+The standing original completion authority plus the received pipe-only parent
+instruction authorizes the remaining166 subset; this is not a new human reply.
+
+`wave_dispatch.handoff_v4` appends `phase-handoff-v4.json` under the same cohort
+OS lease and preserves all earlier markers. Every earlier controller permit is
+fenced. Source integration, exact phase freezing, preflight, approval binding
+and actual dispatch remain the central owner's operations.

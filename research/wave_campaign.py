@@ -324,9 +324,10 @@ def run_campaign(repo, phase_path, approval_path, *, mode='run', recovery_approv
             or not next_phase.verify_reference(approval['authorization_reference'])):
         raise ValueError('Verified exact-phase user authorization required')
     preflight(repo, phase)
-    if phase.get('kind') in (wave_plan.V2_KIND, wave_plan.V3_KIND):
+    if phase.get('kind') in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND):
         escalate = False
-        handoff = wave_dispatch.handoff_v3 if phase['kind'] == wave_plan.V3_KIND else wave_dispatch.handoff_v2
+        handoff = {wave_plan.V2_KIND: wave_dispatch.handoff_v2, wave_plan.V3_KIND: wave_dispatch.handoff_v3,
+                   wave_plan.V4_KIND: wave_dispatch.handoff_v4}[phase['kind']]
         handoff(repo, phase_path, approval)
     Monitor = load_monitor(phase)
     preparation = phase.get('preparation_view')

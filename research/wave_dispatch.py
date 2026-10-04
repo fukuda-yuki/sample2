@@ -393,6 +393,14 @@ class Dispatcher:
         bindings = current['waves'][-1]['assignments'] if current['waves'] else []
         unsent = [b for b in bindings if b['run_id'] not in current['dispatch']]
         if not unsent or current['pending']: return {'status': 'held', 'reason': 'no_reconciled_unsent_slot'}
+        for binding in bindings:
+            previous = current['implementations'].get(binding['run_id'])
+            if binding['run_id'] in current['dispatch']:
+                receipt = previous['receipt'] if previous else {}
+                if (receipt.get('stop_confirmed') is not True or receipt.get('submission_fixed') is not True
+                        or receipt.get('collection_status') == 'collection_fault' or receipt.get('collection_error_type')):
+                    return {'status': 'held', 'reason': 'dispatched_peer_stop_or_collection_unreconciled',
+                        'run_id': binding['run_id']}
         if (authorization.get('approved_by') != 'user' or authorization.get('authorized') is not True
                 or not authorization.get('authorization_reference')
                 or authorization.get('phase_sha256') != self.digest

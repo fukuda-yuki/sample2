@@ -324,5 +324,18 @@ class WaveTests(unittest.TestCase):
         self.assertIsNotNone(receipt['effective_stop_at'])
         self.assertTrue(all(r['stop_confirmed'] for r in receipt['worker_stops']))
 
+    def test_unsent_resume_blocks_when_a_sent_peer_stop_is_unconfirmed(self):
+        dispatcher = self.dispatcher()
+        with dispatcher.session():
+            def partial(bindings):
+                b = bindings[0]
+                dispatcher.record('dispatch', **b)
+                dispatcher.terminal('implemented', b, {'run_id': b['run_id'],
+                    'run_instance_id': b['run_instance_id'], 'stop_confirmed': False, 'submission_fixed': False})
+                return {'status': 'held'}
+            with patch.object(dispatcher, '_implement', side_effect=partial): dispatcher.execute_next()
+            self.assertEqual(dispatcher.resume_unsent({})['reason'], 'dispatched_peer_stop_or_collection_unreconciled')
+            self.assertFalse(self.sent)
+
 
 if __name__ == '__main__': unittest.main()

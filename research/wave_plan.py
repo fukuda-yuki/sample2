@@ -556,7 +556,8 @@ def _validate_v4_acceptance(phase, previous, current):
             or finite.get('candidate', {}).get('sha256') != phase['resource_probe']['sha256']
             or finite.get('unchanged_monitor', {}).get('sha256') != phase['resource_monitor']['sha256']
             or finite.get('observed_failure') != acceptance['observed_resource_fault']
-            or finite.get('finite_passed') is not True or finite.get('old_cpu_identity_cases_passed') is not True
+            or type(finite.get('finite_passed')) is not int or finite['finite_passed'] != 13
+            or type(finite.get('old_cpu_identity_cases_passed')) is not int or finite['old_cpu_identity_cases_passed'] != 31
             or finite.get('all_ast_outside_native_constructor_unchanged') is not True
             or finite.get('deadline_checks') != {'10_seconds': True, 'shorter_outer_deadline_preserved': True, 'above_10_rejected': True}
             or review.get('kind') != 'prospective_pipe_busy_v4_independent_acceptance'

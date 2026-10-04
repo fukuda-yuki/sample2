@@ -56,7 +56,7 @@ class V4Tests(unittest.TestCase):
             'active_run_containers_at_final_recovery_sample': 0, 'recovery_controller_exit_code': 0})
         self.finite4 = save('finite', {'schema': 'prospective-pipe-busy-acquire-finite-v1',
             'old_probe': self.probe, 'candidate': self.v4probe, 'unchanged_monitor': self.v4monitor,
-            'observed_failure': self.fault, 'finite_passed': True, 'old_cpu_identity_cases_passed': True,
+            'observed_failure': self.fault, 'finite_passed': 13, 'old_cpu_identity_cases_passed': 31,
             'all_ast_outside_native_constructor_unchanged': True,
             'deadline_checks': {'10_seconds': True, 'shorter_outer_deadline_preserved': True, 'above_10_rejected': True},
             'native_receipt': save('native', {'finite_native': True})})
@@ -152,6 +152,20 @@ class V4Tests(unittest.TestCase):
         marker.write_bytes(saved)
         with self.assertRaisesRegex(ValueError, 'cannot be overwritten'):
             wave_dispatch.handoff_v4(self.repo,self.path,{**self.approval,'authorization_reference':'changed'})
+
+    def test_finite_actual_count_schema_rejects_boolean_or_wrong_counts(self):
+        finite = util.read_json(self.finite4['path'])
+        for key, wrong in (('finite_passed', True), ('finite_passed', 12),
+                           ('old_cpu_identity_cases_passed', True), ('old_cpu_identity_cases_passed', 30)):
+            util.write_json_atomic(self.finite4['path'], {**finite, key: wrong})
+            changed_ref = self.reference(self.finite4['path'])
+            review = util.read_json(self.review4['path']); review['finite_acceptance'] = changed_ref
+            util.write_json_atomic(self.review4['path'], review)
+            acceptance = {**self.acceptance_value, 'finite_acceptance': changed_ref,
+                          'independent_acceptance': self.reference(self.review4['path'])}
+            util.write_json_atomic(self.acceptance4['path'], acceptance)
+            with self.subTest(key=key, wrong=wrong), self.assertRaises(ValueError):
+                self.build(resource_collector_acceptance=self.reference(self.acceptance4['path']))
 
     def test_all83_pairs166_mock_sends_stop_gates_max4(self):
         self.handoff(); d=self.dispatcher()

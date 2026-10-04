@@ -76,8 +76,9 @@ def verify_preparation_failure(reference):
 
 class StopLatch:
     """Stop admission first; notify every owned root before waiting for stops."""
-    def __init__(self, batch, cases, stop=runtime.request_stop):
+    def __init__(self, batch, cases, stop=runtime.request_stop, fence=None):
         self.batch, self.cases, self.stop = Path(batch), cases, stop
+        self.fence = fence or runtime.fence_owned
         self.event, self.lock = threading.Event(), threading.RLock()
         self.path = self.batch / '_control/safety-stop.json'
 
@@ -91,15 +92,15 @@ class StopLatch:
             yield
 
     def latch(self, reason, **details):
+        decision_at = next_phase.now()
         with self.lock:
             self.event.set()
-            try:
-                if not self.path.exists():
-                    util.write_new_json(self.path, {'at': next_phase.now(), 'reason': reason, **details})
-            except OSError:
-                # The missing normal-completion receipt also bars the next block
-                # after process loss if storage cannot retain this stop record.
-                pass
+            # Persist the decision before distributed control. A crash here
+            # remains a stop, never an adoption or a permission to resume.
+            if not self.path.exists():
+                try:
+                    util.write_new_json(self.path, {'at': decision_at, 'reason': reason, **details})
+                except OSError: pass
         roots = []
         for case in self.cases:
             root = self.batch / case['run_id']
@@ -115,6 +116,21 @@ class StopLatch:
                     'source': 'finite_v5_technical_comparison', 'reason': reason})
             except OSError: pass
             if (root / 'runtime.json').exists(): roots.append(root)
+        def fence(root):
+            try: return self.fence(root)
+            except Exception as exc:
+                return {'confirmed': False, 'error_type': type(exc).__name__, 'run_id': root.name}
+        # Initiate both dispatch fences before waiting for either worker. The
+        # host decision timestamp is not an instantaneous distributed fence.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fences = list(pool.map(fence, roots))
+        try:
+            util.write_new_json(self.batch / '_control/admission-fence' / (uuid.uuid4().hex + '.json'),
+                {'decision_at': decision_at, 'observed_at': next_phase.now(),
+                 'all_confirmed': all(f.get('confirmed') is True for f in fences),
+                 'effective_stop_at': next_phase.now() if all(f.get('confirmed') is True for f in fences) else None,
+                 'fences': fences})
+        except OSError: pass
         def confirm(root):
             try: return self.stop(root)
             except Exception: return {'stop_confirmed': False}

@@ -106,6 +106,9 @@ class SeparatePreparationPlanTests(unittest.TestCase):
 
 class StopLatchTests(unittest.TestCase):
     def setUp(self):
+        fake_fence = patch.object(technical.runtime, 'fence_owned',
+                                 return_value={'confirmed': True, 'method': 'synthetic'})
+        fake_fence.start(); self.addCleanup(fake_fence.stop)
         self.tmp=tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.batch=Path(self.tmp.name); (self.batch/'_control').mkdir()
         self.cases=[{'run_id':n,'run_instance_id':str(i)*32} for i,n in enumerate(('A','B'),1)]
@@ -165,6 +168,23 @@ class StopLatchTests(unittest.TestCase):
             stopped.append(root.name)
         technical.StopLatch(self.batch,self.cases,stop=stop).latch('fixture storage fault')
         self.assertEqual(set(stopped),{'A','B'})
+
+    def test_both_gateway_fences_finish_before_either_worker_stop_wait(self):
+        import threading
+        entered = threading.Barrier(2)
+        completed = set()
+        lock = threading.Lock()
+        def fence(root):
+            entered.wait(5)
+            with lock: completed.add(root.name)
+            return {'confirmed': True, 'run_id': root.name}
+        def stop(root):
+            self.assertEqual(completed, {'A', 'B'})
+            return {'stop_confirmed': True}
+        technical.StopLatch(self.batch, self.cases, stop=stop, fence=fence).latch('synthetic')
+        receipt = util.read_json(next((self.batch/'_control/admission-fence').glob('*.json')))
+        self.assertTrue(receipt['all_confirmed'])
+        self.assertLessEqual(receipt['decision_at'], receipt['effective_stop_at'])
 
 
 class EvidenceTests(unittest.TestCase):

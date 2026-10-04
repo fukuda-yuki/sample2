@@ -9,8 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -465,6 +467,112 @@ def comparison_wall_expired(batch, fixed, at=None):
     return elapsed >= fixed['comparison_wall_clock_stop_seconds']
 
 
+def guardian_alive(control, bundle_sha256, at=None):
+    """Fresh process heartbeat is required, not merely an old start receipt."""
+    try:
+        start = util.read_json(Path(control)/'wall-guardian-start.json')
+        heartbeat = util.read_json(Path(control)/'wall-guardian-heartbeat.json')
+        age = ((at or datetime.now(timezone.utc))-datetime.fromisoformat(heartbeat['at'])).total_seconds()
+        return (start['bundle_sha256'] == heartbeat['bundle_sha256'] == bundle_sha256
+                and start['guardian_id'] == heartbeat['guardian_id']
+                and start['pid'] == heartbeat['pid'] and type(start['pid']) is int
+                and 0 <= age <= 5)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def guard(repo, bundle_path, *, wait=lambda: time.sleep(1)):
+    """No model operation. Own the wall limit during implementation AND gates.
+
+    Run as a separate supervised process before first execution; preserve it
+    through both remote gates. Lost/failed guard is not technical acceptance.
+    """
+    repo = Path(repo).resolve()
+    bundle, fixed = check(repo, bundle_path, environment=False)
+    if fixed.get('comparison_version') != 'go30m-20261004':
+        raise ValueError('Wall guardian is only for the separately authorized plan')
+    batch = next_phase.inside(repo, bundle['cohort'], 'runs')
+    control = batch/'_control'; control.mkdir(parents=True, exist_ok=True)
+    identity = {'guardian_id':uuid.uuid4().hex, 'pid':os.getpid(),
+        'bundle_sha256': util.sha256_file(bundle_path), 'technical_plan_sha256':bundle['technical_plan']['sha256']}
+    util.write_json_atomic(control/'wall-guardian-heartbeat.json', {'at':next_phase.now(), **identity})
+    util.write_new_json(control/'wall-guardian-start.json', {'at': next_phase.now(), **identity})
+    cases = [c for p in bundle['assignments'] for c in p['cases']]
+    latch = StopLatch(batch, cases)
+    try:
+        while True:
+            util.write_json_atomic(control/'wall-guardian-heartbeat.json', {'at':next_phase.now(), **identity})
+            if latch.stopped():
+                return {'status':'stopped','reason':'retained_campaign_stop','model_dispatched':False}
+            if comparison_wall_expired(batch, fixed):
+                latch.latch('comparison_wall_clock_limit')
+                return {'status':'stopped','reason':'comparison_wall_clock_limit','model_dispatched':False}
+            current = pair_execution.state(control/'pair-journal.jsonl')
+            if set(current['gates']) == {1,2}:
+                util.write_new_json(control/'wall-guardian-completed.json', {'at':next_phase.now(),
+                    **identity, 'all_gates_within_wall_limit':True})
+                return {'status':'complete','model_dispatched':False}
+            wait()
+    except BaseException as exc:
+        latch.latch('wall_guardian_fault', error_type=type(exc).__name__)
+        raise
+
+
+def supervise_guard(repo, bundle_path):
+    """Supervise the owned guardian continuously, including remote gate waits."""
+    repo = Path(repo).resolve()
+    bundle, fixed = check(repo, bundle_path, environment=False)
+    if fixed.get('comparison_version') != 'go30m-20261004':
+        raise ValueError('Guardian supervision is only for the additional plan')
+    batch = next_phase.inside(repo, bundle['cohort'], 'runs')
+    control = batch/'_control'; control.mkdir(parents=True, exist_ok=True)
+    digest = util.sha256_file(bundle_path)
+    util.write_new_json(control/'wall-supervisor-start.json', {'at':next_phase.now(),
+        'pid':os.getpid(), 'bundle_sha256':digest})
+    latch = StopLatch(batch, [c for p in bundle['assignments'] for c in p['cases']])
+    child = subprocess.Popen([sys.executable, '-m', 'research.technical_pair_comparison',
+        'guard', '--repo', str(repo), '--bundle', str(Path(bundle_path).resolve())], cwd=repo)
+    startup = time.monotonic()
+    def stop_child():
+        if child.poll() is None:
+            child.terminate()
+            try: child.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=10)
+    try:
+        while child.poll() is None:
+            fault = 'comparison_wall_clock_limit' if comparison_wall_expired(batch, fixed) else None
+            # The child revalidates hundreds of MB of preserved originals
+            # before publishing readiness. No execution can start meanwhile.
+            ready = (control/'wall-guardian-start.json').exists()
+            if (ready or time.monotonic()-startup > 120) and not guardian_alive(control, digest):
+                fault = 'wall_guardian_not_live'
+            if fault or latch.stopped():
+                latch.latch(fault or 'retained_campaign_stop')
+                stop_child()
+                util.write_new_json(control/'wall-supervisor-stopped.json', {'at':next_phase.now(),
+                    'bundle_sha256':digest, 'child_pid':child.pid, 'child_returncode':child.returncode,
+                    'reason':fault or 'retained_campaign_stop'})
+                return {'status':'stopped', 'model_dispatched':False}
+            time.sleep(1)
+        completed = control/'wall-guardian-completed.json'
+        if child.returncode != 0 or not completed.exists() or latch.stopped():
+            latch.latch('wall_guardian_exit_without_acceptance', child_returncode=child.returncode)
+            return {'status':'stopped', 'model_dispatched':False}
+        proof = util.read_json(completed)
+        if proof.get('bundle_sha256') != digest or proof.get('all_gates_within_wall_limit') is not True:
+            raise ValueError('Owned guardian completion differs')
+        util.write_new_json(control/'wall-supervisor-completed.json', {'at':next_phase.now(),
+            'bundle_sha256':digest, 'guardian_completion':next_phase.reference(completed),
+            'child_pid':child.pid, 'child_returncode':child.returncode})
+        return {'status':'complete', 'model_dispatched':False}
+    except BaseException as exc:
+        latch.latch('wall_supervisor_fault', error_type=type(exc).__name__)
+        stop_child()
+        raise
+
+
 def execute(repo, bundle_path):
     repo = Path(repo).resolve()
     bundle, fixed = check(repo,bundle_path)
@@ -480,6 +588,9 @@ def execute(repo, bundle_path):
     control.mkdir(exist_ok=True)
     if (control / 'safety-stop.json').exists():
         return {'status':'held','reason':'technical_safety_stop','model_dispatched':False}
+    if fixed.get('comparison_version') == 'go30m-20261004':
+        if not guardian_alive(control, util.sha256_file(bundle_path)):
+            return {'status':'held','reason':'wall_guardian_not_live','model_dispatched':False}
     def wall_expired():
         return comparison_wall_expired(batch, fixed)
     if wall_expired():
@@ -527,6 +638,9 @@ def execute(repo, bundle_path):
             if total_tokens >= fixed['reported_observed_tokens_stop']: fault='token_safety_limit'
             if seconds >= fixed['maximum_accumulated_run_seconds']: fault='run_time_safety_limit'
             if wall_expired(): fault='comparison_wall_clock_limit'
+            if (fixed.get('comparison_version') == 'go30m-20261004'
+                    and not guardian_alive(control, util.sha256_file(bundle_path))):
+                fault='wall_guardian_not_live'
             if fault:
                 latch.latch(fault, calls=count, observed_tokens=total_tokens, accumulated_run_seconds=seconds)
                 return
@@ -637,7 +751,7 @@ def recover(repo,bundle_path):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode',choices=('rebind-serializer','prepare','check','execute','recover','adopt'))
+    parser.add_argument('mode',choices=('rebind-serializer','prepare','check','execute','recover','adopt','guard','supervise'))
     parser.add_argument('--repo',type=Path,default=next_phase.REPO)
     parser.add_argument('--out',type=Path)
     parser.add_argument('--bundle',type=Path)
@@ -659,7 +773,9 @@ def main():
             comparison_version=args.comparison_version,preparation_failure=args.preparation_failure)
     else:
         if not args.bundle: parser.error('--bundle required')
-        if args.mode=='execute': result=execute(args.repo,args.bundle)
+        if args.mode=='guard': result=guard(args.repo,args.bundle)
+        elif args.mode=='supervise': result=supervise_guard(args.repo,args.bundle)
+        elif args.mode=='execute': result=execute(args.repo,args.bundle)
         elif args.mode=='recover': result=recover(args.repo,args.bundle)
         elif args.mode=='adopt':
             if not args.out: parser.error('adopt requires --out')

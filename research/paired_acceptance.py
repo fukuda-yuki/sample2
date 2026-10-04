@@ -135,6 +135,22 @@ def validate(comparison,plan,scopes):
                 raise ValueError('Technical assignment/instance changed')
         control=journal.parent
         if (control/'safety-stop.json').exists(): raise ValueError('Technical safety/monitor fault retained')
+        if fixed.get('comparison_version') == 'go30m-20261004':
+            started=util.read_json(control/'wall-guardian-start.json')
+            completed_guard=util.read_json(control/'wall-guardian-completed.json')
+            supervisor=util.read_json(control/'wall-supervisor-completed.json')
+            if (started.get('bundle_sha256')!=digest or completed_guard.get('bundle_sha256')!=digest
+                    or completed_guard.get('all_gates_within_wall_limit') is not True
+                    or not started.get('guardian_id')
+                    or started.get('guardian_id')!=completed_guard.get('guardian_id')
+                    or started.get('pid')!=completed_guard.get('pid')
+                    or started.get('technical_plan_sha256')!=reference['sha256']
+                    or completed_guard.get('technical_plan_sha256')!=reference['sha256']
+                    or supervisor.get('bundle_sha256')!=digest
+                    or supervisor.get('child_pid')!=started.get('pid')
+                    or supervisor.get('child_returncode')!=0
+                    or supervisor.get('guardian_completion')!=next_phase.reference(control/'wall-guardian-completed.json')):
+                raise ValueError('Wall guardian completion not established')
         number=block['pair']; bindings=[b for b in current['dispatch'].values() if b['pair']==number]
         if len(bindings)!=2 or number not in current['gates']: raise ValueError('Both real terminal Runs and gate required')
         saved_gate=current['gates'][number]; gate=util.read_json(saved_gate['receipt'])

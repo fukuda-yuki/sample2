@@ -15,7 +15,7 @@ from outer.harness import machine, profiles, run, runtime, util
 
 
 @contextmanager
-def exclusive(control):
+def exclusive(control, *, phase_permit=None):
     """Same byte-range dispatch.lock as the historical driver; no SciPy import."""
     control = Path(control)
     control.mkdir(parents=True, exist_ok=True)
@@ -30,6 +30,13 @@ def exclusive(control):
             import fcntl
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
+            handoff = control / 'phase-handoff.json'
+            if handoff.exists():
+                marker = util.read_json(handoff)
+                if (marker.get('kind') != 'central_fixed_wave_handoff_v1'
+                        or not marker.get('phase_sha256')
+                        or marker.get('phase_sha256') != phase_permit):
+                    raise ValueError('Cohort handed off to central wave dispatcher; legacy entrypoint fenced')
             yield
         finally:
             stream.seek(0)

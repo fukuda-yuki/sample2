@@ -31,9 +31,10 @@ def state(journal, phase, digest):
                 raise ValueError('Previous wave gates incomplete; no refill')
             blocks = phase['two_pair_blocks'][block_cursor:block_cursor + event['blocks']]
             pairs = [p for block in blocks for p in block]
-            if (event['blocks'] not in (1, 2) or (not out['waves'] and event['blocks'] != 1)
+            if (event['blocks'] not in (1, 2) or event['blocks'] > phase['maximum_pairs'] // 2
+                    or len(blocks) != event['blocks'] or (not out['waves'] and event['blocks'] != 1)
                     or not blocks or event['pairs'] != pairs
-                    or event['run_cap'] != 2 * len(pairs) or event['run_cap'] > 8):
+                    or event['run_cap'] != 2 * len(pairs) or event['run_cap'] > 2 * phase['maximum_pairs']):
                 raise ValueError('Wave differs from predefined blocks or 4/8 Run cap')
             wanted = [c for p in phase['assignments'] if p['pair'] in pairs for c in p['cases']]
             if len(event['assignments']) != len(wanted): raise ValueError('Incomplete wave reservation')
@@ -126,7 +127,12 @@ class Dispatcher:
                 'phase_path': str(self.phase_path), 'old_journal': self.phase['old_journal'],
                 'original_bundle': self.phase['original_bundle'], 'approval': self.approval}
             handoff = self.control / 'phase-handoff.json'
-            if handoff.exists():
+            if self.phase['kind'] == wave_plan.V2_KIND:
+                successor = util.read_json(self.control / 'phase-handoff-v2.json')
+                if (successor.get('new_phase') != {'path': str(self.phase_path), 'sha256': self.digest}
+                        or successor.get('approval') != self.approval):
+                    raise ValueError('Explicit immutable v2 handoff required')
+            elif handoff.exists():
                 if util.read_json(handoff) != marker: raise ValueError('Different durable phase owner')
             else: util.write_new_json(handoff, marker)
             self.entered = True
@@ -190,12 +196,13 @@ class Dispatcher:
         if current['waves'] and any(p not in current['gates'] for p in current['waves'][-1]['pairs']):
             return {'status': 'held', 'reason': 'previous_wave_gates_or_explicit_recovery'}
         if current['block_cursor'] == len(self.phase['two_pair_blocks']):
-            return {'status': 'complete', 'phase_pairs': 95, 'global_pairs': 100}
+            return {'status': 'complete', 'phase_pairs': len(self.phase['assignments']), 'global_pairs': 100}
         resource = self.snapshot()
         self.record('resource_snapshot', snapshot=resource)
         if not wave_plan.healthy(resource, self.phase['thresholds']): return self.fault('objective_health_hold')
         # At least one complete 4-Run wave is required before an 8-Run wave.
-        blocks = 2 if escalate and current['waves'] and resource['escalation_healthy'] else 1
+        blocks = 2 if (self.phase['maximum_pairs'] >= 4 and escalate and current['waves']
+                       and resource['escalation_healthy']) else 1
         selected = self.phase['two_pair_blocks'][current['block_cursor']:current['block_cursor'] + blocks]
         numbers = [n for block in selected for n in block]
         bindings = []
@@ -418,3 +425,32 @@ class Dispatcher:
             self.stop_path.rename(self.phase_control / ('retained-stop-' + uuid.uuid4().hex + '.json'))
         self.closed.clear()
         return self._implement(unsent)
+
+
+def handoff_v2(repo, phase_path, approval):
+    """Append one successor under the original cohort lease; never edits v1."""
+    repo, phase_path = Path(repo).resolve(), Path(phase_path).resolve()
+    phase = util.read_json(phase_path); digest = util.sha256_file(phase_path)
+    if phase.get('kind') != wave_plan.V2_KIND: raise ValueError('Explicit v2 successor phase required')
+    if (approval.get('approved_by') != 'user' or approval.get('authorized') is not True
+            or approval.get('phase_sha256') != digest or not approval.get('authorization_reference')):
+        raise ValueError('Exact-new-phase authorization required for v2 handoff')
+    control = Path(phase['batch']) / '_control'; target = control / 'phase-handoff-v2.json'
+    predecessor = phase['predecessor_phase']['sha256']
+    with pair.exclusive(control, phase_permit=digest if target.exists() else predecessor):
+        wave_plan.validate(phase, repo=repo)
+        marker_path = control / 'phase-handoff.json'; marker = util.read_json(marker_path)
+        if (marker.get('phase_sha256') != predecessor
+                or Path(marker['phase_path']).resolve() != Path(phase['predecessor_phase']['path']).resolve()
+                or marker.get('original_bundle') != phase['original_bundle']):
+            raise ValueError('Original immutable predecessor owner differs')
+        receipt = {'kind': 'central_fixed_wave_successor_handoff_v2',
+            'previous_handoff': {'path': str(marker_path.resolve()), 'sha256': util.sha256_file(marker_path)},
+            'previous_phase_sha256': predecessor, 'predecessor_journal': phase['predecessor_journal'],
+            'predecessor_gates': phase['predecessor_gates'],
+            'new_phase': {'path': str(phase_path), 'sha256': digest}, 'approval': approval}
+        if target.exists():
+            if util.read_json(target) != receipt: raise ValueError('Immutable v2 handoff cannot be overwritten')
+        else: util.write_new_json(target, receipt)
+    return {'status': 'handed_off', 'phase_sha256': digest, 'old_phase_edited': False,
+        'receipt_path': str(target), 'model_dispatched': False}

@@ -33,14 +33,40 @@ COMPARISONS = {
                           90061, 'technical-monitorfix-20261004'),
     'go30m-20261004': ('runs/_technical-sharing-v5-100p2-go30m-20261004',
                      90071, 'technical-go30m-20261004'),
+    'go30m-guardianfix-20261004': ('runs/_technical-sharing-v5-100p2-go30m-guardianfix-20261004',
+                     90081, 'technical-go30m-guardianfix-20261004'),
 }
+ADDITIONAL_COMPARISONS = ('go30m-20261004', 'go30m-guardianfix-20261004')
 
 
 def comparison_limits(version):
     if version not in COMPARISONS: raise ValueError('Unknown comparison version')
     return ({**LIMITS, 'reported_observed_tokens_stop': 30_000_000,
              'comparison_wall_clock_stop_seconds': 9000}
-            if version == 'go30m-20261004' else dict(LIMITS))
+            if version in ADDITIONAL_COMPARISONS else dict(LIMITS))
+
+
+def verify_unsent_guardian_failure(reference):
+    """A stopped zero-reservation preparation is preserved, never resumed."""
+    proof = paired_acceptance.read_reference(reference)
+    original = paired_acceptance.read_reference(proof['original_bundle'])
+    batch = Path(proof['cohort']).resolve()
+    current = pair_execution.state(batch/'_control/pair-journal.jsonl')
+    inventory = {p.relative_to(batch).as_posix():{'sha256':util.sha256_file(p),
+        'bytes':p.stat().st_size} for p in batch.rglob('*') if p.is_file()}
+    if (proof.get('kind') != 'v5_unsent_guardian_preparation_fault'
+            or original['cohort'] != 'runs/_technical-sharing-v5-100p2-go30m-20261004'
+            or batch.name != Path(original['cohort']).name
+            or original['source_commit'] != proof['source_commit']
+            or current['reserved'] or current['dispatch']
+            or any(batch.glob('*/manifest.json'))
+            or (batch/'_control/execute-start-1.json').exists()
+            or proof['safety_stop'] != util.read_json(batch/'_control/safety-stop.json')
+            or proof['safety_stop'].get('reason') != 'wall_guardian_fault'
+            or proof['safety_stop'].get('error_type') != 'PermissionError'
+            or inventory != proof['inventory']):
+        raise ValueError('Stopped zero-send guardian preparation differs')
+    return proof
 
 
 def verify_additional_authorization(reference):
@@ -301,7 +327,7 @@ def rebind_serializer(repo, prior_bundle, witness, output):
 
 def prepare(repo, destination, browser_pin, serializer_witness, authorization, *,
             comparison_version='initial', preparation_failure=None):
-    if comparison_version not in ('monitorfix-20261004', 'go30m-20261004'):
+    if comparison_version not in ('monitorfix-20261004', *ADDITIONAL_COMPARISONS):
         raise ValueError('Initial technical comparison is historical read-only; never recreate it')
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if not destination.is_relative_to(repo / 'artifacts') or destination.exists():
@@ -310,10 +336,14 @@ def prepare(repo, destination, browser_pin, serializer_witness, authorization, *
         raise ValueError('Commit final code before freezing the technical comparison')
     plan = next_phase.validate_plan(util.read_json(repo / next_phase.V5_PLAN))
     cohort, assignments = comparison_assignments(comparison_version, plan['arms'])
-    if comparison_version == 'go30m-20261004':
+    if comparison_version in ADDITIONAL_COMPARISONS:
         additional_reference = next_phase.reference(authorization)
         verify_additional_authorization(additional_reference)
-        if preparation_failure is not None: raise ValueError('Additional campaign is not unsent-fault relabelling')
+        if comparison_version == 'go30m-guardianfix-20261004':
+            if preparation_failure is None: raise ValueError('Preserved unsent guardian fault required')
+            failure_reference = next_phase.reference(preparation_failure)
+            verify_unsent_guardian_failure(failure_reference)
+        elif preparation_failure is not None: raise ValueError('Additional campaign is not unsent-fault relabelling')
     elif comparison_version != 'initial':
         if preparation_failure is None: raise ValueError('Preserved unsent fault evidence required')
         failure_reference = next_phase.reference(preparation_failure)
@@ -356,9 +386,11 @@ def prepare(repo, destination, browser_pin, serializer_witness, authorization, *
         'minimum_next_pair_free_bytes':8_000_000_000,
         'total_time_boundary': 'execute-start through actual public/restore/cleanup pair-gate timestamp',
         'adoption': 'No control/original/usage/load defects; actual different-Run HTTP overlap; paired total time strictly less than serial; no quality/distribution-equivalence requirement.'}
-    if comparison_version == 'go30m-20261004':
+    if comparison_version in ADDITIONAL_COMPARISONS:
         fixed.update(comparison_version=comparison_version, additional_authorization=additional_reference,
                      total_actual_dispatch_upper_bound_across_plans=8, separate_plan_not_resume=True)
+        if comparison_version == 'go30m-guardianfix-20261004':
+            fixed['preparation_failure'] = failure_reference
     elif comparison_version != 'initial':
         fixed.update(comparison_version=comparison_version, preparation_failure=failure_reference,
                      total_actual_dispatch_upper_bound_across_plans=4,
@@ -394,11 +426,13 @@ def check(repo, bundle_path, *, environment=True):
     version = fixed.get('comparison_version', 'initial')
     if version not in COMPARISONS: raise ValueError('Unknown fixed technical comparison version')
     cohort, assignments = comparison_assignments(version, bundle['plan']['arms'])
-    if version == 'go30m-20261004':
+    if version in ADDITIONAL_COMPARISONS:
         if (fixed.get('total_actual_dispatch_upper_bound_across_plans') != 8
                 or fixed.get('separate_plan_not_resume') is not True):
             raise ValueError('Additional four-Run cumulative bound changed')
         verify_additional_authorization(fixed['additional_authorization'])
+        if version == 'go30m-guardianfix-20261004':
+            verify_unsent_guardian_failure(fixed['preparation_failure'])
     elif version != 'initial':
         if (fixed.get('total_actual_dispatch_upper_bound_across_plans') != 4
                 or fixed.get('separate_plan_not_resume') is not True):
@@ -471,7 +505,7 @@ def guardian_alive(control, bundle_sha256, at=None):
     """Fresh process heartbeat is required, not merely an old start receipt."""
     try:
         start = util.read_json(Path(control)/'wall-guardian-start.json')
-        heartbeat = util.read_json(Path(control)/'wall-guardian-heartbeat.json')
+        heartbeat = last_guardian_heartbeat(Path(control)/'wall-guardian-heartbeats.jsonl')
         age = ((at or datetime.now(timezone.utc))-datetime.fromisoformat(heartbeat['at'])).total_seconds()
         return (start['bundle_sha256'] == heartbeat['bundle_sha256'] == bundle_sha256
                 and start['guardian_id'] == heartbeat['guardian_id']
@@ -479,6 +513,22 @@ def guardian_alive(control, bundle_sha256, at=None):
                 and 0 <= age <= 5)
     except (OSError, ValueError, KeyError, TypeError):
         return False
+
+
+def last_guardian_heartbeat(path):
+    """Tail only complete append-only lines; no replace/delete reader race."""
+    with Path(path).open('rb') as stream:
+        stream.seek(0, 2)
+        end = stream.tell(); start = max(0, end-8192)
+        stream.seek(start); raw = stream.read(end-start)
+    lines = raw.splitlines(keepends=True)
+    if start: lines = lines[1:]
+    for line in reversed(lines):
+        if line.endswith(b'\n'):
+            row = json.loads(line)
+            if not isinstance(row, dict): raise ValueError('Invalid guardian heartbeat')
+            return row
+    raise ValueError('No complete guardian heartbeat')
 
 
 def guard(repo, bundle_path, *, wait=lambda: time.sleep(1)):
@@ -489,19 +539,22 @@ def guard(repo, bundle_path, *, wait=lambda: time.sleep(1)):
     """
     repo = Path(repo).resolve()
     bundle, fixed = check(repo, bundle_path, environment=False)
-    if fixed.get('comparison_version') != 'go30m-20261004':
+    if fixed.get('comparison_version') not in ADDITIONAL_COMPARISONS:
         raise ValueError('Wall guardian is only for the separately authorized plan')
     batch = next_phase.inside(repo, bundle['cohort'], 'runs')
     control = batch/'_control'; control.mkdir(parents=True, exist_ok=True)
     identity = {'guardian_id':uuid.uuid4().hex, 'pid':os.getpid(),
         'bundle_sha256': util.sha256_file(bundle_path), 'technical_plan_sha256':bundle['technical_plan']['sha256']}
-    util.write_json_atomic(control/'wall-guardian-heartbeat.json', {'at':next_phase.now(), **identity})
+    journal = control/'wall-guardian-heartbeats.jsonl'
+    sequence = 0
+    util.append_line(journal, {'at':next_phase.now(), **identity, 'sequence':sequence})
     util.write_new_json(control/'wall-guardian-start.json', {'at': next_phase.now(), **identity})
     cases = [c for p in bundle['assignments'] for c in p['cases']]
     latch = StopLatch(batch, cases)
     try:
         while True:
-            util.write_json_atomic(control/'wall-guardian-heartbeat.json', {'at':next_phase.now(), **identity})
+            sequence += 1
+            util.append_line(journal, {'at':next_phase.now(), **identity, 'sequence':sequence})
             if latch.stopped():
                 return {'status':'stopped','reason':'retained_campaign_stop','model_dispatched':False}
             if comparison_wall_expired(batch, fixed):
@@ -510,7 +563,8 @@ def guard(repo, bundle_path, *, wait=lambda: time.sleep(1)):
             current = pair_execution.state(control/'pair-journal.jsonl')
             if set(current['gates']) == {1,2}:
                 util.write_new_json(control/'wall-guardian-completed.json', {'at':next_phase.now(),
-                    **identity, 'all_gates_within_wall_limit':True})
+                    **identity, 'all_gates_within_wall_limit':True,
+                    'heartbeat_journal':next_phase.reference(journal)})
                 return {'status':'complete','model_dispatched':False}
             wait()
     except BaseException as exc:
@@ -522,7 +576,7 @@ def supervise_guard(repo, bundle_path):
     """Supervise the owned guardian continuously, including remote gate waits."""
     repo = Path(repo).resolve()
     bundle, fixed = check(repo, bundle_path, environment=False)
-    if fixed.get('comparison_version') != 'go30m-20261004':
+    if fixed.get('comparison_version') not in ADDITIONAL_COMPARISONS:
         raise ValueError('Guardian supervision is only for the additional plan')
     batch = next_phase.inside(repo, bundle['cohort'], 'runs')
     control = batch/'_control'; control.mkdir(parents=True, exist_ok=True)
@@ -533,6 +587,7 @@ def supervise_guard(repo, bundle_path):
     child = subprocess.Popen([sys.executable, '-m', 'research.technical_pair_comparison',
         'guard', '--repo', str(repo), '--bundle', str(Path(bundle_path).resolve())], cwd=repo)
     startup = time.monotonic()
+    ever_ready = False
     def stop_child():
         if child.poll() is None:
             child.terminate()
@@ -545,8 +600,9 @@ def supervise_guard(repo, bundle_path):
             fault = 'comparison_wall_clock_limit' if comparison_wall_expired(batch, fixed) else None
             # The child revalidates hundreds of MB of preserved originals
             # before publishing readiness. No execution can start meanwhile.
-            ready = (control/'wall-guardian-start.json').exists()
-            if (ready or time.monotonic()-startup > 120) and not guardian_alive(control, digest):
+            live = guardian_alive(control, digest)
+            ever_ready = ever_ready or live
+            if (ever_ready or time.monotonic()-startup > 120) and not live:
                 fault = 'wall_guardian_not_live'
             if fault or latch.stopped():
                 latch.latch(fault or 'retained_campaign_stop')
@@ -576,7 +632,7 @@ def supervise_guard(repo, bundle_path):
 def execute(repo, bundle_path):
     repo = Path(repo).resolve()
     bundle, fixed = check(repo,bundle_path)
-    if fixed.get('comparison_version', 'initial') not in ('monitorfix-20261004','go30m-20261004'):
+    if fixed.get('comparison_version', 'initial') not in ('monitorfix-20261004', *ADDITIONAL_COMPARISONS):
         return {'status':'held','reason':'historical_comparison_read_only','model_dispatched':False}
     batch = next_phase.inside(repo,bundle['cohort'],'runs')
     current = pair_execution.state(batch / '_control/pair-journal.jsonl')
@@ -588,7 +644,7 @@ def execute(repo, bundle_path):
     control.mkdir(exist_ok=True)
     if (control / 'safety-stop.json').exists():
         return {'status':'held','reason':'technical_safety_stop','model_dispatched':False}
-    if fixed.get('comparison_version') == 'go30m-20261004':
+    if fixed.get('comparison_version') in ADDITIONAL_COMPARISONS:
         if not guardian_alive(control, util.sha256_file(bundle_path)):
             return {'status':'held','reason':'wall_guardian_not_live','model_dispatched':False}
     def wall_expired():
@@ -638,7 +694,7 @@ def execute(repo, bundle_path):
             if total_tokens >= fixed['reported_observed_tokens_stop']: fault='token_safety_limit'
             if seconds >= fixed['maximum_accumulated_run_seconds']: fault='run_time_safety_limit'
             if wall_expired(): fault='comparison_wall_clock_limit'
-            if (fixed.get('comparison_version') == 'go30m-20261004'
+            if (fixed.get('comparison_version') in ADDITIONAL_COMPARISONS
                     and not guardian_alive(control, util.sha256_file(bundle_path))):
                 fault='wall_guardian_not_live'
             if fault:

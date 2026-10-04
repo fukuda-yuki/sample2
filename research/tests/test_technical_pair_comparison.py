@@ -92,6 +92,13 @@ class SeparatePreparationPlanTests(unittest.TestCase):
         self.assertEqual(technical.comparison_limits('go30m-20261004')['reported_observed_tokens_stop'],30_000_000)
         self.assertEqual(technical.comparison_limits('go30m-20261004')['comparison_wall_clock_stop_seconds'],9000)
         self.assertEqual(technical.LIMITS['reported_observed_tokens_stop'],20_000_000)
+        fixed_cohort,fixed=technical.comparison_assignments('go30m-guardianfix-20261004',['explore','preload'])
+        self.assertNotEqual(fixed_cohort,new_cohort)
+        self.assertFalse({c['run_instance_id'] for p in fixed for c in p['cases']} &
+                         {c['run_instance_id'] for p in new for c in p['cases']})
+        self.assertEqual([c['attempt'] for p in fixed for c in p['cases']],[90081,90081,90082,90082])
+        self.assertEqual(technical.comparison_limits('go30m-guardianfix-20261004'),
+                         technical.comparison_limits('go30m-20261004'))
 
     def test_additional_plan_requires_exact_current_authorization(self):
         path=self.root/'unauthorized.json'
@@ -375,12 +382,28 @@ class DriverTests(unittest.TestCase):
         identity={'bundle_sha256':'fixture','guardian_id':'g','pid':123}
         util.write_new_json(control/'wall-guardian-start.json',{'at':now.isoformat(),**identity})
         self.assertFalse(technical.guardian_alive(control,'fixture',now))
-        util.write_json_atomic(control/'wall-guardian-heartbeat.json',{'at':now.isoformat(),**identity})
+        util.append_line(control/'wall-guardian-heartbeats.jsonl',{'at':now.isoformat(),**identity})
         self.assertTrue(technical.guardian_alive(control,'fixture',now))
         self.assertFalse(technical.guardian_alive(control,'fixture',now+timedelta(seconds=6)))
         self.assertFalse(technical.guardian_alive(control,'other',now))
-        util.write_json_atomic(control/'wall-guardian-heartbeat.json',{'at':now.isoformat(),**identity,'guardian_id':'foreign'})
+        util.append_line(control/'wall-guardian-heartbeats.jsonl',{'at':now.isoformat(),**identity,'guardian_id':'foreign'})
         self.assertFalse(technical.guardian_alive(control,'fixture',now))
+
+    def test_append_heartbeat_while_reader_open_and_partial_tail(self):
+        path=self.repo/'heartbeat.jsonl'
+        util.append_line(path,{'sequence':0})
+        with path.open('rb') as reader:
+            util.append_line(path,{'sequence':1})
+            self.assertEqual(technical.last_guardian_heartbeat(path)['sequence'],1)
+        with path.open('ab') as writer: writer.write(b'{"partial":')
+        self.assertEqual(technical.last_guardian_heartbeat(path)['sequence'],1)
+        with path.open('ab') as writer: writer.write(b'bad}\n')
+        with self.assertRaises(ValueError): technical.last_guardian_heartbeat(path)
+
+    def test_tail_heartbeat_reads_bounded_end_of_large_journal(self):
+        path=self.repo/'heartbeat.jsonl'
+        path.write_text(''.join('{"sequence":'+str(i)+',"padding":"'+('x'*250)+'"}\n' for i in range(100)))
+        self.assertEqual(technical.last_guardian_heartbeat(path)['sequence'],99)
 
     def test_guardian_covers_gate_interval_and_records_identity(self):
         self.fixed.update(comparison_version='go30m-20261004',comparison_wall_clock_stop_seconds=9000)

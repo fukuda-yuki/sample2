@@ -10,6 +10,17 @@ from research import next_phase, pair_execution
 
 
 class SharingRecoveryTests(unittest.TestCase):
+    def test_phase_remote_tag_must_resolve_to_exact_commit(self):
+        phase = {'source_commit': 'a' * 40}
+        remote = {'tag_name': 'scoped-tag', 'target_commitish': phase['source_commit'], 'draft': False}
+        with patch.object(sharing.catalog_delivery, 'gh', return_value='{"object":{"type":"commit","sha":"' + 'a' * 40 + '"}}'):
+            self.assertEqual(sharing.phase_remote_identity(remote, 'scoped-tag', phase)['tag_commit'], 'a' * 40)
+        with patch.object(sharing.catalog_delivery, 'gh', return_value='{"object":{"type":"commit","sha":"' + 'b' * 40 + '"}}'):
+            with self.assertRaises(ValueError): sharing.phase_remote_identity(remote, 'scoped-tag', phase)
+        with patch.object(sharing.catalog_delivery, 'gh') as lookup:
+            with self.assertRaises(ValueError): sharing.phase_remote_identity({**remote, 'target_commitish': 'wrong'}, 'scoped-tag', phase)
+            lookup.assert_not_called()
+
     def test_bundle_specific_release_tags_separate_technical_and_research(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'bundle.json'

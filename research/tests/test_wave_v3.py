@@ -36,7 +36,8 @@ class V3Tests(unittest.TestCase):
         self.monitor, self.probe = self.reference(monitor), self.reference(probe)
         def save(name, value):
             path=new/(name+'.json');util.write_new_json(path,value);return self.reference(path)
-        self.finite = save('finite',{'candidate':self.probe,'unchanged_monitor':self.monitor,'all_native_expected_decisions_passed':True})
+        self.finite_leaf=save('retained-finite-source',{'finite_fixture':True})
+        self.finite = save('finite',{'frozen_source':self.finite_leaf,'candidate':self.probe,'unchanged_monitor':self.monitor,'all_native_expected_decisions_passed':True})
         self.boundary = save('boundary',{'kind':'quiescent_pre_v3_boundary','at':'2026-10-04T11:50:00+00:00',
             'phase':self.reference(self.v2path),'journal':self.reference(self.v2journal),
             'gates':{str(n):{'path':g['receipt_path'],'sha256':g['receipt_sha256']} for n,g in current['gates'].items()},
@@ -48,18 +49,29 @@ class V3Tests(unittest.TestCase):
         self.hold_instruction=save('original-hold',{'kind':'original_parent_hold_instruction','message':'Finite fixture hold until cause condition closed.'})
         protocol = save('protocol',{'probe':self.probe,'monitor':self.monitor,'original_bundle':self.phase['original_bundle'],
             'scheduled_samples':180,'cadence_seconds':10,'source':{'commit':'soak base fixture'}})
-        result = save('result',{'status':'passed','completed_scheduled_samples':180,'transition_observations':[{}, {}, {}],
+        observations=[]
+        rawdir=new/'raw';rawdir.mkdir();mondir=new/'monitor';mondir.mkdir()
+        for sequence in range(1,184):
+            label='scheduled' if sequence<=180 else ('controlled-worker-stop','controlled-gateway-stop','controlled-all-stop')[sequence-181]
+            rawpath=rawdir/(f'{sequence:06d}-'+label+'.json');sample={'ok':True,'finite_sequence':sequence};util.write_new_json(rawpath,sample)
+            monpath=mondir/(f'finite-session-{sequence:06d}.json');util.write_new_json(monpath,{'schema':'prospective-wave-resource-observation-v1',
+                'sequence':sequence,'expected_runs':4,'monitor_session':'finite-session','sample':sample,'faults':[]})
+            observations.append({'sequence':sequence,'raw':self.reference(rawpath),'monitor':{str(monpath):util.sha256_file(monpath)}})
+        self.observations=observations
+        transitions=[{'raw':o['raw'],'monitor':o['monitor']} for o in observations[180:]]
+        result = save('result',{'status':'passed','completed_scheduled_samples':180,'transition_observations':transitions,
             'cleanup_errors':[],'model_called':False,'research_dispatched':False,'protocol_sha256':protocol['sha256']})
         self.soak = save('soak',{'kind':'actual_nonmodel_soak_bounded_evidence_verification',
             'scheduled_samples':180,'controlled_stop_observations':3,'owned_fixtures_created_started_stopped_removed':8,
             'all_original_references_checked_unchanged':True,'original_research_sent_runs':26,'remaining_original_unsent':174,
             'formal_research_resume_authorized':False,'historical_cause_resolved':False,'model_called':False,
-            'source_commit':'soak base fixture','result':result,'protocol':protocol,
+            'source_commit':'soak base fixture','result':result,'protocol':protocol,'observations':observations,
             'attempt':save('attempt',{'no_retry':True}),'ownership':save('ownership',{'errors':[]}),
             'command_ledger':save('commands',{'synthetic_finite_commands':True})})
         self.review = save('review',{'kind':'actual_nonmodel_soak_independent_evidence_review_v3',
             'operational_soak_verified':True,'historical_cause_resolved':False,'formal_174_hold_remains':True,
-            'actual_verification':self.soak,'protocol':protocol,'result':result})
+            'actual_verification':self.soak,'protocol':protocol,'result':result,
+            'input_references':[self.reference(new/'raw/000001-scheduled.json'),self.finite_leaf]})
         evidence=save('causal-evidence',{'finite_fixture_mechanism':'No actual historical claim or permission'})
         affirmative=save('mechanism-independent',{'kind':'verified_resource_transport_mechanism_independent_review',
             'status':'passed','historical_cause_resolved':True,'causal_evidence':evidence,
@@ -187,6 +199,46 @@ class V3Tests(unittest.TestCase):
             self.assertEqual(metadata['ancestor_phase_sha256s'],[self.previous_digest,self.v2digest])
             self.assertEqual(metadata['configured_wave_run_cap'],4)
             self.assertEqual(d.fault('finite_fault')['status'],'held');self.assertEqual(self.fenced[-1],[])
+
+    def test_inner_raw_monitor_and_listed_review_inputs_tamper_rejected(self):
+        paths = [Path(self.observations[0]['raw']['path']), Path(next(iter(self.observations[0]['monitor']))),
+                 Path(self.finite_leaf['path'])]
+        for path in paths:
+            with self.subTest(path=path):
+                original=path.read_bytes();path.write_bytes(original+b'changed')
+                with self.assertRaises((ValueError,OSError)):wave_plan.validate(self.phase)
+                path.write_bytes(original)
+        # An additional listed review input is not covered by the observation table.
+        leaf=self.repo/'independent-input.json';util.write_new_json(leaf,{'input':True})
+        review=util.read_json(self.review['path']);review['input_references'].append(self.reference(leaf))
+        util.write_json_atomic(self.review['path'],review);self.review=self.reference(self.review['path'])
+        decision={**self.decision_value,'post_soak_independent_review':self.review}
+        util.write_json_atomic(self.decision['path'],decision);self.decision=self.reference(self.decision['path'])
+        candidate=self.build();leaf.write_bytes(b'changed')
+        with self.assertRaises(ValueError):wave_plan.validate(candidate)
+
+    def test_swapped_duplicate_missing_or_mislabelled183_observations_rejected(self):
+        original=util.read_json(self.soak['path'])
+        for mutation in ('swap','duplicate','missing','label','transition'):
+            with self.subTest(mutation=mutation):
+                value=deepcopy(original)
+                if mutation=='swap':value['observations'][0],value['observations'][1]=value['observations'][1],value['observations'][0]
+                elif mutation=='duplicate':value['observations'][1]['raw']=value['observations'][0]['raw']
+                elif mutation=='missing':value['observations'].pop()
+                elif mutation=='label':value['observations'][0]['raw']=value['observations'][180]['raw']
+                else:
+                    resultpath=value['result']['path'];result=util.read_json(resultpath);saved=Path(resultpath).read_bytes()
+                    result['transition_observations'][0]['raw']=value['observations'][0]['raw'];util.write_json_atomic(resultpath,result)
+                    value['result']=self.reference(resultpath)
+                util.write_json_atomic(self.soak['path'],value);self.soak=self.reference(self.soak['path'])
+                review=util.read_json(self.review['path']);review['actual_verification']=self.soak
+                if mutation=='transition':review['result']=value['result']
+                util.write_json_atomic(self.review['path'],review);self.review=self.reference(self.review['path'])
+                decision={**self.decision_value,'actual_soak_verification':self.soak,'post_soak_independent_review':self.review}
+                util.write_json_atomic(self.decision['path'],decision)
+                with self.assertRaises(ValueError):self.build(recovery_decision=self.reference(self.decision['path']))
+                if mutation=='transition':Path(resultpath).write_bytes(saved)
+                util.write_json_atomic(self.soak['path'],original)
 
     def test_all87_future_pairs174_mocked_sends_and_gates_max4(self):
         self.handoff();d=self.dispatcher()

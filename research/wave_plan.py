@@ -265,6 +265,51 @@ def _utc_timestamp(value):
     return stamp.astimezone(timezone.utc)
 
 
+
+def _verify_bound_leaf(reference, checked):
+    """Check one declared leaf, deduplicating only within this validation call."""
+    if not isinstance(reference, dict) or not {'path', 'sha256'} <= reference.keys():
+        raise ValueError('Complete immutable acceptance leaf reference required')
+    key = (str(Path(reference['path']).resolve()), reference['sha256'])
+    if key not in checked:
+        if not next_phase.verify_reference(reference):
+            raise ValueError('Listed acceptance evidence leaf changed: ' + reference['path'])
+        checked.add(key)
+
+
+def _verify_soak_observations(soak, result, checked):
+    observations = soak.get('observations')
+    if not isinstance(observations, list) or len(observations) != 183:
+        raise ValueError('Exactly183 sequential soak observations required')
+    seen, session = set(), None
+    for number, observation in enumerate(observations, 1):
+        label = ('scheduled' if number <= 180 else
+                 ('controlled-worker-stop', 'controlled-gateway-stop', 'controlled-all-stop')[number - 181])
+        raw, monitor = observation.get('raw'), observation.get('monitor')
+        if (observation.get('sequence') != number or not isinstance(raw, dict)
+                or not isinstance(monitor, dict) or len(monitor) != 1):
+            raise ValueError('Soak observations must retain sequential unique raw/monitor bindings')
+        raw_path, monitor_path = Path(raw['path']).resolve(), Path(next(iter(monitor))).resolve()
+        if (raw_path in seen or monitor_path in seen or raw_path == monitor_path
+                or raw_path.name != f'{number:06d}-' + label + '.json'
+                or not monitor_path.name.endswith(f'-{number:06d}.json')):
+            raise ValueError('Swapped/duplicate/mislabelled soak observation evidence')
+        seen.update((raw_path, monitor_path))
+        _verify_bound_leaf(raw, checked)
+        _verify_bound_leaf({'path': str(monitor_path), 'sha256': next(iter(monitor.values()))}, checked)
+        sample, record = util.read_json(raw_path), util.read_json(monitor_path)
+        if (record.get('sequence') != number or record.get('expected_runs') != 4
+                or record.get('schema') != 'prospective-wave-resource-observation-v1'
+                or record.get('sample') != sample or sample.get('ok') is not True or record.get('faults') != []):
+            raise ValueError('Raw/monitor observation sequence or exact sample binding changed')
+        if number == 1: session = record.get('monitor_session')
+        if not session or record.get('monitor_session') != session:
+            raise ValueError('Soak observations must belong to one monitor session')
+        if number > 180:
+            transition = result['transition_observations'][number - 181]
+            if transition.get('raw') != raw or transition.get('monitor') != monitor:
+                raise ValueError('Controlled stop-stage references differ from exact final183 observations')
+
 def _validate_v3_acceptance(phase, previous):
     """Technical success alone cannot close the retained formal-dispatch hold."""
     finite = _checked_json(phase, 'finite_acceptance')
@@ -274,6 +319,15 @@ def _validate_v3_acceptance(phase, previous):
     hold_boundary = _checked_json(phase, 'hold_boundary')
     _checked_json(phase, 'revised_hold_instruction')
     decision = _checked_json(phase, 'resource_collector_acceptance')
+    checked = set()
+    # The existing finite receipt lists original source/fixture references directly.
+    for reference in finite.values():
+        if isinstance(reference, dict) and {'path', 'sha256'} <= reference.keys():
+            _verify_bound_leaf(reference, checked)
+    inputs = review.get('input_references')
+    if not isinstance(inputs, list) or not inputs or any(not isinstance(r, dict) or 'path' not in r or 'sha256' not in r for r in inputs):
+        raise ValueError('Independent review must retain all listed immutable input references')
+    for reference in inputs: _verify_bound_leaf(reference, checked)
     probe, monitor = phase['resource_probe']['sha256'], phase['resource_monitor']['sha256']
     if (finite.get('candidate', {}).get('sha256') != probe
             or finite.get('unchanged_monitor', {}).get('sha256') != monitor
@@ -320,6 +374,7 @@ def _validate_v3_acceptance(phase, previous):
             or not soak.get('source_commit')
             or protocol.get('scheduled_samples') != 180 or protocol.get('cadence_seconds') != 10):
         raise ValueError('Actual soak result/protocol does not bind exact reviewed candidate')
+    _verify_soak_observations(soak, result, checked)
     if (review.get('kind') != 'actual_nonmodel_soak_independent_evidence_review_v3'
             or review.get('operational_soak_verified') is not True
             or review.get('historical_cause_resolved') is not False

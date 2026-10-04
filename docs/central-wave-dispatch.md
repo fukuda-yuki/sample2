@@ -210,3 +210,11 @@ a new instruction from a soak or manufacture one. A separate exact-phase user
 authorization is still checked at campaign entry. Public v3 metadata adds only
 ancestor phase hashes and acceptance/soak verification hashes; private instruction
 text is not published. All heavy stages retain the existing global serial barrier.
+
+V3 validation checks every listed immutable leaf in the finite acceptance and
+actual soak/review wrappers, including the independent review's input references.
+Exactly 183 unique sequential raw/monitor pairs are required: 180 scheduled
+observations, then worker-stop, gateway-stop and all-stop. Current leaf hashes,
+raw/sample equality, monitor sequences/session and exact result transition
+references are rechecked on each validation. Hash reuse is confined to a single
+validation call; no earlier successful validation can hide a subsequent edit.

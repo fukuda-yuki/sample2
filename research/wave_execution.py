@@ -1,14 +1,103 @@
 """Existing real harness adapters for central waves; no live CLI.
 
 Construction and execution require an explicit parent-frozen phase/approval and
-health/publication callbacks. Evaluator overrides belong to a separately pinned
-postprocessor, supplied by the research lead; original condition bytes stay put.
+health/publication callbacks. Prospective diagnostics assets are frozen from a
+separately witnessed preparation view; existing Run conditions stay unchanged.
 """
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from outer.harness import machine, profiles, run, runtime, util
+from outer.harness import profiles, run, runtime, util
 from research import next_phase_execution, wave_plan
+
+EDUCATION_SOURCE = 'inner/evaluator/Education.Evaluator/Program.cs'
+DIAGNOSTICS_REVISION = 'education-1.0.0-diagnostics-1'
+OLD_EDUCATION_SOURCE_SHA256 = '9476e6e60b85d927b59079b9816492bffa6ec92c86d337a0638136124fd03003'
+NEW_EDUCATION_SOURCE_SHA256 = '5552b4d68e32fd91c451be2e4ec5beae4383f2f7890b16c0a7679d511568b162'
+
+
+def preparation_witness(phase, original):
+    view = phase.get('preparation_view', {})
+    reference = view.get('witness', {})
+    if not reference or util.sha256_file(reference['path']) != reference.get('sha256'):
+        raise ValueError('Hash-bound prospective diagnostics witness required')
+    witness = util.read_json(reference['path'])
+    specs = {name: digest for name, digest in original['pinned_files'].items() if name.startswith('inner/spec/')}
+    if (witness.get('kind') != 'prospective_preparation_view_diagnostics_v1'
+            or witness.get('original_bundle_sha256') != phase['original_bundle']['sha256']
+            or witness.get('implementation_revision') != DIAGNOSTICS_REVISION
+            or witness.get('old_source_sha256') != OLD_EDUCATION_SOURCE_SHA256
+            or witness.get('new_source_sha256') != NEW_EDUCATION_SOURCE_SHA256
+            or original['pinned_files'].get(EDUCATION_SOURCE) != OLD_EDUCATION_SOURCE_SHA256
+            or witness.get('criteria_unchanged') is not True or witness.get('criteria_pins') != specs
+            or not specs or not isinstance(witness.get('new_evaluator_sha256'), str)
+            or len(witness['new_evaluator_sha256']) != 64):
+        raise ValueError('Only the exact diagnostics-1 revision with unchanged criteria is allowed')
+    for key in ('equivalence_receipt', 'nonlive_acceptance'):
+        ref = witness.get(key, {})
+        if not ref or util.sha256_file(ref['path']) != ref.get('sha256'):
+            raise ValueError('Diagnostics witness evidence missing or changed: ' + key)
+    return witness
+
+
+def validate_preparation(view, phase):
+    """Offline byte checks; no Run creation, compiler, scorer, key or network."""
+    view = Path(view).resolve()
+    if view != Path(phase['preparation_view']['path']).resolve(): raise ValueError('Wrong preparation view')
+    if util.sha256_file(phase['original_bundle']['path']) != phase['original_bundle']['sha256']:
+        raise ValueError('Original bundle bytes changed')
+    original = util.read_json(phase['original_bundle']['path'])
+    witness = preparation_witness(phase, original)
+    # Every old pinned non-runtime byte is preserved, except the one exact
+    # source revision. This includes all other inner source, oracle, criteria,
+    # task profiles, intervention, worker/runtime code, model-facing inputs.
+    for name, digest in original['pinned_files'].items():
+        if name.startswith('artifacts/runtime/'): continue
+        wanted = NEW_EDUCATION_SOURCE_SHA256 if name == EDUCATION_SOURCE else digest
+        if util.sha256_file(view / name) != wanted:
+            raise ValueError('Preparation view changed frozen source/criteria/input: ' + name)
+    tasks = original['plan']['task_ids']
+    if set(witness.get('runtime_locks', {})) != set(tasks): raise ValueError('All four view runtime locks required')
+    allowed = {'evaluator_files', 'evaluator_sha256', 'evaluator_build', 'build_id', 'created_at'}
+    for task in tasks:
+        preset = profiles.read(view, 'runtimes', phase['runtime'])
+        root = profiles.runtime_root(view, task, preset)
+        reference = witness['runtime_locks'][task]
+        if (Path(reference['path']).resolve() != (root / 'lock.json').resolve()
+                or util.sha256_file(root / 'lock.json') != reference['sha256']):
+            raise ValueError('Prepared lock path/hash mismatch: ' + task)
+        lock, old = util.read_json(root / 'lock.json'), original['runtime_locks'][task]
+        if task.startswith('MS1-'):
+            if lock != old: raise ValueError('Music evaluator/runtime lock must remain unchanged')
+        else:
+            if (set(lock) != set(old) or any(lock[k] != old[k] for k in old if k not in allowed)
+                    or lock['evaluator_sha256'] != witness['new_evaluator_sha256']
+                    or lock['evaluator_build'].get('implementation_revision') != DIAGNOSTICS_REVISION
+                    or lock['evaluator_build'].get('clean_worktree') is not True):
+                raise ValueError('Education runtime permits only the witnessed evaluator build change')
+        if util.tree_hashes(root / 'evaluator') != lock['evaluator_files']:
+            raise ValueError('Prepared evaluator tree changed: ' + task)
+        dll = 'MusicStore.Evaluator.dll' if task.startswith('MS1-') else 'Education.Evaluator.dll'
+        if util.sha256_file(root / 'evaluator' / dll) != lock['evaluator_sha256']:
+            raise ValueError('Prepared evaluator assembly hash changed: ' + task)
+    equivalence = util.read_json(witness['equivalence_receipt']['path'])
+    rows = equivalence.get('eight_task_arm_prompt_and_model_input_equivalence', [])
+    if (equivalence.get('original_bundle_sha256') != phase['original_bundle']['sha256']
+            or equivalence.get('model_called') is not False or equivalence.get('run_created') is not False
+            or equivalence.get('source_originals_changed') is not False or len(rows) != 8
+            or {(r['task'], r['arm']) for r in rows} != {(t, a) for t in tasks for a in ('explore', 'preload')}):
+        raise ValueError('Eight original task/arm equivalence records required')
+    for row in rows:
+        condition = profiles.resolve(view, row['task'], row['arm'], phase['runtime'])
+        if condition.get('task_input_adapter') != 'migration-v1': raise ValueError('Unsupported input adapter')
+        inputs = (view / condition['evaluation']['catalog_path']).parents[1] / 'inputs'
+        prompt, _ = profiles.prepare_prompt(condition, inputs / 'legacy-source')
+        actual = {name: util.tree_hashes(inputs / name) for name in ('legacy-source', 'existing-business')}
+        if (row.get('public_and_hidden_profile_bytes_unchanged') is not True
+                or util.sha256_bytes(prompt.encode('utf8')) != row['prompt_sha256']
+                or actual != row['model_input_files']):
+            raise ValueError('Original prompt/model input equivalence changed: ' + row['task'] + '/' + row['arm'])
+    return witness
 
 
 def preflight(repo, phase):
@@ -28,6 +117,12 @@ def preflight(repo, phase):
                        'research/next_phase_sharing.py'}
     changed = {name for name, digest in original['pinned_files'].items()
                if phase['source_pins'].get(name, digest) != digest}
+    witness = validate_preparation(phase['preparation_view']['path'], phase) if phase.get('preparation_view') else None
+    if EDUCATION_SOURCE in changed:
+        if witness is None: raise ValueError('Diagnostics source change requires a frozen prospective view')
+        if phase['source_pins'].get(EDUCATION_SOURCE) != witness['new_source_sha256']:
+            raise ValueError('Root diagnostics source differs from witnessed revision')
+        allowed_changed.add(EDUCATION_SOURCE)
     if not changed <= allowed_changed:
         raise ValueError('New phase cannot alter original model-facing assets/runtime/evaluation criteria')
     return original
@@ -40,10 +135,11 @@ class HarnessAdapters:
         self.prepare_repo = Path(prepare_repo).resolve() if prepare_repo else self.repo.resolve()
         self.validate_preparation = validate_preparation
         if self.prepare_repo != self.repo.resolve():
+            self.validate_preparation = self.validate_preparation or globals()['validate_preparation']
             view = phase.get('preparation_view', {})
-            if Path(view.get('path', '.')).resolve() != self.prepare_repo or not validate_preparation:
+            if Path(view.get('path', '.')).resolve() != self.prepare_repo:
                 raise ValueError('Separate preparation view requires frozen equivalence witness validator')
-            validate_preparation(self.prepare_repo, phase)
+            self.validate_preparation(self.prepare_repo, phase)
         self.batch = Path(phase['batch'])
         self.postprocess = postprocess or next_phase_execution.browser_postprocess(self.original)
 

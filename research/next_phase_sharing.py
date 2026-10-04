@@ -31,7 +31,7 @@ def pair_context(repo, bundle_path, number):
     return bundle, batch, current, pair, bindings
 
 
-def release_prefix(bundle_path, bundle):
+def release_prefix(bundle_path, bundle, phase=None):
     """Keep distinct frozen bundles and technical fixtures off each other's tags."""
     technical = bundle.get('kind') == 'continuity_sharing_technical_fixture'
     if technical and not bundle['cohort'].startswith('runs/_technical-sharing-'):
@@ -40,20 +40,32 @@ def release_prefix(bundle_path, bundle):
         raise ValueError('Sharing requires a frozen research bundle or explicit technical fixture')
     prefix = ('technical-continuity' if technical else
         'source-info-v5-100p2' if bundle.get('plan', {}).get('plan_id') == next_phase.V5_ID else 'source-info-v2')
-    return prefix + '-' + util.sha256_file(bundle_path)[:12] + '-pair-'
+    digest = phase['phase_sha256'] if phase else util.sha256_file(bundle_path)
+    if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
+        raise ValueError('Exact phase/bundle SHA-256 required for publication tag')
+    return prefix + '-' + digest[:12] + '-pair-'
 
 
-def clocked(workspace, bundle_path, number, bundle, bindings, stage_name, operation):
+def clocked(workspace, bundle_path, number, bundle, bindings, stage_name, operation, *, phase=None):
+    phases = {b.get('phase_sha256') for b in bindings}
+    if phase:
+        phases.add(phase['phase_sha256'])
+    if len(phases) != 1:
+        raise ValueError('Mixed execution phases in public operation')
+    phase_digest = next(iter(phases))
     return machine.timed_stage(Path(workspace) / 'public-gate-timing.jsonl', stage_name, operation,
         binding={'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
             'cohort': bundle['cohort'],
-            'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings}})
+            'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
+            **({'phase_sha256': phase_digest} if phase_digest else {})})
 
 
-def stage(repo, bundle_path, number, destination):
+def stage(repo, bundle_path, number, destination, *, context=None, phase=None):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
-    bundle, batch, current, pair, bindings = pair_context(repo, bundle_path, number)
-    release_prefix(bundle_path, bundle)
+    if phase and not callable(context):
+        raise ValueError('Phase staging requires the authoritative central context')
+    bundle, batch, current, pair, bindings = (context or pair_context)(repo, bundle_path, number)
+    release_prefix(bundle_path, bundle, phase)
     if destination.exists() or not destination.is_relative_to(repo / 'artifacts'):
         raise ValueError('Use a new owned artifacts staging directory')
     public = destination / 'public'
@@ -65,7 +77,8 @@ def stage(repo, bundle_path, number, destination):
         'selected_runs': names, 'assigned_slots': pair['cases'],
         'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
         'original_inventory': originals, 'files': [], 'excluded': [], 'model_called': False,
-        'evaluator_called': False, 'complete_research_corpus': False}
+        'evaluator_called': False, 'complete_research_corpus': False,
+        **({'execution_phase': phase} if phase else {})}
     def copy(source, name, original_hash=None):
         catalog_share.safe_member(name)
         output = catalog_share.native(public / name)
@@ -97,6 +110,23 @@ def stage(repo, bundle_path, number, destination):
             'research/tasks/candidate-register.json', public_request, task_profile['evaluation']['spec_path']):
         copy(repo / name, name)
     copy(repo / 'research/sharing/CONTINUITY-README.md', 'README.md')
+    if phase:
+        # This is a new reviewed public copy; the historical private plan and
+        # original five pairs are not edited or reinterpreted.
+        readme = public / 'README.md'
+        readme.write_text(readme.read_text(encoding='utf-8') +
+            '\n## Prospectively amended execution phase\n\n'
+            'The original v5 allocation and its first five pairs remain historical records. '
+            'This pair belongs to the separately approved central fixed-wave phase for '
+            'original pairs 6–100: initially two pairs/four Runs, optionally four pairs/eight '
+            'Runs under predeclared operational health criteria. Internal Run concurrency '
+            'remains one. All wave implementations stop before serial evaluation and '
+            'publication gates. No additional samples or regenerated earlier Runs are included. '
+            'STUDY.json and MANIFEST.json identify the execution phase and evaluator '
+            'implementation separately from the original allocation.\n', encoding='utf-8')
+        entry = next(e for e in manifest['files'] if e['path'] == 'README.md')
+        entry.update(sha256=util.sha256_file(readme), bytes=readme.stat().st_size,
+                     transformation='historical_readme_with_explicit_prospective_phase_addendum')
     copy(repo / 'research/sharing/THIRD-PARTY-NOTICES.md', 'THIRD-PARTY-NOTICES.md')
     for name in ('MS-PL.txt', 'OpenCode-MIT.txt'):
         copy(repo / 'research/sharing/LICENSES' / name, 'LICENSES/' + name)
@@ -108,6 +138,7 @@ def stage(repo, bundle_path, number, destination):
     portable = public / 'STUDY.json'
     util.write_new_json(portable, {'plan': bundle['plan'], 'assignments': bundle['assignments'],
         'source_commit': bundle['source_commit'], 'original_bundle_sha256': util.sha256_file(bundle_path),
+        **({'execution_phase': phase} if phase else {}),
         'public_subset_limitations': 'Private oracle, runtime, native state and evaluation databases remain local; this public slice supports saved evidence extraction, not a full evaluator replay.'})
     manifest['files'].append({'path': 'STUDY.json', 'sha256': util.sha256_file(portable),
         'source_sha256': None, 'bytes': portable.stat().st_size, 'transformation': 'explicit_portable_study_metadata'})
@@ -125,19 +156,25 @@ def stage(repo, bundle_path, number, destination):
         'model_called': False, 'next_pair_gate_complete': False}
 
 
-def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=catalog_delivery.download):
+def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=catalog_delivery.download,
+          context=None, phase=None, record_gate=None):
     repo, workspace = Path(repo).resolve(), Path(workspace).resolve()
+    if phase and (not callable(context) or not callable(record_gate)):
+        raise ValueError('Phase sharing requires central context and gate recorder')
     allowed = repo / 'artifacts/continuity-sharing-v1'
     if workspace == allowed or not workspace.is_relative_to(allowed):
         raise ValueError('Use the designated owned continuity sharing workspace')
-    bundle, batch, current, pair, bindings = pair_context(repo, bundle_path, number)
+    bundle, batch, current, pair, bindings = (context or pair_context)(repo, bundle_path, number)
     if number in current['gates']: return {'status': 'gate_already_complete', 'model_called': False}
     finalization = workspace / 'finalization.json'
     if finalization.exists():
-        return finish(repo, bundle_path, number, workspace, review, finalization)
+        return finish(repo, bundle_path, number, workspace, review, finalization,
+                      context=context, phase=phase, record_gate=record_gate)
     manifest = catalog_share.verify_public(workspace / 'public', exact=True)
     if manifest['plan_sha256'] != util.sha256_file(bundle_path) or manifest['pair'] != number:
         raise ValueError('Public bytes belong to another plan/pair')
+    if manifest.get('execution_phase') != phase:
+        raise ValueError('Public bytes belong to another execution phase')
     for rid, original in manifest['original_inventory'].items():
         if catalog_share.inventory(batch / rid) != original: raise ValueError('Original pair changed after review')
     asset = clocked(workspace, bundle_path, number, bundle, bindings, 'package_including_compression',
@@ -146,14 +183,16 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     if not original_extraction.exists():
         clocked(workspace, bundle_path, number, bundle, bindings, 'before_upload_offline_extract',
             lambda: catalog_delivery.offline_extract(workspace / 'public', original_extraction))
-    prefix = release_prefix(bundle_path, bundle)
+    prefix = release_prefix(bundle_path, bundle, phase)
     actual_transport = transfer is None and fetch is catalog_delivery.download
     if transfer is None:
         transfer = lambda package, tag, commit: catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
     urls = clocked(workspace, bundle_path, number, bundle, bindings, 'publication_and_remote_hash_check',
-        lambda: transfer(workspace / 'package', prefix + f'{number:03d}', bundle['source_commit']))
+        lambda: transfer(workspace / 'package', prefix + f'{number:03d}',
+                         phase['source_commit'] if phase else bundle['source_commit']))
     publication = {'remote_assets_verified': True, 'urls': urls, 'package_sha256': asset['sha256'],
-        'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number}
+        'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number,
+        **({'phase_sha256': phase['phase_sha256']} if phase else {})}
     if bundle['plan']['plan_id'] == next_phase.V5_ID:
         # v5 live acceptance cannot use the injectable local rehearsal path.
         publication['transport_mode'] = ('github-release-anonymous-download-v1'
@@ -194,20 +233,24 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     util.write_new_json(finalization, {'pair': number,
         'plan_sha256': util.sha256_file(bundle_path), 'cohort': bundle['cohort'],
         'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
+        **({'phase_sha256': phase['phase_sha256']} if phase else {}),
         'review_sha256': util.sha256_file(review), 'attempt': attempt,
         'original_inventory': manifest['original_inventory'],
         'package_sha256': asset['sha256'], 'roundtrip_receipt': str(roundtrip_path),
         'evidence_files': {str(p): util.sha256_file(p) for p in evidence_paths}})
-    return finish(repo, bundle_path, number, workspace, review, finalization)
+    return finish(repo, bundle_path, number, workspace, review, finalization,
+                  context=context, phase=phase, record_gate=record_gate)
 
 
-def finish(repo, bundle_path, number, workspace, review, finalization):
+def finish(repo, bundle_path, number, workspace, review, finalization, *, context=None,
+           phase=None, record_gate=None):
     """Complete only the saved verified roundtrip, including after owned cleanup."""
-    bundle, batch, current, pair, bindings = pair_context(repo, bundle_path, number)
+    bundle, batch, current, pair, bindings = (context or pair_context)(repo, bundle_path, number)
     saved = util.read_json(finalization)
     expected = {'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
         'cohort': bundle['cohort'], 'review_sha256': util.sha256_file(review),
-        'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings}}
+        'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
+        **({'phase_sha256': phase['phase_sha256']} if phase else {})}
     if any(saved.get(k) != v for k, v in expected.items()):
         raise ValueError('Retained finalization belongs to another pair, instance or review')
     for name, digest in saved['evidence_files'].items():
@@ -238,11 +281,16 @@ def finish(repo, bundle_path, number, workspace, review, finalization):
     gate = {'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
         'cohort': bundle['cohort'], 'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
         'evidence_files': refs, 'publication_receipt': str(workspace / 'publication-receipt.json'),
-        'roundtrip_receipt': saved['roundtrip_receipt'], 'cleanup_receipt': str(cleanup_path)}
+        'roundtrip_receipt': saved['roundtrip_receipt'], 'cleanup_receipt': str(cleanup_path),
+        **({'phase_sha256': phase['phase_sha256']} if phase else {})}
     if gate_path.exists():
         if util.read_json(gate_path) != gate: raise ValueError('Retained gate differs')
     else: util.write_new_json(gate_path, gate)
-    pair_execution.record_pair_gate(batch, number, gate_path)
+    if record_gate is None:
+        if phase: raise ValueError('Phase gate requires the authoritative central recorder')
+        pair_execution.record_pair_gate(batch, number, gate_path)
+    else:
+        record_gate(batch, number, gate_path)
     return {'status': 'shared_downloaded_restored_extracted_cleaned', 'pair': number,
         'gate': str(gate_path), 'model_called': False, 'originals_unchanged': True}
 

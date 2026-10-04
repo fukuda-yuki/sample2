@@ -126,5 +126,20 @@ class PreparationTests(unittest.TestCase):
         Path(self.phase['original_bundle']['path']).write_bytes(b'changed original')
         with self.assertRaisesRegex(ValueError, 'Original bundle bytes'): execution.validate_preparation(self.view, self.phase)
 
+    def test_phase_pinned_sharing_adapter_test_is_the_only_allowed_test_change(self):
+        allowed = 'research/tests/test_next_phase_sharing.py'
+        required = ('research/wave_plan.py', 'research/wave_dispatch.py', 'research/wave_execution.py', 'research/pair_execution.py')
+        pins = {}
+        for name in (*required, allowed):
+            path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'new researcher code')
+            pins[name] = util.sha256_file(path)
+        original = {'pinned_files': {allowed: 'a' * 64}}
+        phase = {'source_pins': pins}
+        with patch.object(execution.wave_plan, 'validate', return_value=original):
+            self.assertEqual(execution.preflight(self.root, phase), original)
+            denied = 'research/tests/test_other.py'; path = self.root / denied; path.write_bytes(b'changed unrelated test')
+            pins[denied] = util.sha256_file(path); original['pinned_files'][denied] = 'b' * 64
+            with self.assertRaisesRegex(ValueError, 'cannot alter original'): execution.preflight(self.root, phase)
+
 
 if __name__ == '__main__': unittest.main()

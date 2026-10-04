@@ -114,7 +114,7 @@ def preflight(repo, phase):
             raise ValueError('Frozen input/environment/code changed: ' + name)
     # An override must never silently replace a worker/runtime/task/input pin.
     allowed_changed = {'research/pair_execution.py', 'research/next_phase_execution.py',
-                       'research/next_phase_sharing.py'}
+                       'research/next_phase_sharing.py', 'research/tests/test_next_phase_sharing.py'}
     changed = {name for name, digest in original['pinned_files'].items()
                if phase['source_pins'].get(name, digest) != digest}
     witness = validate_preparation(phase['preparation_view']['path'], phase) if phase.get('preparation_view') else None

@@ -16,6 +16,7 @@ V4_KIND = 'source_info_v5_central_fixed_wave_phase_v4'
 V6_KIND = 'source_info_v5_central_fixed_wave_phase_v6'
 V7_KIND = 'source_info_v5_central_fixed_wave_phase_v7'
 V8_KIND = 'source_info_v5_central_fixed_wave_phase_v8'
+V9_KIND = 'source_info_v5_central_fixed_wave_phase_v9'
 V6_PROBE_SHA = 'bee0107bd1d82d4c20fa821d2a85f23b57e847d1c468e79994ab6436550ff36b'
 V5_KIND = 'source_info_v5_central_fixed_wave_phase_v5'
 V5_PROBE_SHA = '490e605232dc89ce024032d1236b097a9931bfb3079f0683a2de101691b32cd7'
@@ -75,6 +76,8 @@ def build(original_bundle, old_journal, batch, *, thresholds, source_commit, sou
 
 
 def validate(phase, *, repo=None):
+    if phase.get('kind') == V9_KIND:
+        return validate_v9(phase, repo=repo)
     if phase.get('kind') == V8_KIND:
         return validate_v8(phase, repo=repo)
     if phase.get('kind') == V7_KIND:
@@ -1279,6 +1282,168 @@ def validate_v8(phase, *, repo=None):
             if not path.is_relative_to(root) or util.sha256_file(path) != digest:
                 raise ValueError('New V8 source pin changed: '+name)
     return original
+
+def _v9_empty_predecessor(phase):
+    """Only the actual never-dispatched V8 lease failure may lack a journal."""
+    if phase.get('kind') != V9_KIND:
+        raise ValueError('Absent journal is restricted to the explicit V9 boundary')
+    previous_ref = phase['predecessor_phase']
+    if not next_phase.verify_reference(previous_ref):
+        raise ValueError('Changed empty predecessor phase')
+    previous = util.read_json(previous_ref['path'])
+    if previous.get('kind') != V8_KIND:
+        raise ValueError('Exact failed V8 predecessor required')
+    original = validate_v8(previous)
+    expected = Path(previous['batch']) / '_control' / previous['phase_id'] / 'wave-journal.jsonl'
+    if (phase.get('predecessor_journal') != {'path':str(expected), 'sha256':None, 'absent':True}
+            or expected.exists() or phase.get('predecessor_gates') != {}):
+        raise ValueError('Actual V8 journal must remain absent; even a new empty file is invalid')
+    boundary_ref = phase.get('predecessor_empty_boundary', {})
+    if not next_phase.verify_reference(boundary_ref):
+        raise ValueError('Actual zero-dispatch predecessor boundary required')
+    boundary = util.read_json(boundary_ref['path'])
+    marker = Path(previous['batch']) / '_control' / 'phase-handoff-v8.json'
+    if (boundary.get('kind') != 'actual_v8_zero_dispatch_absent_journal_boundary'
+            or boundary.get('phase') != previous_ref or boundary.get('absent_journal') != phase['predecessor_journal']
+            or boundary.get('handoff') != next_phase.reference(marker)
+            or boundary.get('controller_observed_exit_code') != 1
+            or boundary.get('controller_started_monitor') is not False
+            or boundary.get('new_formal_dispatches') != 0
+            or boundary.get('remaining_original_UUID_count') != 86
+            or boundary.get('model_called') is not False or boundary.get('credentials_accessed') is not False):
+        raise ValueError('Exact observed V8 pre-send failure evidence required')
+    handoff = util.read_json(marker)
+    if (handoff.get('new_phase') != previous_ref
+            or handoff.get('predecessor_journal') != previous['predecessor_journal']
+            or handoff.get('predecessor_gates') != previous['predecessor_gates']):
+        raise ValueError('Actual immutable V8 handoff differs')
+    wanted = [{'run_id':c['run_id'],'run_instance_id':c['run_instance_id'],
+               'path':str(Path(previous['batch'])/c['run_id']),'absent':True}
+              for pair in previous['assignments'] for c in pair['cases']]
+    if boundary.get('remaining_original_paths') != wanted:
+        raise ValueError('Every original86 absence must be witnessed at the boundary')
+    if (set(boundary.get('owned_running_checks', {})) != {'sample2.run','sample2.browser-review'}
+            or any(v.get('exit_code') != 0 or v.get('names') != []
+                   for v in boundary['owned_running_checks'].values())
+            or not next_phase.verify_reference(boundary.get('saved_start_attempt',{}))
+            or not next_phase.verify_reference(boundary.get('closed_114_57_boundary',{}))):
+        raise ValueError('Actual stopped original114 boundary and owned-resource observations required')
+    launch = util.read_json(boundary['saved_start_attempt']['path'])
+    prior_acceptance = util.read_json(previous['independent_monitor_acceptance']['path'])
+    if (boundary['closed_114_57_boundary'] != prior_acceptance['closed_predecessor_boundary']
+            or launch.get('kind') != 'actual_v8_single_foreground_original86_start_attempt'
+            or launch.get('phase') != previous_ref or launch.get('source_commit') != previous['source_commit']
+            or launch.get('pid') != boundary.get('controller_PID')
+            or launch.get('actual_send_not_yet_claimed') is not True):
+        raise ValueError('Actual V8 launch and closed114 boundary must match the saved evidence')
+    return previous, original
+
+
+def check_v9_unsent_boundary(phase):
+    """One-time build/handoff check; legitimate V9 prepared roots may exist later."""
+    import subprocess
+    previous, _ = _v9_empty_predecessor(phase)
+    if any((Path(previous['batch'])/c['run_id']).exists()
+           for pair in previous['assignments'] for c in pair['cases']):
+        raise ValueError('Original86 must still be unprepared and unsent before V9 handoff')
+    for label in ('sample2.run','sample2.browser-review'):
+        result = subprocess.run(['docker','ps','--format','{{.Names}}','--filter','label='+label],
+                                capture_output=True,text=True,check=True)
+        if result.stdout.strip():
+            raise ValueError('Owned running resources block empty-boundary handoff')
+
+
+def build_v9(predecessor_phase, empty_boundary, *, source_commit, source_pins, lease_repair_acceptance):
+    previous = util.read_json(predecessor_phase)
+    with pair_execution.exclusive(Path(previous['batch'])/'_control', phase_permit=util.sha256_file(predecessor_phase)):
+        phase = {**previous,'schema_version':9,'kind':V9_KIND,'phase_id':'central-wave-pair58-100-v9',
+            'source_commit':source_commit,'source_pins':source_pins,
+            'predecessor_phase':next_phase.reference(predecessor_phase),
+            'predecessor_journal':{'path':str(Path(previous['batch'])/'_control'/previous['phase_id']/'wave-journal.jsonl'),
+                                   'sha256':None,'absent':True},
+            'predecessor_gates':{},'predecessor_empty_boundary':empty_boundary,
+            'lease_repair_acceptance':lease_repair_acceptance}
+        validate_v9(phase)
+        check_v9_unsent_boundary(phase)
+        return phase
+
+
+def validate_v9(phase, *, repo=None):
+    previous, original = _v9_empty_predecessor(phase)
+    mutable = {'schema_version','kind','phase_id','source_commit','source_pins',
+               'predecessor_phase','predecessor_journal','predecessor_gates'}
+    if (phase.get('schema_version') != 9 or phase.get('phase_id') != 'central-wave-pair58-100-v9'
+            or set(phase) != set(previous)|{'predecessor_empty_boundary','lease_repair_acceptance'}
+            or any(phase.get(k) != v for k,v in previous.items() if k not in mutable)):
+        raise ValueError('V9 only repairs the zero-dispatch lease; all acquisition conditions remain inherited')
+    allowed = {'research/pair_execution.py','research/wave_plan.py','research/wave_dispatch.py',
+               'research/wave_campaign.py','research/wave_sharing.py','research/resource_supervisor.py'}
+    if (set(phase['source_pins']) != set(previous['source_pins'])|{'research/tests/test_lease_chain.py'}
+            or any(phase['source_pins'][name] != digest
+                   for name,digest in previous['source_pins'].items() if name not in allowed)):
+        raise ValueError('Lease repair cannot alter or drop other frozen source dependencies')
+    reference = phase['lease_repair_acceptance']
+    if not next_phase.verify_reference(reference):
+        raise ValueError('Actual independently reviewed lease repair acceptance required')
+    proof = util.read_json(reference['path'])
+    if (proof.get('kind') != 'actual_v9_zero_dispatch_lease_repair_acceptance'
+            or proof.get('passed') is not True or proof.get('source_pins') != phase['source_pins']
+            or proof.get('model_called') is not False or proof.get('evaluator_called') is not False
+            or proof.get('user_credential_accessed') is not False
+            or proof.get('predecessor_empty_boundary') != phase['predecessor_empty_boundary']
+            or proof.get('original_unsent_UUID_count') != 86):
+        raise ValueError('Current source and actual empty-boundary acceptance differ')
+    evidence = {}
+    for name in ('independent_review','actual_lease_receipt','actual_resource_fixture','source_sharing'):
+        if not next_phase.verify_reference(proof.get(name,{})):
+            raise ValueError('Missing actual V9 acceptance evidence: '+name)
+        evidence[name] = util.read_json(proof[name]['path'])
+    review,lease,fixture,sharing = (evidence[n] for n in
+        ('independent_review','actual_lease_receipt','actual_resource_fixture','source_sharing'))
+    required = ('actual_saved_v8_permit_accepted','stale_v7_and_legacy_permits_rejected',
+        'v9_only_permit_after_handoff','missing_intermediate_rejected','changed_hash_path_kind_rejected',
+        'unsupported_successor_rejected','competing_process_lock_rejected','release_reacquisition_passed',
+        'absent_journal_strict','v9_independent_monitor_and_publication_routing')
+    if (lease.get('kind') != 'actual_v9_finite_lease_chain_nonmodel_validation'
+            or lease.get('passed') is not True or lease.get('model_called') is not False
+            or lease.get('source_pins') != phase['source_pins']
+            or any(lease.get('checks',{}).get(name) is not True for name in required)
+            or review.get('status') != 'passed' or review.get('reviewed_source_sha256') != phase['source_pins']
+            or review.get('kind') != 'independent_v9_actual_lease_and_source_review'
+            or review.get('model_called') is not False
+            or review.get('actual_lease_receipt') != proof['actual_lease_receipt']
+            or review.get('actual_resource_fixture') != proof['actual_resource_fixture']
+            or review.get('reviewed_commit') != proof.get('reviewed_source_commit')):
+        raise ValueError('Actual finite lease checks and independent current-source review required')
+    if (fixture.get('kind') != 'actual_finite_v8_independent_resource_supervisor_fixture_receipt'
+            or fixture.get('passed') is not True or fixture.get('model_called') is not False
+            or fixture.get('user_credential_accessed') is not False or fixture.get('actual_provider_calls') != 0
+            or fixture.get('evaluator_called') is not False or fixture.get('formal_UUIDs_touched') is not False
+            or fixture.get('networks') != 'none'
+            or fixture.get('thresholds') != {'cadence_seconds':10,'stale_seconds':30,'probe_deadline_seconds':10}
+            or fixture['candidate_monitor']['sha256'] != phase['resource_monitor']['sha256']
+            or fixture['candidate_probe']['sha256'] != phase['resource_probe']['sha256']
+            or fixture.get('owned_fixture_resources_remaining') != []
+            or fixture.get('supervisor_source',{}).get('sha256') != phase['source_pins']['research/resource_supervisor.py']
+            or any(fixture.get('checks',{}).get(name) is not True for name in (
+                'central_gil_hold_monitor_progress','blocked_sampler_stale_timer_and_real_gateway_ack',
+                'late_gateway_fenced','actual_shutdown_ACK_and_owned_stopped','actual_fixture_owned_cleanup'))):
+        raise ValueError('New supervisor source requires actual unchanged-threshold finite fixture')
+    if (sharing.get('ordinary_push_and_no_ff_integration_completed') is not True
+            or sharing.get('source_commit') != phase['source_commit']
+            or sharing.get('source_pins') != phase['source_pins']
+            or sharing.get('reviewed_source_commit') != review['reviewed_commit']):
+        raise ValueError('Actual no-ff integration and approved source sharing required')
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root/phase['cohort']).resolve() != Path(phase['batch']).resolve():
+            raise ValueError('Wrong V9 canonical cohort')
+        for name,digest in phase['source_pins'].items():
+            path=(root/name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest:
+                raise ValueError('Frozen V9 source changed: '+name)
+    return original
+
 
 def healthy(snapshot, thresholds):
     """Allowlist only operational inputs. Quality/arm/token outcomes cannot enter."""

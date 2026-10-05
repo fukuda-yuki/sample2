@@ -32,7 +32,10 @@ def exclusive(control, *, phase_permit=None):
         try:
             handoff = control / 'phase-handoff.json'
             successors = [(version, control / ('phase-handoff-v' + str(version) + '.json'))
-                          for version in (2, 3, 4, 5, 6, 7)]
+                          for version in (2, 3, 4, 5, 6, 7, 8, 9)]
+            supported = {path.name for _, path in successors}
+            if any(path.name not in supported for path in control.glob('phase-handoff-v*.json')):
+                raise ValueError('Unsupported immutable successor handoff')
             if any(path.exists() for _, path in successors) and not handoff.exists():
                 raise ValueError('Missing immutable predecessor handoff')
             if handoff.exists():

@@ -32,7 +32,7 @@ def exclusive(control, *, phase_permit=None):
         try:
             handoff = control / 'phase-handoff.json'
             successors = [(version, control / ('phase-handoff-v' + str(version) + '.json'))
-                          for version in (2, 3, 4, 5, 6, 7, 8, 9)]
+                          for version in (2, 3, 4, 5, 6, 7, 8, 9, 10)]
             supported = {path.name for _, path in successors}
             if any(path.name not in supported for path in control.glob('phase-handoff-v*.json')):
                 raise ValueError('Unsupported immutable successor handoff')
@@ -440,6 +440,9 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
 
 
 def _validate_gate(value, current, pair):
+    from research import app_failure_preservation
+    if value.get('gate_kind') == app_failure_preservation.KIND:
+        return app_failure_preservation.validate_gate(value, current, pair)
     if value.get('gate_kind') is not None:
         from research import preservation_gate
         return preservation_gate.validate_gate(value, current, pair)

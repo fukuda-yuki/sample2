@@ -81,14 +81,17 @@ def state(journal, phase, digest, *, preservation_history=None):
                     for b in bindings)):
                 raise ValueError('Every wave Run must stop and originals fix before heavy processing')
             barrier = True
-        elif kind in ('pair_gate', 'pair_preservation_gate'):
+        elif kind in ('pair_gate', 'pair_preservation_gate', 'pair_app_failure_preservation_gate'):
             if not barrier or event['pair'] in out['gates']: raise ValueError('Premature or duplicate pair gate')
             if util.sha256_file(event['receipt_path']) != event['receipt_sha256']:
                 raise ValueError('Pair gate evidence changed')
             gate = util.read_json(event['receipt_path'])
             from research import preservation_gate
+            from research import app_failure_preservation
             if (kind == 'pair_preservation_gate') != (gate.get('gate_kind') == preservation_gate.KIND):
                 raise ValueError('Explicit preservation journal event and gate subtype must agree')
+            if (kind == 'pair_app_failure_preservation_gate') != (gate.get('gate_kind') == app_failure_preservation.KIND):
+                raise ValueError('Explicit app-failure preservation event and subtype must agree')
             if kind == 'pair_preservation_gate' and preservation_history is not None:
                 preservation_gate.validate_saved_gate(gate,out,event['pair'],history=preservation_history,
                     gate_reference={'path':event['receipt_path'],'sha256':event['receipt_sha256']})
@@ -106,7 +109,7 @@ def state(journal, phase, digest, *, preservation_history=None):
 class Dispatcher:
     def __init__(self, repo, phase_path, approval, *, prepare, verify, implement,
                  postprocess, publish, reconcile, fence, snapshot, supervise, publication_ready,
-                 enroll_scope=None, admit=None):
+                 enroll_scope=None, admit=None, app_failure_policy=None):
         self.repo, self.phase_path = Path(repo).resolve(), Path(phase_path).resolve()
         self.phase = util.read_json(phase_path); self.digest = util.sha256_file(phase_path)
         wave_plan.validate(self.phase, repo=self.repo)
@@ -128,6 +131,34 @@ class Dispatcher:
         self._monitor_wave = None
         self._known_dispatch = set()
         self.enroll_scope, self.admit = enroll_scope, admit
+        self.app_failure_policy = app_failure_policy or self.phase.get('app_failure_policy')
+        if self.app_failure_policy:
+            from research import app_failure_preservation
+            policy = app_failure_preservation.validate_policy(self.app_failure_policy)
+            if policy['original_bundle'] != self.phase['original_bundle']:
+                raise ValueError('App-failure policy belongs to another original cohort')
+
+    def retained_fault(self, binding, row):
+        if not self.app_failure_policy or (row.get('scoring') or {}).get('state') != 'evaluator_fault':
+            return False
+        from research import app_failure_preservation as app
+        try:
+            policy = app.validate_policy(self.app_failure_policy)
+            if policy['allowed_instances'].get(binding['run_id']) != binding['run_instance_id']:
+                return False
+            proof = app.app_exception_evidence(self.batch / binding['run_id'])
+            return proof['row'] == row and row.get('operation_status') != 'cleanup_failed'
+        except (ValueError, KeyError, OSError):
+            return False
+
+    def app_contract(self, number, current):
+        from research import app_failure_preservation as app
+        selected = [b for b in current['dispatch'].values() if b['pair'] == number]
+        if not any(pair._postprocess_fault(current['results'][b['run_id']]['row']) for b in selected):
+            return None
+        if not self.app_failure_policy:
+            raise ValueError('Retained app failure requires authorized policy')
+        return app.ensure_contract(self.app_failure_policy, self.phase, current, number)
 
     @contextmanager
     def session(self):
@@ -138,7 +169,7 @@ class Dispatcher:
                 'phase_path': str(self.phase_path), 'old_journal': self.phase['old_journal'],
                 'original_bundle': self.phase['original_bundle'], 'approval': self.approval}
             handoff = self.control / 'phase-handoff.json'
-            if self.phase['kind'] in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND):
+            if self.phase['kind'] in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND, wave_plan.V10_KIND):
                 version = self.phase['schema_version']
                 successor = util.read_json(self.control / ('phase-handoff-v' + str(version) + '.json'))
                 if (successor.get('new_phase') != {'path': str(self.phase_path), 'sha256': self.digest}
@@ -150,6 +181,10 @@ class Dispatcher:
             self.entered = True
             try:
                 self.current()  # seed verified scope before monitor or recovery
+                if self.app_failure_policy:
+                    from research import app_failure_preservation
+                    app_failure_preservation.attest_handler(self.app_failure_policy, self.phase,
+                        {'path':str(self.phase_path),'sha256':self.digest}, sole_lease_held=True)
                 yield self
             finally: self.entered = False
 
@@ -339,7 +374,8 @@ class Dispatcher:
         if any(current['implementations'][b['run_id']]['receipt'].get('stop_confirmed') is not True
                 or current['implementations'][b['run_id']]['receipt'].get('submission_fixed') is not True for b in bindings):
             return {'status': 'held', 'reason': 'stop_or_original_fix_unconfirmed'}
-        if any(pair._postprocess_fault(result['row']) for result in current['results'].values()):
+        if any(pair._postprocess_fault(result['row']) and not self.retained_fault(current['dispatch'][rid], result['row'])
+               for rid, result in current['results'].items()):
             return {'status': 'held', 'reason': 'recorded_postprocess_fault'}
         if not current['barrier']:
             self.record('barrier', pairs=current['waves'][-1]['pairs'])
@@ -362,10 +398,11 @@ class Dispatcher:
                 except Exception: return self.fault('postprocess_fault')
                 util.write_new_json(durable, {**binding, 'row': row})
             self.terminal('result', binding, row)
-            if pair._postprocess_fault(row): return self.fault('postprocess_fault')
+            if pair._postprocess_fault(row) and not self.retained_fault(binding, row): return self.fault('postprocess_fault')
         current = self.current()
         for number in current['waves'][-1]['pairs']:
             if number in current['gates']: continue
+            self.app_contract(number, current)
             # This callback may stage a public copy and report that exact review
             # is pending. No remote intent or operational fault is recorded.
             if not self.publication_ready(number, current):
@@ -385,7 +422,9 @@ class Dispatcher:
             value = util.read_json(path)
             pair._validate_gate(value, current, number)
             if value.get('phase_sha256') != self.digest: raise ValueError('Publication gate phase mismatch')
-            self.record('pair_gate', pair=number, receipt_path=str(Path(path).resolve()), receipt_sha256=util.sha256_file(path))
+            from research import app_failure_preservation
+            event = 'pair_app_failure_preservation_gate' if value.get('gate_kind') == app_failure_preservation.KIND else 'pair_gate'
+            self.record(event, pair=number, receipt_path=str(Path(path).resolve()), receipt_sha256=util.sha256_file(path))
             current = self.current()
         return {'status': 'wave_gated', 'pairs': current['waves'][-1]['pairs'], 'next_wave_dispatched': False}
 
@@ -500,11 +539,15 @@ def handoff_v9(repo, phase_path, approval):
     return _handoff(repo, phase_path, approval, 9)
 
 
+def handoff_v10(repo, phase_path, approval):
+    return _handoff(repo, phase_path, approval, 10)
+
+
 def _handoff(repo, phase_path, approval, version):
     """Append a successor under the original cohort lease; never edits ancestors."""
     repo, phase_path = Path(repo).resolve(), Path(phase_path).resolve()
     phase = util.read_json(phase_path); digest = util.sha256_file(phase_path)
-    if phase.get('kind') != {2: wave_plan.V2_KIND, 3: wave_plan.V3_KIND, 4: wave_plan.V4_KIND, 5: wave_plan.V5_KIND, 6: wave_plan.V6_KIND, 7: wave_plan.V7_KIND, 8: wave_plan.V8_KIND, 9: wave_plan.V9_KIND}[version]:
+    if phase.get('kind') != {2: wave_plan.V2_KIND, 3: wave_plan.V3_KIND, 4: wave_plan.V4_KIND, 5: wave_plan.V5_KIND, 6: wave_plan.V6_KIND, 7: wave_plan.V7_KIND, 8: wave_plan.V8_KIND, 9: wave_plan.V9_KIND, 10: wave_plan.V10_KIND}[version]:
         raise ValueError('Explicit versioned successor phase required')
     if (approval.get('approved_by') != 'user' or approval.get('authorized') is not True
             or approval.get('phase_sha256') != digest or not approval.get('authorization_reference')):
@@ -515,6 +558,8 @@ def _handoff(repo, phase_path, approval, version):
         wave_plan.validate(phase, repo=repo)
         if version == 9 and not target.exists():
             wave_plan.check_v9_unsent_boundary(phase)
+        if version == 10 and not target.exists():
+            wave_plan.check_v10_unsent_boundary(phase)
         marker_path = control / ('phase-handoff.json' if version == 2 else 'phase-handoff-v' + str(version - 1) + '.json')
         marker = util.read_json(marker_path)
         owner = {'sha256': marker.get('phase_sha256'), 'path': marker.get('phase_path')} if version == 2 else marker['new_phase']

@@ -72,7 +72,7 @@ class LeaseTests(unittest.TestCase):
                 with self.assertRaises(ValueError):self.acquire(self.owner8)
 
     def test_unsupported_successor_rejected(self):
-        for name in ('phase-handoff-v10.json','phase-handoff-vbogus.json'):
+        for name in ('phase-handoff-v11.json','phase-handoff-vbogus.json'):
             target=self.control/name;util.write_new_json(target,{})
             with self.assertRaisesRegex(ValueError,'Unsupported'):self.acquire(self.owner8)
             target.unlink()

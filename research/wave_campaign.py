@@ -322,12 +322,12 @@ def run_campaign(repo, phase_path, approval_path, *, mode='run', recovery_approv
             or not next_phase.verify_reference(approval['authorization_reference'])):
         raise ValueError('Verified exact-phase user authorization required')
     preflight(repo, phase)
-    if phase.get('kind') in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND):
+    if phase.get('kind') in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND, wave_plan.V10_KIND):
         escalate = False
         handoff = {wave_plan.V2_KIND: wave_dispatch.handoff_v2, wave_plan.V3_KIND: wave_dispatch.handoff_v3,
-                   wave_plan.V4_KIND: wave_dispatch.handoff_v4, wave_plan.V5_KIND: wave_dispatch.handoff_v5, wave_plan.V6_KIND: wave_dispatch.handoff_v6, wave_plan.V7_KIND: wave_dispatch.handoff_v7, wave_plan.V8_KIND: wave_dispatch.handoff_v8, wave_plan.V9_KIND: wave_dispatch.handoff_v9}[phase['kind']]
+                   wave_plan.V4_KIND: wave_dispatch.handoff_v4, wave_plan.V5_KIND: wave_dispatch.handoff_v5, wave_plan.V6_KIND: wave_dispatch.handoff_v6, wave_plan.V7_KIND: wave_dispatch.handoff_v7, wave_plan.V8_KIND: wave_dispatch.handoff_v8, wave_plan.V9_KIND: wave_dispatch.handoff_v9, wave_plan.V10_KIND: wave_dispatch.handoff_v10}[phase['kind']]
         handoff(repo, phase_path, approval)
-    independent = phase.get('kind') in (wave_plan.V8_KIND, wave_plan.V9_KIND)
+    independent = phase.get('kind') in (wave_plan.V8_KIND, wave_plan.V9_KIND, wave_plan.V10_KIND)
     Monitor = None if independent else load_monitor(phase)
     preparation = phase.get('preparation_view')
     adapters = wave_execution.HarnessAdapters(repo, phase,

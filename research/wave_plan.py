@@ -17,6 +17,7 @@ V6_KIND = 'source_info_v5_central_fixed_wave_phase_v6'
 V7_KIND = 'source_info_v5_central_fixed_wave_phase_v7'
 V8_KIND = 'source_info_v5_central_fixed_wave_phase_v8'
 V9_KIND = 'source_info_v5_central_fixed_wave_phase_v9'
+V10_KIND = 'source_info_v5_central_fixed_wave_phase_v10'
 V6_PROBE_SHA = 'bee0107bd1d82d4c20fa821d2a85f23b57e847d1c468e79994ab6436550ff36b'
 V5_KIND = 'source_info_v5_central_fixed_wave_phase_v5'
 V5_PROBE_SHA = '490e605232dc89ce024032d1236b097a9931bfb3079f0683a2de101691b32cd7'
@@ -76,6 +77,8 @@ def build(original_bundle, old_journal, batch, *, thresholds, source_commit, sou
 
 
 def validate(phase, *, repo=None):
+    if phase.get('kind') == V10_KIND:
+        return validate_v10(phase, repo=repo)
     if phase.get('kind') == V9_KIND:
         return validate_v9(phase, repo=repo)
     if phase.get('kind') == V8_KIND:
@@ -173,7 +176,7 @@ def predecessor_state(phase):
     if not next_phase.verify_reference(ref) or not next_phase.verify_reference(journal):
         raise ValueError('Predecessor phase/journal bytes changed')
     previous = util.read_json(ref['path'])
-    expected_kind = {V8_KIND: V7_KIND, V7_KIND: V6_KIND, V6_KIND: V5_KIND, V5_KIND: V4_KIND, V4_KIND: V3_KIND, V3_KIND: V2_KIND}.get(phase.get('kind'), KIND)
+    expected_kind = {V10_KIND: V9_KIND, V8_KIND: V7_KIND, V7_KIND: V6_KIND, V6_KIND: V5_KIND, V5_KIND: V4_KIND, V4_KIND: V3_KIND, V3_KIND: V2_KIND}.get(phase.get('kind'), KIND)
     if previous.get('kind') != expected_kind: raise ValueError('Successor must retain the exact preceding phase version')
     original = validate(previous)
     for key in ('resource_monitor', 'resource_probe', 'resource_collector_acceptance'):
@@ -185,7 +188,7 @@ def predecessor_state(phase):
         from research import preservation_gate
         history = preservation_gate.load_saved_history(phase)
     current = wave_dispatch.state(journal['path'], previous, ref['sha256'], preservation_history=history)
-    prior_pairs = {V7_KIND: range(54,58), V6_KIND: range(50, 54), V5_KIND: range(22, 50), V4_KIND: range(18, 22), V3_KIND: range(14, 18), V2_KIND: range(12, 14)}.get(expected_kind, range(6, 12))
+    prior_pairs = {V9_KIND: range(58,68), V7_KIND: range(54,58), V6_KIND: range(50, 54), V5_KIND: range(22, 50), V4_KIND: range(18, 22), V3_KIND: range(14, 18), V2_KIND: range(12, 14)}.get(expected_kind, range(6, 12))
     expected = {c['run_id']: c for p in original['assignments'] if p['pair'] in prior_pairs for c in p['cases']}
     if (current['pending'] or set(current['dispatch']) != set(expected) or set(current['reserved']) != set(expected)
             or set(current['implementations']) != set(expected) or set(current['results']) != set(expected)
@@ -1442,6 +1445,208 @@ def validate_v9(phase, *, repo=None):
             path=(root/name).resolve()
             if not path.is_relative_to(root) or util.sha256_file(path) != digest:
                 raise ValueError('Frozen V9 source changed: '+name)
+    return original
+
+
+def _v10_closed_boundary(phase, previous, current):
+    """A real closed V9 boundary, including its immutable unsent transport stop."""
+    ref = phase['closed_predecessor_boundary']
+    if not next_phase.verify_reference(ref):
+        raise ValueError('Actual closed V9 boundary changed')
+    proof = util.read_json(ref['path'])
+    stop = Path(previous['batch']) / '_control' / previous['phase_id'] / 'dispatch-stop.json'
+    gates = {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']}
+             for n, g in current['gates'].items()}
+    if (proof.get('kind') != 'actual_v9_original134_67_closed_recovery_boundary'
+            or proof.get('phase') != phase['predecessor_phase']
+            or proof.get('journal') != phase['predecessor_journal']
+            or proof.get('gates') != gates or proof.get('actual_sent_runs') != 134
+            or proof.get('pairs_gated') != 67
+            or proof.get('remaining_original66_paths_absent') is not True
+            or proof.get('old_scoped_controllers_and_observers_absent') is not True
+            or proof.get('original_stop', {}).get('path') != str(stop)
+            or not next_phase.verify_reference(proof.get('original_stop', {}))):
+        raise ValueError('Closed134/67 and unchanged V9 STOP evidence required')
+    if (set(proof.get('owned_running_checks', {})) != {'sample2.run', 'sample2.browser-review'}
+            or any(v.get('exit_code') != 0 or v.get('names') != []
+                   for v in proof['owned_running_checks'].values())):
+        raise ValueError('Actual owned-resource zero required')
+    terminal, start = (proof.get(k, {}) for k in ('stopped_only_terminal', 'stopped_only_start'))
+    if not next_phase.verify_reference(terminal) or not next_phase.verify_reference(start):
+        raise ValueError('Actual stopped-only terminal required')
+    result = util.read_json(terminal['path'])
+    launched = util.read_json(start['path'])
+    if (result.get('kind') != 'actual_authorized_app_preservation_v9_recovery_terminal'
+            or launched.get('kind') != 'actual_authorized_app_preservation_v9_recovery_start'
+            or launched.get('phase') != phase['predecessor_phase']
+            or launched.get('pid') != result.get('pid')
+            or proof.get('source_commit') != previous['source_commit']
+            or launched.get('canonical_source_unchanged') is not True
+            or launched.get('app_failure_policy') != phase['app_failure_policy']
+            or result.get('result') != {'status': 'wave_gated', 'pairs': [66, 67], 'next_wave_dispatched': False}
+            or any(result.get(k) is not True for k in ('canonical_source_unchanged',
+                'raw_request_bytes_unchanged', 'remaining_original66_paths_absent',
+                'old_stop_unchanged', 'old_observers_absent', 'owned_running_zero'))
+            or result.get('new_run_dispatch') is not False or result.get('observer_started') is not False
+            or proof.get('stopped_only_actual_exit_code') != 0):
+        raise ValueError('Stopped-only actual completion without dispatch/rescore required')
+    from research import app_failure_preservation as app
+    handler_ref = result.get('actual_handler_execution', {})
+    if not next_phase.verify_reference(handler_ref): raise ValueError('Actual approved recovery handler required')
+    gate = util.read_json(current['gates'][67]['receipt_path'])
+    contract = app.validate_contract(gate['preservation_contract'], current=current, historical=True)
+    if (gate.get('gate_kind') != app.KIND or contract['policy'] != phase['app_failure_policy']
+            or contract['handler_execution'] != handler_ref
+            or not any(f['run_id'] == 'MS1-CONT-B-preload-5067'
+                and f['run_instance_id'] == 'f0ba008e299b529f85cac4de35b65212' for f in contract['faults'])):
+        raise ValueError('Exact67 approved retained-fault gate and actual handler required')
+    shutdowns = proof.get('monitor_shutdowns', [])
+    if len(shutdowns) != 2:
+        raise ValueError('Both actual V9 observer shutdowns required')
+    sessions = set()
+    for leaf in shutdowns:
+        if not next_phase.verify_reference(leaf): raise ValueError('Observer shutdown changed')
+        ack = util.read_json(leaf['path'])
+        session = ack.get('session')
+        expected = stop.parent / 'resources' / str(session) / 'shutdown-ack.json'
+        if (not session or session in sessions or ack.get('phase_sha256') != phase['predecessor_phase']['sha256']
+                or leaf.get('path') != str(expected)
+                or ack.get('monitor_stop_confirmed') is not True or ack.get('owned_resources_resolved') is not True):
+            raise ValueError('Observer shutdown not confirmed')
+        sessions.add(session)
+    if shutdowns != launched.get('prior_monitor_shutdowns'):
+        raise ValueError('Exact recorded V9 observer sessions required')
+    wanted = [{'run_id': c['run_id'], 'run_instance_id': c['run_instance_id'],
+               'path': str(Path(previous['batch']) / c['run_id']), 'absent': True}
+              for p in previous['assignments'] if p['pair'] >= 68 for c in p['cases']]
+    if proof.get('remaining_original_paths') != wanted or len(wanted) != 66:
+        raise ValueError('Exactly original68–100 absence required')
+    return proof
+
+
+def check_v10_unsent_boundary(phase):
+    """Only at build/first handoff: later legitimate original roots may exist."""
+    import subprocess
+    if any((Path(phase['batch']) / c['run_id']).exists()
+           for p in phase['assignments'] for c in p['cases']):
+        raise ValueError('Original66 must remain unprepared and unsent at V10 handoff')
+    for label in ('sample2.run', 'sample2.browser-review'):
+        result = subprocess.run(['docker', 'ps', '--format', '{{.Names}}', '--filter', 'label=' + label],
+                                capture_output=True, text=True, check=True)
+        if result.stdout.strip(): raise ValueError('Owned running resources block V10 handoff')
+
+
+def build_v10(predecessor_phase, predecessor_journal, closed_boundary, *, source_commit,
+              source_pins, continuation_acceptance, app_failure_policy):
+    from research import wave_dispatch
+    previous = util.read_json(predecessor_phase)
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        original = util.read_json(previous['original_bundle']['path'])
+        inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 68}
+        phase = {**previous, 'schema_version': 10, 'kind': V10_KIND, 'phase_id': 'central-wave-pair68-100-v10',
+            'source_commit': source_commit, 'source_pins': source_pins,
+            'completed_pairs': list(range(1, 68)), 'assignments': original['assignments'][67:],
+            'shards': inherited, 'responsibility_counts': [sum(v == n for v in inherited.values()) for n in range(1, 5)],
+            'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(68, 101, 2)],
+            'predecessor_phase': next_phase.reference(predecessor_phase),
+            'predecessor_journal': next_phase.reference(predecessor_journal),
+            'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n, g in current['gates'].items()},
+            'closed_predecessor_boundary': closed_boundary, 'continuation_acceptance': continuation_acceptance,
+            'app_failure_policy': app_failure_policy}
+        validate_v10(phase)
+        check_v10_unsent_boundary(phase)
+        return phase
+
+
+def validate_v10(phase, *, repo=None):
+    previous, original, current = predecessor_state(phase)
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks',
+        'predecessor_phase', 'predecessor_journal', 'predecessor_gates'}
+    inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 68}
+    if (phase.get('schema_version') != 10 or phase.get('phase_id') != 'central-wave-pair68-100-v10'
+            or set(phase) != set(previous) | {'closed_predecessor_boundary', 'continuation_acceptance', 'app_failure_policy'}
+            or phase.get('completed_pairs') != list(range(1, 68))
+            or phase.get('assignments') != original['assignments'][67:]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(68, 101, 2)]
+            or phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+                [sum(v == n for v in inherited.values()) for n in range(1, 5)]
+            or any(phase.get(k) != v for k, v in previous.items() if k not in mutable)
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('V10 only continues original68–100; all acquisition conditions remain inherited')
+    allowed = {'research/pair_execution.py', 'research/wave_plan.py', 'research/wave_dispatch.py',
+        'research/wave_campaign.py', 'research/wave_sharing.py', 'research/resource_supervisor.py',
+        'research/tests/test_lease_chain.py', 'research/next_phase_sharing.py'}
+    if (set(phase['source_pins']) != set(previous['source_pins']) | {'research/tests/test_v10_successor.py',
+            'research/app_failure_preservation.py', 'research/tests/test_app_failure_preservation.py'}
+            or any(phase['source_pins'][name] != digest for name, digest in previous['source_pins'].items() if name not in allowed)):
+        raise ValueError('V10 cannot alter other frozen source dependencies')
+    _v10_closed_boundary(phase, previous, current)
+    from research import app_failure_preservation
+    policy = app_failure_preservation.validate_policy(phase['app_failure_policy'])
+    if policy['original_bundle'] != phase['original_bundle'] or policy['batch'] != phase['batch']:
+        raise ValueError('V10 app-failure policy must retain original cohort')
+    ref = phase['continuation_acceptance']
+    if not next_phase.verify_reference(ref): raise ValueError('Current-source V10 acceptance required')
+    proof = util.read_json(ref['path'])
+    if (proof.get('kind') != 'actual_v10_original66_closed_successor_acceptance'
+            or proof.get('passed') is not True or proof.get('source_pins') != phase['source_pins']
+            or proof.get('closed_predecessor_boundary') != phase['closed_predecessor_boundary']
+            or proof.get('original_unsent_UUID_count') != 66
+            or any(proof.get(k) is not False for k in ('model_called', 'evaluator_called', 'user_credential_accessed'))):
+        raise ValueError('Exact original66 current-source acceptance differs')
+    evidence = {}
+    for name in ('finite_validation', 'independent_review', 'supervisor_body_equivalence', 'source_sharing'):
+        if not next_phase.verify_reference(proof.get(name, {})): raise ValueError('Missing actual V10 evidence: ' + name)
+        evidence[name] = util.read_json(proof[name]['path'])
+    finite, review, reuse, sharing = (evidence[n] for n in
+        ('finite_validation', 'independent_review', 'supervisor_body_equivalence', 'source_sharing'))
+    if (finite.get('passed') is not True or finite.get('source_pins') != phase['source_pins']
+            or finite.get('failures') != 0 or finite.get('errors') != 0 or finite.get('skipped') != 0
+            or finite.get('model_called') is not False
+            or review.get('status') != 'passed' or review.get('reviewed_source_sha256') != phase['source_pins']
+            or review.get('kind') != 'independent_v10_closed_successor_source_review'
+            or review.get('model_called') is not False or review.get('finite_validation') != proof['finite_validation']
+            or review.get('supervisor_body_equivalence') != proof['supervisor_body_equivalence']
+            or review.get('reviewed_commit') != proof.get('reviewed_source_commit')):
+        raise ValueError('Finite current-source validation and independent review required')
+    old_source, new_source, fixture = (reuse.get(k, {}) for k in ('previous_supervisor', 'current_supervisor', 'actual_resource_fixture'))
+    if (reuse.get('passed') is not True or reuse.get('allowed_changes') != ['V10_KIND constant', 'Supervisor kind allowlist', 'Supervisor source-guard allowlist']
+            or any(not next_phase.verify_reference(r) for r in (old_source, new_source, fixture))
+            or old_source.get('sha256') != previous['source_pins']['research/resource_supervisor.py']
+            or new_source.get('sha256') != phase['source_pins']['research/resource_supervisor.py']):
+        raise ValueError('Actual unchanged supervisor safety bodies required for fixture reuse')
+    old_bytes = Path(old_source['path']).read_bytes().replace(b'\r\n', b'\n')
+    new_bytes = Path(new_source['path']).read_bytes().replace(b'\r\n', b'\n')
+    new_bytes = new_bytes.replace(b"V10_KIND = 'source_info_v5_central_fixed_wave_phase_v10'\n", b'')
+    new_bytes = new_bytes.replace(b'(KIND, V9_KIND, V10_KIND, FIXTURE_KIND)', b'(KIND, V9_KIND, FIXTURE_KIND)')
+    new_bytes = new_bytes.replace(b'(KIND, V9_KIND, V10_KIND)', b'(KIND, V9_KIND)')
+    if new_bytes != old_bytes: raise ValueError('Supervisor safety body changed beyond version allowlists')
+    actual = util.read_json(fixture['path'])
+    previous_acceptance = util.read_json(previous['lease_repair_acceptance']['path'])
+    if (fixture != previous_acceptance['actual_resource_fixture']
+            or actual.get('passed') is not True or actual.get('supervisor_source', {}).get('sha256') != old_source['sha256']
+            or actual.get('candidate_monitor', {}).get('sha256') != phase['resource_monitor']['sha256']
+            or actual.get('candidate_probe', {}).get('sha256') != phase['resource_probe']['sha256']
+            or actual.get('owned_fixture_resources_remaining') != []
+            or actual.get('thresholds') != {'cadence_seconds': 10, 'stale_seconds': 30, 'probe_deadline_seconds': 10}
+            or any(actual.get(k) is not False for k in ('model_called', 'evaluator_called', 'user_credential_accessed', 'formal_UUIDs_touched'))
+            or actual.get('actual_provider_calls') != 0
+            or any(actual.get('checks', {}).get(k) is not True for k in ('central_gil_hold_monitor_progress',
+                'blocked_sampler_stale_timer_and_real_gateway_ack', 'late_gateway_fenced',
+                'actual_shutdown_ACK_and_owned_stopped', 'actual_fixture_owned_cleanup'))):
+        raise ValueError('Historical fixture does not prove unchanged monitor/probe/safety bodies')
+    if (sharing.get('ordinary_push_and_no_ff_integration_completed') is not True
+            or sharing.get('source_commit') != phase['source_commit'] or sharing.get('source_pins') != phase['source_pins']
+            or sharing.get('reviewed_source_commit') != review['reviewed_commit']):
+        raise ValueError('Actual V10 no-ff source integration and sharing required')
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong V10 canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('Frozen V10 source changed: ' + name)
     return original
 
 

@@ -50,7 +50,7 @@ class Publisher:
         d = self.dispatcher
         current = d.current()
         soak_phase = d.phase
-        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND):
+        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND):
             soak_phase = util.read_json(soak_phase['predecessor_phase']['path'])
         disclosure = {}
         if self.preservation_contract is not None:
@@ -68,16 +68,19 @@ class Publisher:
             'operational_policy_sha256': d.phase['operational_policy']['sha256'],
             **({'predecessor_phase_sha256': d.phase['predecessor_phase']['sha256'],
                 'predecessor_journal_sha256': d.phase['predecessor_journal']['sha256'],
+                **({'predecessor_journal_absent': True,
+                    'predecessor_empty_boundary_sha256': d.phase['predecessor_empty_boundary']['sha256']}
+                   if d.phase['kind'] == wave_plan.V9_KIND else {}),
                 'resource_probe_sha256': d.phase['resource_probe']['sha256']}
                if d.phase.get('predecessor_phase') else {}),
             **({'ancestor_phase_sha256s': [r['sha256'] for r in wave_plan.ancestor_references(d.phase)],
                 'cause_condition_acceptance_sha256': soak_phase['resource_collector_acceptance']['sha256'],
                 'actual_soak_verification_sha256': d.phase['actual_soak_verification']['sha256']}
-               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND) else {}),
+               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND) else {}),
             **({'probe_repair_acceptance_sha256': d.phase['resource_collector_acceptance']['sha256'],
                 'soak_binding': 'Historical ancestor v3 probe only; does not authorize current v'
                     + str(d.phase['schema_version']) + ' probe bytes'}
-               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND) else {}),
+               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND) else {}),
             **disclosure,
             'evaluator_diagnostics': d.phase.get('evaluator_diagnostics'),
             'limitation': 'Shared resource/provider concurrency is a separate execution condition; historical pairs1–'

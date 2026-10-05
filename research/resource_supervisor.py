@@ -20,6 +20,7 @@ from outer.harness import runtime, util
 from outer.harness.preserve import native_path
 
 KIND = 'source_info_v5_central_fixed_wave_phase_v8'
+V9_KIND = 'source_info_v5_central_fixed_wave_phase_v9'
 FIXTURE_KIND = 'nonmodel_resource_supervisor_fixture_v1'
 CADENCE_SECONDS, STALE_SECONDS = 10, 30
 
@@ -254,10 +255,10 @@ class Supervisor:
         self.phase_path = checked(config['phase'])
         self.phase = util.read_json(self.phase_path)
         self.phase['_digest'] = config['phase']['sha256']
-        if self.phase['kind'] not in (KIND, FIXTURE_KIND):
+        if self.phase['kind'] not in (KIND, V9_KIND, FIXTURE_KIND):
             raise ValueError('Independent observer requires its explicit frozen phase')
         source_root = Path(__file__).resolve().parents[1]
-        if self.phase['kind'] == KIND:
+        if self.phase['kind'] in (KIND, V9_KIND):
             for name in ('research/resource_supervisor.py', 'outer/harness/runtime.py',
                          'outer/harness/util.py', 'outer/harness/run.py', 'outer/harness/ownership.py'):
                 if self.phase['source_pins'].get(name) != util.sha256_file(source_root / name):

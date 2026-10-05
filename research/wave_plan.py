@@ -14,6 +14,7 @@ V2_KIND = 'source_info_v5_central_fixed_wave_phase_v2'
 V3_KIND = 'source_info_v5_central_fixed_wave_phase_v3'
 V4_KIND = 'source_info_v5_central_fixed_wave_phase_v4'
 V6_KIND = 'source_info_v5_central_fixed_wave_phase_v6'
+V7_KIND = 'source_info_v5_central_fixed_wave_phase_v7'
 V6_PROBE_SHA = 'bee0107bd1d82d4c20fa821d2a85f23b57e847d1c468e79994ab6436550ff36b'
 V5_KIND = 'source_info_v5_central_fixed_wave_phase_v5'
 V5_PROBE_SHA = '490e605232dc89ce024032d1236b097a9931bfb3079f0683a2de101691b32cd7'
@@ -73,6 +74,8 @@ def build(original_bundle, old_journal, batch, *, thresholds, source_commit, sou
 
 
 def validate(phase, *, repo=None):
+    if phase.get('kind') == V7_KIND:
+        return validate_v7(phase, repo=repo)
     if phase.get('kind') == V6_KIND:
         return validate_v6(phase, repo=repo)
     if phase.get('kind') == V5_KIND:
@@ -164,7 +167,7 @@ def predecessor_state(phase):
     if not next_phase.verify_reference(ref) or not next_phase.verify_reference(journal):
         raise ValueError('Predecessor phase/journal bytes changed')
     previous = util.read_json(ref['path'])
-    expected_kind = {V6_KIND: V5_KIND, V5_KIND: V4_KIND, V4_KIND: V3_KIND, V3_KIND: V2_KIND}.get(phase.get('kind'), KIND)
+    expected_kind = {V7_KIND: V6_KIND, V6_KIND: V5_KIND, V5_KIND: V4_KIND, V4_KIND: V3_KIND, V3_KIND: V2_KIND}.get(phase.get('kind'), KIND)
     if previous.get('kind') != expected_kind: raise ValueError('Successor must retain the exact preceding phase version')
     original = validate(previous)
     for key in ('resource_monitor', 'resource_probe', 'resource_collector_acceptance'):
@@ -172,7 +175,7 @@ def predecessor_state(phase):
     expected_journal = Path(previous['batch']) / '_control' / previous['phase_id'] / 'wave-journal.jsonl'
     if Path(journal['path']).resolve() != expected_journal.resolve(): raise ValueError('Wrong predecessor journal location')
     current = wave_dispatch.state(journal['path'], previous, ref['sha256'])
-    prior_pairs = {V5_KIND: range(22, 50), V4_KIND: range(18, 22), V3_KIND: range(14, 18), V2_KIND: range(12, 14)}.get(expected_kind, range(6, 12))
+    prior_pairs = {V6_KIND: range(50, 54), V5_KIND: range(22, 50), V4_KIND: range(18, 22), V3_KIND: range(14, 18), V2_KIND: range(12, 14)}.get(expected_kind, range(6, 12))
     expected = {c['run_id']: c for p in original['assignments'] if p['pair'] in prior_pairs for c in p['cases']}
     if (current['pending'] or set(current['dispatch']) != set(expected) or set(current['reserved']) != set(expected)
             or set(current['implementations']) != set(expected) or set(current['results']) != set(expected)
@@ -1015,6 +1018,87 @@ def validate_v6(phase, *, repo=None):
         for name, digest in phase['source_pins'].items():
             path = (root / name).resolve()
             if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v6 source pin changed: ' + name)
+    return original
+
+
+def build_v7(predecessor_phase, predecessor_journal, *, source_commit, source_pins, preservation_acceptance):
+    """Original54..100 only, following the explicitly accepted retained53 fault."""
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V6_KIND: raise ValueError('Exact v6 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch'])/'_control', phase_permit=util.sha256_file(predecessor_phase)):
+        from research import wave_dispatch
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        inherited = {k:v for k,v in previous['shards'].items() if int(k) >= 54}
+        phase = {**previous,'schema_version':7,'kind':V7_KIND,'phase_id':'central-wave-pair54-100-v7',
+            'source_commit':source_commit,'source_pins':source_pins,
+            'completed_pairs':list(range(1,54)),'assignments':previous['assignments'][4:],
+            'shards':inherited,'responsibility_counts':[sum(v == n for v in inherited.values()) for n in range(1,5)],
+            'two_pair_blocks':[list(range(i,min(i+2,101))) for i in range(54,101,2)],
+            'predecessor_phase':next_phase.reference(predecessor_phase),
+            'predecessor_journal':next_phase.reference(predecessor_journal),
+            'predecessor_gates':{str(n):{'path':g['receipt_path'],'sha256':g['receipt_sha256']} for n,g in current['gates'].items()},
+            'preservation_acceptance':preservation_acceptance}
+        validate_v7(phase)
+        return phase
+
+
+def validate_v7(phase, *, repo=None):
+    previous,original,current = predecessor_state(phase)
+    if (phase.get('schema_version') != 7 or phase.get('phase_id') != 'central-wave-pair54-100-v7'
+            or phase.get('completed_pairs') != list(range(1,54))
+            or phase.get('assignments') != original['assignments'][53:]
+            or phase.get('two_pair_blocks') != [list(range(i,min(i+2,101))) for i in range(54,101,2)]
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v7 original94-instance amendment')
+    mutable = {'schema_version','kind','phase_id','source_commit','source_pins','completed_pairs',
+        'assignments','shards','responsibility_counts','two_pair_blocks','predecessor_phase',
+        'predecessor_journal','predecessor_gates'}
+    if (set(phase) != set(previous) | {'preservation_acceptance'}
+            or any(phase.get(k) != v for k,v in previous.items() if k not in mutable)):
+        raise ValueError('V7 cannot alter model/input/criteria/budgets/policy/collector or four-Run cap')
+    inherited = {k:v for k,v in previous['shards'].items() if int(k) >= 54}
+    if (phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+            [sum(v == n for v in inherited.values()) for n in range(1,5)]):
+        raise ValueError('V7 must retain original responsibility mapping')
+    from research import preservation_gate
+    acceptance = util.read_json(preservation_gate.checked(phase['preservation_acceptance']))
+    if (acceptance.get('kind') != 'exact_pair53_preservation_and_v7_future94_acceptance'
+            or acceptance.get('passed') is not True or acceptance.get('source_commit') != phase['source_commit']
+            or acceptance.get('remaining_original_UUID_count') != 94
+            or acceptance.get('model_called') is not False or acceptance.get('evaluator_called') is not False):
+        raise ValueError('Reviewed original53 preservation and future94 acceptance required')
+    for key in ('contract','preservation_gate','source_review','nonmodel_acceptance','preserved_boundary','source_sharing'):
+        preservation_gate.checked(acceptance[key])
+    gate = util.read_json(acceptance['preservation_gate']['path'])
+    preservation_gate.validate_gate(gate,current,53)
+    if (acceptance['preservation_gate'] != phase['predecessor_gates']['53']
+            or gate.get('preservation_contract') != acceptance['contract']):
+        raise ValueError('Accepted preservation gate differs from actual predecessor')
+    review = util.read_json(acceptance['source_review']['path'])
+    contract = preservation_gate.validate_contract(acceptance['contract'])
+    if (acceptance['source_review'] != contract['evidence']['source_review']
+            or acceptance['nonmodel_acceptance'] != contract['evidence']['nonmodel_acceptance']
+            or review.get('status') != 'passed' or review.get('reviewed_commit') != contract['source_commit']
+            or any(phase['source_pins'].get(n) != h for n,h in review['reviewed_source_sha256'].items())):
+        raise ValueError('New source pins must retain the independently accepted preservation implementation')
+    checks = util.read_json(acceptance['nonmodel_acceptance']['path'])
+    shared = util.read_json(acceptance['source_sharing']['path'])
+    boundary = util.read_json(acceptance['preserved_boundary']['path'])
+    if (checks.get('passed') is not True or checks.get('model_called') is not False
+            or shared.get('ordinary_push_and_no_ff_integration_completed') is not True
+            or shared.get('source_commit') != phase['source_commit']
+            or boundary.get('gated_pairs') != 53 or boundary.get('sent_stopped_fixed_archived') != 106
+            or boundary.get('remaining_original_UUID_count') != 94
+            or boundary.get('original_evaluator_fault_retained') is not True
+            or boundary.get('pair52_usage_missingness_retained') is not True):
+        raise ValueError('Actual preservation, nonmodel verification and source sharing required')
+    if repo is not None:
+        root=Path(repo).resolve()
+        if (root/phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name,digest in phase['source_pins'].items():
+            path=(root/name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest:
+                raise ValueError('New v7 source pin changed: '+name)
     return original
 
 

@@ -32,7 +32,7 @@ def exclusive(control, *, phase_permit=None):
         try:
             handoff = control / 'phase-handoff.json'
             successors = [(version, control / ('phase-handoff-v' + str(version) + '.json'))
-                          for version in (2, 3, 4, 5, 6)]
+                          for version in (2, 3, 4, 5, 6, 7)]
             if any(path.exists() for _, path in successors) and not handoff.exists():
                 raise ValueError('Missing immutable predecessor handoff')
             if handoff.exists():
@@ -437,13 +437,21 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
 
 
 def _validate_gate(value, current, pair):
+    if value.get('gate_kind') is not None:
+        from research import preservation_gate
+        return preservation_gate.validate_gate(value, current, pair)
+    assigned = [d for d in current['dispatch'].values() if d['pair'] == pair]
+    if any(_postprocess_fault(current['results'].get(d['run_id'], {}).get('row', {})) for d in assigned):
+        raise ValueError('Recorded postprocess fault blocks publication gate')
+    return _validate_gate_common(value, current, pair)
+
+
+def _validate_gate_common(value, current, pair):
     assigned = [d for d in current['dispatch'].values() if d['pair'] == pair]
     if len(assigned) != 2 or not all(d['run_id'] in current['results'] for d in assigned):
         raise ValueError('Exactly two terminal results required before the gate')
     if _collection_hold(current, assigned):
         raise ValueError('Recorded collection fault blocks publication gate')
-    if any(_postprocess_fault(current['results'][d['run_id']]['row']) for d in assigned):
-        raise ValueError('Recorded postprocess fault blocks publication gate')
     expected = {d['run_id']: d['run_instance_id'] for d in assigned}
     if (value.get('pair') != pair or value.get('plan_sha256') != assigned[0]['plan_sha256']
             or value.get('cohort') != assigned[0]['cohort'] or value.get('run_instances') != expected):

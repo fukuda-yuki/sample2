@@ -307,3 +307,43 @@ new acquisition permission. Source integration, freeze and preflight remain
 required. All earlier phase markers and STOP evidence stay intact;
 `handoff_v6` appends one marker under the cohort lease and fences old permits.
 Historical183 soak evidence remains bound only to the original V3 helper.
+
+## Exact original53 preservation gate and V7 future94 continuation
+
+The user explicitly approved publication of original53 as evaluation-faulted
+and quality-incomplete, retaining the original result. This is a single
+operational gate eligibility amendment, not a scoring or task amendment.
+`preservation_gate` admits only CU1-ENR-D-preload-5053, its original UUID,
+artifact and V6 phase, the saved HTTP500/missing Create view/collector fault,
+completed distributed stop and cleanup, unchanged original result/evaluation,
+archived package, incomplete52 usage, accepted implementation and actual user
+approval. The immutable pre-gate journal snapshot must remain an exact prefix.
+The normal `_postprocess_fault` guard is unchanged. Without the explicit
+contract all other evaluator failures remain blocked.
+
+The private gate subtype and `pair_preservation_gate` journal event must agree.
+Both actual finalization and strict replay validate the same contract. The
+public disclosure says evaluator_fault, quality null and incomplete browser
+coverage remain; quality_acceptance is false. All exact-copy privacy/licensing,
+real remote bytes, anonymous download, hash restoration, sockets-blocked saved
+extraction and owned cleanup requirements remain mandatory. Private authority,
+ownership state and contract paths are not part of the public disclosure.
+An explanatory note alone cannot satisfy this gate.
+
+Finish original53 under the sole V6 cohort lease using the independently
+accepted prospective handler. Attest its imported module paths and bytes in
+addition to the original acquisition source preflight. Keep the V6 phase,
+pins, original results and STOP unchanged; append only the actual special gate.
+Retain old local53 copies, using a separately reviewed preservation workspace.
+The existing V6 release tag must be absent or exactly reconciled, never
+overwritten. Old readers fail closed on the new journal event.
+
+After no-ff integration and authorized ordinary source sharing, freeze V7 with
+the closed original50..53 journal and actual preservation acceptance. Only the
+original54..100 assignments/94 UUIDs may dispatch, retaining original priorities
+and responsibilities, max4/internal1/no refill, V6 collector bytes, model,
+criteria, runtime, inputs, thresholds and budgets. `handoff_v7` appends a new
+marker and fences previous permits. The inherited V6 collector proof is checked
+in its original phase context; it is not rewritten as a new probe acceptance.
+New sampling uses the ordinary fault guard and never applies the53 exception to
+another Run. No original rescore, model pilot, resend or replacement is allowed.

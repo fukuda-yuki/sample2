@@ -4,6 +4,8 @@ No models, scoring, retries or generic HTTP-failure classification. The only
 admitted exception is the exact saved original53 fault and its explicit authority.
 """
 from pathlib import Path
+import hashlib
+import subprocess
 
 from outer.harness import util
 from research import next_phase
@@ -21,6 +23,8 @@ EVIDENCE = ('phase', 'authority', 'source_review', 'nonmodel_acceptance', 'bound
             'stop', 'fence', 'manifest', 'snapshot', 'postprocess', 'evaluation', 'record',
             'browser_events', 'browser_collector', 'browser_server_log', 'browser_fault',
             'browser_cleanup', 'archive_package', 'pair52_preload_events', 'pair52_explore_events')
+SAVED_ACCEPTANCE_SHA256 = 'bf358d57348b05d11d41b9df27b1dbf55717a1614ec7733e6d5e2168af09c4c6'
+SAVED_GATE_SHA256 = '39f4d1dfea8023f7ba4de5c1f511de46ad4a24ee5091efae13e069c11b91f840'
 
 
 def checked(reference):
@@ -33,6 +37,10 @@ def checked(reference):
 
 
 def validate_contract(reference, *, current=None):
+    return _validate_contract(reference, current=current)
+
+
+def _validate_contract(reference, *, current=None, history=None):
     contract = util.read_json(checked(reference))
     if (contract.get('kind') != CONTRACT_KIND or contract.get('pair') != 53
             or contract.get('run_id') != RUN or contract.get('run_instance_id') != INSTANCE
@@ -125,10 +133,13 @@ def validate_contract(reference, *, current=None):
             or acceptance.get('source_pins') != pins
             or not set(SOURCE_MODULES) <= set(pins)):
         raise ValueError('Accepted prospective recovery source and nonmodel checks required')
-    for name, digest in pins.items():
-        path = (source_root/name).resolve()
-        if not path.is_relative_to(source_root) or util.sha256_file(path) != digest:
-            raise ValueError('Executing preservation source differs from independently accepted bytes')
+    if history is None:
+        for name, digest in pins.items():
+            path = (source_root/name).resolve()
+            if not path.is_relative_to(source_root) or util.sha256_file(path) != digest:
+                raise ValueError('Executing preservation source differs from independently accepted bytes')
+    else:
+        _check_saved_history(history, reference, contract)
     boundary = util.read_json(paths['boundary'])
     counts = boundary.get('counts', {})
     if (counts.get('gated_pairs') != 52 or counts.get('actually_sent_stopped_fixed_postprocessed_archived') != 106
@@ -195,13 +206,17 @@ def public_disclosure(reference):
 
 
 def validate_gate(value, current, number):
+    return _validate_gate(value, current, number)
+
+
+def _validate_gate(value, current, number, *, history=None):
     from research import pair_execution
     if (number != 53 or value.get('gate_kind') != KIND or value.get('phase_sha256') != PHASE
             or value.get('run_instances') != PAIR_INSTANCES or value.get('quality_acceptance') is not False
             or value.get('retained_scoring_state') != 'evaluator_fault'):
         raise ValueError('Unsupported retained-fault preservation gate')
     reference = value.get('preservation_contract', {})
-    contract = validate_contract(reference,current=current)
+    contract = _validate_contract(reference,current=current,history=history)
     if (value.get('recovery_source_commit') != contract['source_commit']
             or value.get('evidence_files', {}).get(reference['path']) != reference['sha256']):
         raise ValueError('Private gate must bind actual recovery contract and source')
@@ -210,3 +225,95 @@ def validate_gate(value, current, number):
            for b in selected):
         raise ValueError('Exception cannot extend to another original result')
     pair_execution._validate_gate_common(value,current,number)
+
+
+def load_saved_history(phase):
+    """Only the already accepted exact53 history, never a generic bypass flag."""
+    if phase.get('kind') != 'source_info_v5_central_fixed_wave_phase_v7':
+        raise ValueError('Saved history must come from the immutable V7 acceptance')
+    history = {'acceptance': phase['preservation_acceptance']}
+    acceptance = util.read_json(checked(history['acceptance']))
+    if (history['acceptance']['sha256'] != SAVED_ACCEPTANCE_SHA256
+            or acceptance.get('source_commit') != phase['source_commit']
+            or acceptance['preservation_gate'] != phase['predecessor_gates']['53']):
+        raise ValueError('Wrong immutable historical phase/gate')
+    _check_saved_history(history, acceptance['contract'])
+    return history
+
+
+def _check_saved_history(history, reference, contract=None):
+    if (not isinstance(history, dict) or set(history) != {'acceptance'}
+            or history['acceptance'].get('sha256') != SAVED_ACCEPTANCE_SHA256):
+        raise ValueError('Only the exact previously accepted history is permitted')
+    acceptance = util.read_json(checked(history['acceptance']))
+    if (acceptance.get('kind') != 'exact_pair53_preservation_and_v7_future94_acceptance'
+            or acceptance.get('passed') is not True or acceptance.get('remaining_original_UUID_count') != 94
+            or acceptance.get('model_called') is not False or acceptance.get('evaluator_called') is not False
+            or reference != acceptance['contract']
+            or acceptance['preservation_gate']['sha256'] != SAVED_GATE_SHA256):
+        raise ValueError('Exact saved acceptance contract/gate required')
+    names = ('contract','preservation_gate','source_review','nonmodel_acceptance',
+             'preserved_boundary','source_sharing','actual_saved_nonmodel_validation',
+             'actual_handler_execution_attestation')
+    values = {name: util.read_json(checked(acceptance[name])) for name in names}
+    saved = values['contract']
+    if contract is not None and contract != saved:
+        raise ValueError('Saved contract content mismatch')
+    review, tests, actual, handler = (values[name] for name in (
+        'source_review','nonmodel_acceptance','actual_saved_nonmodel_validation',
+        'actual_handler_execution_attestation'))
+    commit = saved['source_commit']
+    tree = review['reviewed_tree']
+    pins = saved['source_pins']
+    if (review['reviewed_commit'] != commit or tests['source_commit'] != commit
+            or actual['source_commit'] != commit or handler['recovery_source_commit'] != commit
+            or tests['source_tree'] != tree or actual['source_tree'] != tree
+            or handler['recovery_source_tree'] != tree
+            or review['reviewed_source_sha256'] != pins or tests['source_pins'] != pins
+            or saved['evidence']['source_review'] != acceptance['source_review']
+            or saved['evidence']['nonmodel_acceptance'] != acceptance['nonmodel_acceptance']
+            or actual['actual_contract'] != reference or handler['contract'] != reference
+            or values['preservation_gate']['preservation_contract'] != reference):
+        raise ValueError('Historical source/contract proofs disagree')
+    if (handler.get('kind') != 'actual_imported_exact53_preservation_handler_attestation'
+            or handler.get('phase_sha256') != PHASE or handler.get('sole_cohort_lease_held') is not True
+            or handler.get('model_called') is not False or handler.get('evaluator_called') is not False
+            or handler.get('stop_sha256') != saved['evidence']['stop']['sha256']
+            or handler.get('canonical_acquisition_source_commit') !=
+                util.read_json(checked(saved['evidence']['phase']))['source_commit']
+            or set(handler.get('actual_imported_modules', {})) != set(SOURCE_MODULES)
+            or any(handler['actual_imported_modules'][name]['sha256'] != pins[name] for name in SOURCE_MODULES)):
+        raise ValueError('Exact actual saved handler/source attestation required')
+    if (actual.get('kind') != 'actual_saved_original53_preservation_contract_nonmodel_validation'
+            or actual.get('passed') is not True
+            or any(actual.get(key) is not True for key in ('actual_original_contract_positive_validated',
+                'strict_original_v6_replay_passed','original_refs_reverified'))
+            or actual.get('model_called') is not False or actual.get('evaluator_called') is not False
+            or actual.get('originals_modified') is not False or not actual.get('negative_checks')
+            or any(row.get('rejected') is not True for row in actual['negative_checks'])):
+        raise ValueError('Actual saved finite original validation required')
+    source_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(['git','rev-parse',commit + '^{tree}'],cwd=source_root,
+        capture_output=True,check=True)
+    if result.stdout.decode().strip() != tree:
+        raise ValueError('Historical Git tree changed')
+    for name, digest in pins.items():
+        if not (source_root/name).resolve().is_relative_to(source_root):
+            raise ValueError('Foreign historical source pin')
+        blob = subprocess.run(['git','cat-file','blob',commit + ':' + name],cwd=source_root,
+            capture_output=True,check=True).stdout
+        if hashlib.sha256(blob).hexdigest() != digest:
+            raise ValueError('Historical accepted Git blob changed')
+    return acceptance
+
+
+def validate_saved_contract(reference, *, history, current=None):
+    return _validate_contract(reference,current=current,history=history)
+
+
+def validate_saved_gate(value, current, number, *, history, gate_reference):
+    acceptance = _check_saved_history(history, value.get('preservation_contract', {}))
+    if (number != 53 or gate_reference != acceptance['preservation_gate']
+            or value != util.read_json(checked(gate_reference))):
+        raise ValueError('Only the exact accepted saved gate may use historical verification')
+    return _validate_gate(value,current,number,history=history)

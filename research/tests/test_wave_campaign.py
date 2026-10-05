@@ -55,6 +55,14 @@ class DriverTests(unittest.TestCase):
             self.assertTrue(campaign.warmup(health, {}, sleep=lambda _: None, clock=lambda: 0))
         self.assertEqual(health.snapshot.call_count, 3)
 
+    def test_warmup_holds_initial_observer_generation_until_two_fresh_samples(self):
+        health = Mock()
+        health.snapshot.side_effect = [RuntimeError('observer scope not ready'),
+            {'sampled_at':'current-a'}, {'sampled_at':'current-a'}, {'sampled_at':'current-b'}]
+        with patch.object(campaign.wave_plan,'healthy',return_value=True):
+            self.assertTrue(campaign.warmup(health,{},sleep=lambda _:None,clock=lambda:0))
+        self.assertEqual(health.snapshot.call_count,4)
+
 
 class JournalTests(unittest.TestCase):
     def test_identity_and_provider_failure_hold_without_raw_response_reads(self):
@@ -90,13 +98,14 @@ class StorageTests(unittest.TestCase):
             util.write_new_json(root / 'manifest.json', binding)
             util.write_new_json(root / 'runtime.json', binding)
             d = Mock(); d.batch = Path(directory)
-            d.current.return_value = {'waves': [{'pairs': [6, 7], 'assignments': [binding]}], 'dispatch': {'A': binding}}
+            d.resource_scope.return_value = {'pairs': [6, 7], 'assignments': [binding], 'dispatched': {'A'}}
             monitor = Mock()
             health = campaign.Health(d, monitor)
             self.assertEqual(health.roots(), [])
             util.write_json_atomic(root / 'runtime.json', {**binding, 'worker_started_at': 'created'})
             self.assertEqual(health.roots(), [root])
             monitor.set_wave.assert_called_with('wave-6-7', 1)
+            d.current.assert_not_called()
 
     def test_first_wave_forecast_reserves_all_remaining_not_just_active_runs(self):
         with tempfile.TemporaryDirectory() as directory:

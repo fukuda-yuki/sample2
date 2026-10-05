@@ -168,13 +168,11 @@ class Health:
                 'mode': 'active_preservation' if pending else 'next_wave_admission'}
 
     def roots(self):
-        current = self.dispatcher.current()
-        if not current['waves']: return []
-        wave = current['waves'][-1]
+        wave = self.dispatcher.resource_scope()
+        if not wave['assignments']: return []
         self.monitor.set_wave('wave-' + '-'.join(map(str, wave['pairs'])), len(wave['assignments']))
         roots = []
         for binding in wave['assignments']:
-            if binding['run_id'] not in current['dispatch']: continue
             root = self.dispatcher.batch / binding['run_id']
             if not (root / 'runtime.json').exists(): continue
             state = util.read_json(root / 'runtime.json')
@@ -277,7 +275,7 @@ def warmup(health, thresholds, *, seconds=30, sleep=time.sleep, clock=time.monot
             sample = health.snapshot()
             healthy = wave_plan.healthy(sample, thresholds)
             stamp = sample['sampled_at']
-        except (OSError, ValueError, KeyError, TypeError): healthy, stamp = False, None
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError): healthy, stamp = False, None
         if not healthy: consecutive = 0
         elif stamp != previous: consecutive += 1
         previous = stamp
@@ -324,12 +322,13 @@ def run_campaign(repo, phase_path, approval_path, *, mode='run', recovery_approv
             or not next_phase.verify_reference(approval['authorization_reference'])):
         raise ValueError('Verified exact-phase user authorization required')
     preflight(repo, phase)
-    if phase.get('kind') in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND):
+    if phase.get('kind') in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND):
         escalate = False
         handoff = {wave_plan.V2_KIND: wave_dispatch.handoff_v2, wave_plan.V3_KIND: wave_dispatch.handoff_v3,
-                   wave_plan.V4_KIND: wave_dispatch.handoff_v4, wave_plan.V5_KIND: wave_dispatch.handoff_v5, wave_plan.V6_KIND: wave_dispatch.handoff_v6, wave_plan.V7_KIND: wave_dispatch.handoff_v7}[phase['kind']]
+                   wave_plan.V4_KIND: wave_dispatch.handoff_v4, wave_plan.V5_KIND: wave_dispatch.handoff_v5, wave_plan.V6_KIND: wave_dispatch.handoff_v6, wave_plan.V7_KIND: wave_dispatch.handoff_v7, wave_plan.V8_KIND: wave_dispatch.handoff_v8}[phase['kind']]
         handoff(repo, phase_path, approval)
-    Monitor = load_monitor(phase)
+    independent = phase.get('kind') == wave_plan.V8_KIND
+    Monitor = None if independent else load_monitor(phase)
     preparation = phase.get('preparation_view')
     adapters = wave_execution.HarnessAdapters(repo, phase,
         prepare_repo=preparation['path'] if preparation else None,
@@ -341,14 +340,21 @@ def run_campaign(repo, phase_path, approval_path, *, mode='run', recovery_approv
         snapshot=lambda: delegates['health'].snapshot(),
         supervise=lambda bindings: delegates['health'].supervise(bindings),
         publication_ready=lambda number, current: delegates['publisher'].ready(number, current),
-        publish=lambda number, current, recovering: delegates['publisher'].publish(number, current, recovering))
+        publish=lambda number, current, recovering: delegates['publisher'].publish(number, current, recovering),
+        enroll_scope=(lambda scope: delegates['monitor'].enroll_ready(scope)) if independent else None,
+        admit=(lambda binding: delegates['monitor'].admit(binding)) if independent else None)
     from research.wave_sharing import Publisher
     delegates['publisher'] = Publisher(dispatcher)
     recovery = util.read_json(recovery_approval_path) if recovery_approval_path else None
     if mode in ('resume-unsent', 'continue') and not recovery:
         raise ValueError('Explicit same-phase recovery approval required')
     with dispatcher.session():
-        monitor = Monitor(dispatcher.phase_control / 'resources', lambda: delegates['health'].roots())
+        if independent:
+            from research.resource_supervisor import ProcessMonitor
+            monitor = ProcessMonitor(phase_path, dispatcher.phase_control / 'resources', dispatcher.resource_scope)
+        else:
+            monitor = Monitor(dispatcher.phase_control / 'resources', lambda: delegates['health'].roots())
+        delegates['monitor'] = monitor
         delegates['health'] = Health(dispatcher, monitor, escalate=escalate)
         try:
             monitor.start()

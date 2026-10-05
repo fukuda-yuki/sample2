@@ -17,7 +17,7 @@ BINDING_KEYS = ('run_id', 'run_instance_id', 'slot', 'pair', 'plan_sha256',
                 'phase_sha256', 'cohort', 'runtime', 'input_sha256', 'condition_sha256')
 
 
-def state(journal, phase, digest):
+def state(journal, phase, digest, *, preservation_history=None):
     """Replay strict state; incomplete tails and ambiguous sends always hold."""
     out = dict(reserved={}, dispatch={}, implementations={}, results={}, gates={}, waves=[])
     expected = {c['run_id']: c for p in phase['assignments'] for c in p['cases']}
@@ -89,7 +89,11 @@ def state(journal, phase, digest):
             from research import preservation_gate
             if (kind == 'pair_preservation_gate') != (gate.get('gate_kind') == preservation_gate.KIND):
                 raise ValueError('Explicit preservation journal event and gate subtype must agree')
-            pair._validate_gate(gate, out, event['pair'])
+            if kind == 'pair_preservation_gate' and preservation_history is not None:
+                preservation_gate.validate_saved_gate(gate,out,event['pair'],history=preservation_history,
+                    gate_reference={'path':event['receipt_path'],'sha256':event['receipt_sha256']})
+            else:
+                pair._validate_gate(gate, out, event['pair'])
             if gate.get('phase_sha256') != digest: raise ValueError('Gate must also bind new phase')
             out['gates'][event['pair']] = event
         elif kind not in ('resource_snapshot', 'postprocess_start', 'publication_start', 'fault', 'metrics', 'resume'):
@@ -101,7 +105,8 @@ def state(journal, phase, digest):
 
 class Dispatcher:
     def __init__(self, repo, phase_path, approval, *, prepare, verify, implement,
-                 postprocess, publish, reconcile, fence, snapshot, supervise, publication_ready):
+                 postprocess, publish, reconcile, fence, snapshot, supervise, publication_ready,
+                 enroll_scope=None, admit=None):
         self.repo, self.phase_path = Path(repo).resolve(), Path(phase_path).resolve()
         self.phase = util.read_json(phase_path); self.digest = util.sha256_file(phase_path)
         wave_plan.validate(self.phase, repo=self.repo)
@@ -120,6 +125,9 @@ class Dispatcher:
         self.publication_ready = publication_ready
         self.admission = threading.RLock(); self.journal_lock = threading.RLock(); self.entered = False
         self.closed = threading.Event(); self.owned_active = {}
+        self._monitor_wave = None
+        self._known_dispatch = set()
+        self.enroll_scope, self.admit = enroll_scope, admit
 
     @contextmanager
     def session(self):
@@ -130,7 +138,7 @@ class Dispatcher:
                 'phase_path': str(self.phase_path), 'old_journal': self.phase['old_journal'],
                 'original_bundle': self.phase['original_bundle'], 'approval': self.approval}
             handoff = self.control / 'phase-handoff.json'
-            if self.phase['kind'] in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND):
+            if self.phase['kind'] in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND):
                 version = self.phase['schema_version']
                 successor = util.read_json(self.control / ('phase-handoff-v' + str(version) + '.json'))
                 if (successor.get('new_phase') != {'path': str(self.phase_path), 'sha256': self.digest}
@@ -140,14 +148,35 @@ class Dispatcher:
                 if util.read_json(handoff) != marker: raise ValueError('Different durable phase owner')
             else: util.write_new_json(handoff, marker)
             self.entered = True
-            try: yield self
+            try:
+                self.current()  # seed verified scope before monitor or recovery
+                yield self
             finally: self.entered = False
 
     def current(self):
         if not self.entered: raise ValueError('Central cohort session lock required')
         wave_plan.validate(self.phase, repo=self.repo)
         with self.journal_lock:
-            return state(self.journal, self.phase, self.digest)
+            current = state(self.journal, self.phase, self.digest)
+        self._sync_scope(current)
+        return current
+
+    def _sync_scope(self, current):
+        """Cache only identities already accepted by strict replay, never health."""
+        with self.admission:
+            self._monitor_wave = (current['waves'][-1] if current['waves'] else None)
+            self.owned_active = {rid: dict(current['reserved'][rid])
+                for rid in current['dispatch'] if rid not in current['implementations']
+                or current['implementations'][rid]['receipt'].get('stop_confirmed') is not True}
+            self._known_dispatch = set(current['dispatch'])
+
+    def resource_scope(self):
+        """Small verified wave view; no ancestor hashing on the sampling thread."""
+        with self.admission:
+            wave = self._monitor_wave
+            return {'pairs': list(wave['pairs']) if wave else [],
+                'assignments': [dict(b) for b in wave['assignments']] if wave else [],
+                'dispatched': set(self._known_dispatch)}
 
     def record(self, kind, **value):
         with self.journal_lock:
@@ -158,7 +187,8 @@ class Dispatcher:
         util.write_new_json(path, {'binding': binding, 'receipt': receipt})
         self.record(kind, **binding, receipt=receipt, receipt_path=str(path), receipt_sha256=util.sha256_file(path))
         if kind in ('implemented', 'stop_reconciled') and receipt.get('stop_confirmed') is True:
-            self.owned_active.pop(binding['run_id'], None)
+            with self.admission:
+                self.owned_active.pop(binding['run_id'], None)
 
     def fault(self, reason):
         """Decision closes dispatch durably; distributed gateway ACK time is separate."""
@@ -170,20 +200,16 @@ class Dispatcher:
                     util.write_new_json(self.stop_path, {'reason': reason, 'phase_sha256': self.digest,
                         'decision_at': pair.run.now(), 'http_fence_confirmed': False})
             except OSError as exc: evidence_errors.append(type(exc).__name__)
-            try:
-                current = self.current()
-                owned = [binding for rid, binding in current['dispatch'].items()
-                    if rid not in current['implementations']
-                    or current['implementations'][rid]['receipt'].get('stop_confirmed') is not True]
-            except (OSError, ValueError) as exc:
-                evidence_errors.append(type(exc).__name__)
-                owned = list(self.owned_active.values())
-            try: self.record('fault', reason=reason, stop_reference=str(self.stop_path))
-            except OSError as exc: evidence_errors.append(type(exc).__name__)
+            owned = [dict(b) for b in self.owned_active.values()]
         # Caller closes ALL gateways concurrently before waiting for worker stops.
         # Callback must return every owned binding, ACK and stop uncertainty.
         try: receipt = self.fence(owned)
         except Exception as exc: receipt = {'confirmed': False, 'error_type': type(exc).__name__}
+        # Full validation remains mandatory, but cannot delay physical fencing.
+        try: self.current()
+        except (OSError, ValueError) as exc: evidence_errors.append(type(exc).__name__)
+        try: self.record('fault', reason=reason, stop_reference=str(self.stop_path))
+        except OSError as exc: evidence_errors.append(type(exc).__name__)
         path = self.phase_control / ('distributed-fence-' + uuid.uuid4().hex + '.json')
         try:
             util.write_new_json(path, {'phase_sha256': self.digest, 'owned': owned, 'receipt': receipt,
@@ -234,6 +260,13 @@ class Dispatcher:
                 self.verify(binding)
                 bindings.append(binding)
         self.record('wave_reserved', pairs=numbers, blocks=len(selected), run_cap=len(bindings), assignments=bindings)
+        with self.admission:
+            self._monitor_wave = {'pairs': numbers, 'assignments': [dict(b) for b in bindings]}
+        if self.enroll_scope is not None:
+            try:
+                self.enroll_scope(self.resource_scope())
+            except Exception:
+                return self.fault('independent_scope_or_health_not_ready')
         return self._implement(bindings)
 
     def _implement(self, bindings):
@@ -253,9 +286,12 @@ class Dispatcher:
                                 failed = True
                     with self.admission:
                         if self.closed.is_set() or self.stop_path.exists(): break
+                        if self.admit is not None:
+                            self.admit(binding)
                         # Durable intent precedes pool submission. A crash here is
                         # ambiguous dispatch; neither recovery nor resume replays it.
                         self.owned_active[binding['run_id']] = binding
+                        self._known_dispatch.add(binding['run_id'])
                         self.record('dispatch', **binding)
                         futures[pool.submit(self.implement, self.repo, self.batch, binding['run_id'])] = binding
                 pending = set(futures) - processed
@@ -363,7 +399,7 @@ class Dispatcher:
             or current['implementations'][rid]['receipt'].get('submission_fixed') is not True]
         unresolved = []
         for rid in uncertain:
-            binding = current['dispatch'][rid]
+            binding = current['reserved'][rid]
             try: receipt = self.reconcile(binding)
             except Exception as exc:
                 unresolved.append({'run_id': rid, 'error_type': type(exc).__name__}); continue
@@ -455,11 +491,16 @@ def handoff_v7(repo, phase_path, approval):
     return _handoff(repo, phase_path, approval, 7)
 
 
+
+def handoff_v8(repo, phase_path, approval):
+    return _handoff(repo, phase_path, approval, 8)
+
+
 def _handoff(repo, phase_path, approval, version):
     """Append a successor under the original cohort lease; never edits ancestors."""
     repo, phase_path = Path(repo).resolve(), Path(phase_path).resolve()
     phase = util.read_json(phase_path); digest = util.sha256_file(phase_path)
-    if phase.get('kind') != {2: wave_plan.V2_KIND, 3: wave_plan.V3_KIND, 4: wave_plan.V4_KIND, 5: wave_plan.V5_KIND, 6: wave_plan.V6_KIND, 7: wave_plan.V7_KIND}[version]:
+    if phase.get('kind') != {2: wave_plan.V2_KIND, 3: wave_plan.V3_KIND, 4: wave_plan.V4_KIND, 5: wave_plan.V5_KIND, 6: wave_plan.V6_KIND, 7: wave_plan.V7_KIND, 8: wave_plan.V8_KIND}[version]:
         raise ValueError('Explicit versioned successor phase required')
     if (approval.get('approved_by') != 'user' or approval.get('authorized') is not True
             or approval.get('phase_sha256') != digest or not approval.get('authorization_reference')):

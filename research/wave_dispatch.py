@@ -81,11 +81,14 @@ def state(journal, phase, digest):
                     for b in bindings)):
                 raise ValueError('Every wave Run must stop and originals fix before heavy processing')
             barrier = True
-        elif kind == 'pair_gate':
+        elif kind in ('pair_gate', 'pair_preservation_gate'):
             if not barrier or event['pair'] in out['gates']: raise ValueError('Premature or duplicate pair gate')
             if util.sha256_file(event['receipt_path']) != event['receipt_sha256']:
                 raise ValueError('Pair gate evidence changed')
             gate = util.read_json(event['receipt_path'])
+            from research import preservation_gate
+            if (kind == 'pair_preservation_gate') != (gate.get('gate_kind') == preservation_gate.KIND):
+                raise ValueError('Explicit preservation journal event and gate subtype must agree')
             pair._validate_gate(gate, out, event['pair'])
             if gate.get('phase_sha256') != digest: raise ValueError('Gate must also bind new phase')
             out['gates'][event['pair']] = event
@@ -127,7 +130,7 @@ class Dispatcher:
                 'phase_path': str(self.phase_path), 'old_journal': self.phase['old_journal'],
                 'original_bundle': self.phase['original_bundle'], 'approval': self.approval}
             handoff = self.control / 'phase-handoff.json'
-            if self.phase['kind'] in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND):
+            if self.phase['kind'] in (wave_plan.V2_KIND, wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND):
                 version = self.phase['schema_version']
                 successor = util.read_json(self.control / ('phase-handoff-v' + str(version) + '.json'))
                 if (successor.get('new_phase') != {'path': str(self.phase_path), 'sha256': self.digest}
@@ -448,11 +451,15 @@ def handoff_v6(repo, phase_path, approval):
     return _handoff(repo, phase_path, approval, 6)
 
 
+def handoff_v7(repo, phase_path, approval):
+    return _handoff(repo, phase_path, approval, 7)
+
+
 def _handoff(repo, phase_path, approval, version):
     """Append a successor under the original cohort lease; never edits ancestors."""
     repo, phase_path = Path(repo).resolve(), Path(phase_path).resolve()
     phase = util.read_json(phase_path); digest = util.sha256_file(phase_path)
-    if phase.get('kind') != {2: wave_plan.V2_KIND, 3: wave_plan.V3_KIND, 4: wave_plan.V4_KIND, 5: wave_plan.V5_KIND, 6: wave_plan.V6_KIND}[version]:
+    if phase.get('kind') != {2: wave_plan.V2_KIND, 3: wave_plan.V3_KIND, 4: wave_plan.V4_KIND, 5: wave_plan.V5_KIND, 6: wave_plan.V6_KIND, 7: wave_plan.V7_KIND}[version]:
         raise ValueError('Explicit versioned successor phase required')
     if (approval.get('approved_by') != 'user' or approval.get('authorized') is not True
             or approval.get('phase_sha256') != digest or not approval.get('authorization_reference')):

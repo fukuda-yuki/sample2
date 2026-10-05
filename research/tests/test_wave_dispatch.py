@@ -267,6 +267,47 @@ class WaveTests(unittest.TestCase):
             self.assertTrue(result['evidence_errors'])
             self.assertTrue(dispatcher.closed.is_set())
 
+    def test_fault_fences_before_any_full_validation(self):
+        dispatcher = self.dispatcher()
+        order = []
+        with dispatcher.session():
+            binding = self.phase['assignments'][0]['cases'][0]
+            dispatcher.owned_active[binding['run_id']] = binding
+            dispatcher.fence = lambda owned: order.append(('fence', owned)) or {'confirmed': True}
+            def failed_validation():
+                order.append(('validation', None))
+                raise ValueError('Synthetic delayed/corrupt journal validation')
+            with patch.object(dispatcher, 'current', side_effect=failed_validation):
+                result = dispatcher.fault('fixture_resource_stale')
+            self.assertEqual([x[0] for x in order], ['fence', 'validation'])
+            self.assertEqual(order[0][1], [binding])
+            self.assertTrue(result['evidence_errors'])
+
+    def test_recovery_terminal_uses_reserved_binding_and_never_resends(self):
+        dispatcher = self.dispatcher(publication_ready=lambda number, current: False)
+        with dispatcher.session():
+            def stopped_before_terminal(bindings):
+                for b in bindings:
+                    dispatcher.owned_active[b['run_id']] = b
+                    dispatcher.record('dispatch', **b)
+                    util.write_new_json(self.batch / b['run_id'] / 'implementation-receipt.json',
+                        dict(run_id=b['run_id'], run_instance_id=b['run_instance_id'],
+                             stop_confirmed=True, submission_fixed=True))
+                return {'status': 'held'}
+            with patch.object(dispatcher, '_implement', side_effect=stopped_before_terminal):
+                dispatcher.execute_next()
+            self.assertEqual(dispatcher.recover()['reason'], 'publication_review_pending')
+            current = dispatcher.current()
+            self.assertEqual(len(current['implementations']), 4)
+            self.assertEqual(self.sent, [])
+            for event in current['implementations'].values():
+                binding = util.read_json(event['receipt_path'])['binding']
+                self.assertNotIn('kind', binding)
+                self.assertEqual(binding, current['reserved'][event['run_id']])
+            prior = len(list(dispatcher.phase_control.glob('implemented-*.json')))
+            dispatcher.recover()
+            self.assertEqual(len(list(dispatcher.phase_control.glob('implemented-*.json'))), prior)
+
     def test_initial_preparation_crash_reuses_same_unstarted_instance(self):
         count = 0
         def partial(binding):

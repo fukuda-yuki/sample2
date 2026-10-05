@@ -11,12 +11,19 @@ from research import catalog_share, next_phase_sharing, pair_execution, wave_pla
 
 
 class Publisher:
-    def __init__(self, dispatcher):
+    def __init__(self, dispatcher, *, preservation_contract=None):
         self.dispatcher = dispatcher
         self.repo = dispatcher.repo
         self.original_path = Path(dispatcher.phase['original_bundle']['path'])
+        self.preservation_contract = preservation_contract
+        if preservation_contract is not None:
+            from research import preservation_gate
+            preservation_gate.validate_contract(preservation_contract, current=dispatcher.current())
 
     def workspace(self, number):
+        if self.preservation_contract is not None:
+            if number != 53: raise ValueError('Preservation publisher is exact53 only')
+            return self.repo / 'artifacts/continuity-sharing-v1/wave-053-preservation-v7'
         return self.repo / 'artifacts/continuity-sharing-v1' / f'wave-{number:03d}'
 
     def context(self, repo, original_path, number):
@@ -43,8 +50,12 @@ class Publisher:
         d = self.dispatcher
         current = d.current()
         soak_phase = d.phase
-        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND):
+        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND):
             soak_phase = util.read_json(soak_phase['predecessor_phase']['path'])
+        disclosure = {}
+        if self.preservation_contract is not None:
+            from research import preservation_gate
+            disclosure['preservation_disposition'] = preservation_gate.public_disclosure(self.preservation_contract)
         return {'phase_id': d.phase['phase_id'], 'phase_sha256': d.digest,
             'source_commit': d.phase['source_commit'],
             'original_bundle_sha256': d.phase['original_bundle']['sha256'],
@@ -62,11 +73,12 @@ class Publisher:
             **({'ancestor_phase_sha256s': [r['sha256'] for r in wave_plan.ancestor_references(d.phase)],
                 'cause_condition_acceptance_sha256': soak_phase['resource_collector_acceptance']['sha256'],
                 'actual_soak_verification_sha256': d.phase['actual_soak_verification']['sha256']}
-               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND) else {}),
+               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND) else {}),
             **({'probe_repair_acceptance_sha256': d.phase['resource_collector_acceptance']['sha256'],
                 'soak_binding': 'Historical ancestor v3 probe only; does not authorize current v'
                     + str(d.phase['schema_version']) + ' probe bytes'}
-               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND) else {}),
+               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND) else {}),
+            **disclosure,
             'evaluator_diagnostics': d.phase.get('evaluator_diagnostics'),
             'limitation': 'Shared resource/provider concurrency is a separate execution condition; historical pairs1–'
                 + str(max(d.phase['completed_pairs'])) + ' and their earlier execution phases are preserved without rescoring.'}
@@ -114,7 +126,7 @@ class Publisher:
 
         result = next_phase_sharing.share(d.repo, self.original_path, number, workspace,
             workspace / 'public-review.json', context=self.context, phase=self.metadata(number),
-            record_gate=verify_gate)
+            record_gate=verify_gate, preservation_contract=self.preservation_contract)
         if result.get('status') != 'shared_downloaded_restored_extracted_cleaned':
             raise ValueError('Actual publication/anonymous restore/cleanup gate incomplete')
         return Path(result['gate'])

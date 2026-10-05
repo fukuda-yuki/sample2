@@ -177,11 +177,16 @@ def stage(repo, bundle_path, number, destination, *, context=None, phase=None):
 
 
 def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=catalog_delivery.download,
-          context=None, phase=None, record_gate=None, preservation_contract=None):
+          context=None, phase=None, record_gate=None, preservation_contract=None, app_failure_contract=None):
     repo, workspace = Path(repo).resolve(), Path(workspace).resolve()
     if phase and (not callable(context) or not callable(record_gate)):
         raise ValueError('Phase sharing requires central context and gate recorder')
     preservation = {}
+    if app_failure_contract is not None:
+        from research import app_failure_preservation as app
+        if preservation_contract is not None or not phase or phase.get('app_failure_preservation_disposition') != app.public_disclosure(app_failure_contract):
+            raise ValueError('Exact app-failure preservation disclosure required')
+        preservation = app.gate_fields(app_failure_contract)
     if preservation_contract is not None:
         from research import preservation_gate
         preservation = preservation_gate.gate_fields(preservation_contract)
@@ -195,7 +200,7 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     finalization = workspace / 'finalization.json'
     if finalization.exists():
         return finish(repo, bundle_path, number, workspace, review, finalization,
-                      context=context, phase=phase, record_gate=record_gate, preservation_contract=preservation_contract)
+                      context=context, phase=phase, record_gate=record_gate, preservation_contract=preservation_contract, app_failure_contract=app_failure_contract)
     manifest = catalog_share.verify_public(workspace / 'public', exact=True)
     if manifest['plan_sha256'] != util.sha256_file(bundle_path) or manifest['pair'] != number:
         raise ValueError('Public bytes belong to another plan/pair')
@@ -271,21 +276,26 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
         'package_sha256': asset['sha256'], 'roundtrip_receipt': str(roundtrip_path),
         'evidence_files': {str(p): util.sha256_file(p) for p in evidence_paths}, **preservation})
     return finish(repo, bundle_path, number, workspace, review, finalization,
-                  context=context, phase=phase, record_gate=record_gate, preservation_contract=preservation_contract)
+                  context=context, phase=phase, record_gate=record_gate, preservation_contract=preservation_contract, app_failure_contract=app_failure_contract)
 
 
 def finish(repo, bundle_path, number, workspace, review, finalization, *, context=None,
-           phase=None, record_gate=None, preservation_contract=None):
+           phase=None, record_gate=None, preservation_contract=None, app_failure_contract=None):
     """Complete only the saved verified roundtrip, including after owned cleanup."""
     bundle, batch, current, pair, bindings = (context or pair_context)(repo, bundle_path, number)
     saved = util.read_json(finalization)
     preservation = {}
+    if app_failure_contract is not None:
+        from research import app_failure_preservation as app
+        if preservation_contract is not None or not phase or phase.get('app_failure_preservation_disposition') != app.public_disclosure(app_failure_contract):
+            raise ValueError('Exact app-failure finalization disclosure required')
+        preservation = app.gate_fields(app_failure_contract)
     if preservation_contract is not None:
         from research import preservation_gate
         preservation = preservation_gate.gate_fields(preservation_contract)
         if number != 53 or not phase or phase.get('preservation_disposition') != preservation_gate.public_disclosure(preservation_contract):
             raise ValueError('Preservation finalization needs the same explicit disclosure')
-    elif saved.get('preservation_contract') is not None or saved.get('gate_kind') is not None:
+    elif app_failure_contract is None and (saved.get('preservation_contract') is not None or saved.get('gate_kind') is not None):
         raise ValueError('Retained preservation finalization requires its exact contract')
     expected = {'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
         'cohort': bundle['cohort'], 'review_sha256': util.sha256_file(review),
@@ -320,6 +330,8 @@ def finish(repo, bundle_path, number, workspace, review, finalization, *, contex
             str(finalization): util.sha256_file(finalization)}
     if preservation_contract is not None:
         refs[preservation_contract['path']] = preservation_contract['sha256']
+    if app_failure_contract is not None:
+        refs[app_failure_contract['path']] = app_failure_contract['sha256']
     gate = {'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
         'cohort': bundle['cohort'], 'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
         'evidence_files': refs, 'publication_receipt': str(workspace / 'publication-receipt.json'),

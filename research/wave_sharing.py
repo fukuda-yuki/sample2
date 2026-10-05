@@ -49,8 +49,13 @@ class Publisher:
     def metadata(self, number):
         d = self.dispatcher
         current = d.current()
+        app_contract = d.app_contract(number, current) if getattr(d, 'app_failure_policy', None) else None
+        if app_contract:
+            from research import app_failure_preservation
+            app_disclosure = {'app_failure_preservation_disposition': app_failure_preservation.public_disclosure(app_contract)}
+        else: app_disclosure = {}
         soak_phase = d.phase
-        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND):
+        while soak_phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND, wave_plan.V10_KIND):
             soak_phase = util.read_json(soak_phase['predecessor_phase']['path'])
         disclosure = {}
         if self.preservation_contract is not None:
@@ -76,12 +81,12 @@ class Publisher:
             **({'ancestor_phase_sha256s': [r['sha256'] for r in wave_plan.ancestor_references(d.phase)],
                 'cause_condition_acceptance_sha256': soak_phase['resource_collector_acceptance']['sha256'],
                 'actual_soak_verification_sha256': d.phase['actual_soak_verification']['sha256']}
-               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND) else {}),
+               if d.phase['kind'] in (wave_plan.V3_KIND, wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND, wave_plan.V10_KIND) else {}),
             **({'probe_repair_acceptance_sha256': d.phase['resource_collector_acceptance']['sha256'],
                 'soak_binding': 'Historical ancestor v3 probe only; does not authorize current v'
                     + str(d.phase['schema_version']) + ' probe bytes'}
-               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND) else {}),
-            **disclosure,
+               if d.phase['kind'] in (wave_plan.V4_KIND, wave_plan.V5_KIND, wave_plan.V6_KIND, wave_plan.V7_KIND, wave_plan.V8_KIND, wave_plan.V9_KIND, wave_plan.V10_KIND) else {}),
+            **disclosure, **app_disclosure,
             'evaluator_diagnostics': d.phase.get('evaluator_diagnostics'),
             'limitation': 'Shared resource/provider concurrency is a separate execution condition; historical pairs1–'
                 + str(max(d.phase['completed_pairs'])) + ' and their earlier execution phases are preserved without rescoring.'}
@@ -129,7 +134,8 @@ class Publisher:
 
         result = next_phase_sharing.share(d.repo, self.original_path, number, workspace,
             workspace / 'public-review.json', context=self.context, phase=self.metadata(number),
-            record_gate=verify_gate, preservation_contract=self.preservation_contract)
+            record_gate=verify_gate, preservation_contract=self.preservation_contract,
+            app_failure_contract=d.app_contract(number, current) if getattr(d, 'app_failure_policy', None) else None)
         if result.get('status') != 'shared_downloaded_restored_extracted_cleaned':
             raise ValueError('Actual publication/anonymous restore/cleanup gate incomplete')
         return Path(result['gate'])

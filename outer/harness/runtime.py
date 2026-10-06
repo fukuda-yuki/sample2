@@ -68,15 +68,21 @@ def source(repo, task):
     return dest
 
 
-def prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
+def prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek', task_revision=None):
     repo = Path(repo).resolve()
     profiles.identifier(task_id)
     preset = profiles.read(repo, 'runtimes', runtime_id)
     attempt = profiles.runtime_root(repo, task_id, preset) / 'preparation' / uuid.uuid4().hex
     attempt.mkdir(parents=True)
-    util.write_new_json(attempt / 'request.json', {'task':task_id, 'rebuild':rebuild, 'started_at':run.now()})
+    request = {'task':task_id, 'rebuild':rebuild, 'started_at':run.now()}
+    if task_revision is not None:
+        request['task_profile_revision'] = task_revision
+    util.write_new_json(attempt / 'request.json', request)
     try:
-        result = _prepare(repo, task_id=task_id, rebuild=rebuild, runtime_id=runtime_id)
+        options = {'task_id': task_id, 'rebuild': rebuild, 'runtime_id': runtime_id}
+        if task_revision is not None:
+            options['task_revision'] = task_revision
+        result = _prepare(repo, **options)
         util.write_new_json(attempt / 'result.json', result)
         return result
     except Exception as exc:
@@ -85,16 +91,22 @@ def prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
         raise RuntimeError('Preparation failed; retained record: ' + str(attempt / 'failure.json')) from exc
 
 
-def _prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
+def _prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek', task_revision=None):
     repo = Path(repo).resolve()
     docker('info', '--format', '{{.OSType}}', timeout=30)
-    task = profiles.read(repo, 'tasks', task_id)
+    task = profiles.task_profile(repo, task_id, task_revision)
     source(repo, task)
     profile = profiles.read(repo, 'runtimes', runtime_id)
     root = profiles.runtime_root(repo, task_id, profile)
     root.mkdir(parents=True, exist_ok=True)
     if (root / 'lock.json').exists() and not rebuild:
         lock = util.read_json(root / 'lock.json')
+        if task_revision is not None or 'task_profile_revision' in lock:
+            if (lock.get('task_profile_revision') != task_revision
+                    or lock.get('evaluator_version') != task['evaluation']['evaluation_version']
+                    or lock.get('evaluator_project') != task['evaluation']['project']
+                    or lock.get('controller_files') != controller_files(repo)):
+                raise ValueError('Retained runtime revision/controller differs; prepare a new binding')
         for digest in lock['images'].values():
             image_id(digest)
         return lock
@@ -142,6 +154,10 @@ def _prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
                                 'clean_worktree': not bool(command(['git', 'status', '--porcelain'], cwd=repo).stdout),
                                 'source_commit': command(['git', 'rev-parse', 'HEAD'], cwd=repo).stdout.strip()},
             'created_at': run.now()}
+    if task_revision is not None:
+        lock.update(task_profile_revision=task_revision,
+                    evaluator_version=task['evaluation']['evaluation_version'],
+                    evaluator_project=task['evaluation']['project'])
     util.write_new_json(build_root / 'lock.json', lock)
     util.write_json_atomic(root / 'lock.json', lock)
     return lock

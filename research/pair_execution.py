@@ -440,6 +440,9 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
 
 
 def _validate_gate(value, current, pair):
+    if value.get('gate_kind') == 'repaired_main_pair_publication_gate_v1':
+        from research import acquisition_sharing
+        return acquisition_sharing.validate_gate(value, current, pair)
     from research import app_failure_preservation
     if value.get('gate_kind') == app_failure_preservation.KIND:
         return app_failure_preservation.validate_gate(value, current, pair)

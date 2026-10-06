@@ -67,7 +67,7 @@ def validate(repo, path):
     for old in [repo,*map(live_pilot.safe_path,p['protected_roots'])]:
         if live_pilot.within(root,old) or live_pilot.within(old,root):
             raise ValueError('Campaign overlaps protected source/data')
-    if p.get('policy') != policy():
+    if p.get('policy') not in policies_allowed():
         raise ValueError('Research acquisition policy changed')
     if p.get('storage_policy')!='new_campaign_ntfs_compression_originals_retained':
         raise ValueError('Explicit bounded new-root storage policy required')
@@ -86,6 +86,13 @@ def policy():
         cross_attempt_arm_composition=False, all_attempts_and_usage_retained=True,
         next_wave_requires='owned_operational_archive_and_resource_release',
         balance=False, paid_fallback=False, purchases=False)
+
+
+def policies_allowed():
+    owned=policy()
+    published=dict(owned)
+    published['next_wave_requires']='actual_publication_restore_cleanup_and_owned_closure'
+    return (owned, published)
 
 
 @scoped_validation

@@ -241,9 +241,18 @@ class ProcessMonitor:
         raise RuntimeError('Two distinct fresh current-scope samples required')
 
     def _status(self):
-        pointer = util.read_json(self.directory / 'status.json')
-        path = checked(pointer)
-        value = util.read_json(path)
+        # Observer may briefly lock status.json on Windows; retry before STOP latch.
+        last=None
+        for _ in range(10):
+            try:
+                pointer = util.read_json(self.directory / 'status.json')
+                path = checked(pointer)
+                value = util.read_json(path)
+                break
+            except PermissionError as exc:
+                last=exc; time.sleep(0.05)
+        else:
+            raise last
         if (value.get('session') != self.session or value.get('phase_sha256') != self.digest
                 or value.get('generation') != self.generation
                 or value.get('sampled_scope_generation') != self.generation

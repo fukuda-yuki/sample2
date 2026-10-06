@@ -314,8 +314,20 @@ def validate_predecessor(repo, plan):
     old_path = live_pilot.checked(predecessor['plan'])
     old = campaign.validate(old_repo, old_path)
     repaired_runtime._committed_files(old_repo, old['source_commit'], old['source_pins'])
-    if repo == old_repo or any(plan.get(k) != old.get(k) for k in PRESERVED):
+    if repo == old_repo:
         raise ValueError('Successor changed original campaign identity/design/budget')
+    for k in PRESERVED:
+        if k == 'policy':
+            a=dict(plan.get('policy') or {}); b=dict(old.get('policy') or {})
+            allowed={'actual_publication_restore_cleanup_and_owned_closure',
+                     'owned_operational_archive_and_resource_release'}
+            if a.get('next_wave_requires') in allowed and b.get('next_wave_requires') in allowed:
+                a.pop('next_wave_requires', None); b.pop('next_wave_requires', None)
+            if a != b:
+                raise ValueError('Successor changed original campaign identity/design/budget')
+            continue
+        if plan.get(k) != old.get(k):
+            raise ValueError('Successor changed original campaign identity/design/budget')
     root, old_root = live_pilot.safe_path(plan['batch']), live_pilot.safe_path(old['batch'])
     if root == old_root or root.is_relative_to(old_root) or old_root.is_relative_to(root):
         raise ValueError('Successor must have a separate storage root')

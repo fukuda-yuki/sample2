@@ -45,6 +45,28 @@ def protected_instance_ids():
     return {case['run_instance_id'] for pair in reviewed_assignments() for case in pair['cases']}
 
 
+def readiness_instance_ids(plan):
+    """Hash-bound logical pilot identities, including unsent origin reservations."""
+    if 'readiness_recovery_plan' in plan or 'readiness_recovery_result' in plan:
+        if not all(k in plan for k in ('readiness_recovery_plan','readiness_recovery_result')):
+            raise ValueError('Both recovery references required')
+        from research import readiness_recovery
+        recovered=util.read_json(live_pilot.checked(plan['readiness_recovery_plan']))
+        if recovered.get('kind')!=readiness_recovery.KIND: raise ValueError('Wrong recovery owner')
+        reference=recovered['original_plan']
+    elif 'readiness_pilot_plan' in plan:
+        reference=plan['readiness_pilot_plan']
+    else:
+        return set()  # Offline draft cannot execute without readiness_for_main.
+    origin=util.read_json(live_pilot.checked(reference))
+    cases=[case for pair in origin.get('assignments',[]) for case in pair.get('cases',[])]
+    identities={case.get('run_instance_id') for case in cases}
+    if (origin.get('kind')!=live_pilot.KIND or len(cases)!=4 or len(identities)!=4
+            or any(not isinstance(rid,str) or not re.fullmatch('[a-f0-9]{32}',rid) for rid in identities)):
+        raise ValueError('Four distinct logical original pilot UUIDs required')
+    return identities
+
+
 def assignments():
     result=reviewed_assignments()
     for index,pair in enumerate(result):
@@ -86,7 +108,7 @@ def verify_main_phase(path,repo):
     cases=p.get('assignments')
     expected=assignments()
     if not isinstance(cases,list) or len(cases)!=100: raise ValueError('Exactly 100 pairs required')
-    instances=set(); old_instances=protected_instance_ids()
+    instances=set(); old_instances=protected_instance_ids() | readiness_instance_ids(p)
     for pair,want in zip(cases,expected):
         if ({k:v for k,v in pair.items() if k!='cases'}!={k:v for k,v in want.items() if k!='cases'}
                 or type(pair.get('pair')) is not int or len(pair.get('cases',[]))!=2):
@@ -103,6 +125,16 @@ def verify_main_phase(path,repo):
             live_pilot.safe_path(base/('pair-'+str(pair['pair']))/case['run_id'])
     live_pilot.verify_pins(repo,p['source_pins'])
     if not set(EXTRA_PINS)<=p['source_pins'].keys(): raise ValueError('Main/repaired binding source pins required')
+    recovery_keys=('readiness_recovery_plan','readiness_recovery_result')
+    if any(key in p for key in recovery_keys):
+        from research import readiness_recovery
+        if (not all(key in p for key in recovery_keys)
+                or not set(readiness_recovery.EXTRA_PINS)<=p['source_pins'].keys()):
+            raise ValueError('Complete explicitly pinned recovery readiness references required')
+        recovered=util.read_json(live_pilot.checked(p[recovery_keys[0]]))
+        if recovered.get('kind')!=readiness_recovery.KIND:
+            raise ValueError('Wrong typed recovery readiness owner')
+        live_pilot.checked(p[recovery_keys[1]])
     if p['source_pins'][BASE_PROTOCOL]!=BASE_PROTOCOL_SHA256: raise ValueError('Reviewed protocol binding changed')
     monitor=live_pilot.checked(p['resource_monitor']); probe=live_pilot.checked(p['resource_probe'])
     if probe!=monitor.with_name('wave_resource_probe.py'): raise ValueError('Foreign resource probe')
@@ -235,6 +267,16 @@ def pilot_ready(repo,plan_reference,result_reference):
             'launcher_registration':live_pilot.reference(directory/'registration.json')}
 
 
+def readiness_for_main(repo,plan):
+    """Explicit amended readiness never relabels the failed original pilot."""
+    keys=('readiness_recovery_plan','readiness_recovery_result')
+    if any(key in plan for key in keys):
+        if not all(key in plan for key in keys): raise ValueError('Both explicit recovery references required')
+        from research import readiness_recovery
+        return readiness_recovery.ready(repo,plan[keys[0]],plan[keys[1]])
+    return pilot_ready(repo,plan['readiness_pilot_plan'],plan['readiness_pilot_result'])
+
+
 def validate_observer_terminal(plan,plan_reference,pair,child,terminal):
     """Verify saved session generations, hashes, healthy samples and shutdown."""
     phase_path=live_pilot.safe_path(child/'phase.json'); phase_hash=util.sha256_file(phase_path)
@@ -312,7 +354,7 @@ def execute_pair(repo,path,number,approval_path):
     from research import next_phase,catalog_environment
     if next_phase.git(repo,'rev-parse','HEAD')!=p['source_commit'] or next_phase.git(repo,'status','--porcelain'):
         raise ValueError('Clean exact committed source required')
-    pilot_ready(repo,p['readiness_pilot_plan'],p['readiness_pilot_result'])
+    readiness_for_main(repo,p)
     catalog_environment.validate(util.read_json(live_pilot.checked(p['browser_pin'])),repo)
     if type(number) is not int or not 1<=number<=100: raise ValueError('Fixed pair number required')
     base=Path(p['batch'])
@@ -370,7 +412,7 @@ def main():
     args=parser.parse_args()
     if args.action=='check':
         p=verify_main_phase(args.plan,args.repo)
-        proof=pilot_ready(args.repo,p['readiness_pilot_plan'],p['readiness_pilot_result'])
+        proof=readiness_for_main(args.repo,p)
         return dict(start_ready=True,main_plan=live_pilot.reference(args.plan),pilot=proof,new_main_authorized=False)
     if args.action=='create': return create(args.repo,args.plan)
     if args.pair is None or args.approval is None: parser.error('execute-pair requires --pair and --approval')

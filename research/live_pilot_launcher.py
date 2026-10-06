@@ -60,16 +60,23 @@ def preflight(repo, plan_path, approval_path, pair=None):
     live_pilot.checked(approval_ref)
     if pair is not None:
         from research import acquisition_readiness
-        acquisition_readiness.pilot_ready(repo, plan['readiness_pilot_plan'], plan['readiness_pilot_result'])
+        acquisition_readiness.readiness_for_main(repo, plan)
         if pair_execution.events(scope / '_control/pair-journal.jsonl'):
             raise ValueError('No main pair resend')
         if not (base / 'execution-start.json').exists() and pair != 1:
             raise ValueError('Durable main start timestamp missing')
         invocation_wall(plan, ref, pair)
+    elif plan['kind']==live_pilot.RECOVERY_KIND:
+        invocation_wall(plan,ref)
     return repo, plan, ref, approval_ref
 
 
 def selected_pairs(plan, pair=None):
+    if plan.get('kind') == live_pilot.RECOVERY_KIND:
+        assignments=plan.get('assignments',[])
+        if pair is not None or len(assignments)!=1 or assignments[0].get('pair')!=2:
+            raise ValueError('Only original unsent recovery pair2 permitted')
+        return assignments
     if plan.get('kind') == live_pilot.KIND:
         if pair is not None:
             raise ValueError('--pair is only for the main cohort')
@@ -89,6 +96,9 @@ def scope_root(plan, pair=None):
 
 
 def invocation_wall(plan, ref, pair=None):
+    if plan.get('kind')==live_pilot.RECOVERY_KIND:
+        from research import readiness_recovery
+        return readiness_recovery.remaining_wall(plan)
     if pair is None:
         return 9000
     origin = Path(plan['batch']) / 'execution-start.json'
@@ -349,8 +359,10 @@ def stop_owned(plan, ref, repo, directory, child, reason, pair=None):
 def _check_result(plan, ref, pair=None):
     path = live_pilot.safe_path(scope_root(plan, pair) / ('result.json' if pair is None else 'pair-result.json'))
     result = util.read_json(path)
+    completion=('recovery_operational_complete' if plan['kind']==live_pilot.RECOVERY_KIND
+                else 'pilot_operational_complete' if pair is None else 'pair_operational_complete')
     if (result.get('kind') != plan['kind'] or result.get('plan_sha256') != ref['sha256']
-            or result.get('pilot_operational_complete' if pair is None else 'pair_operational_complete') is not True
+            or result.get(completion) is not True
             or (pair is not None and result.get('pair') != pair) or result.get('fault') is not None
             or result.get('watcher_shutdown_verified') is not True):
         raise ValueError('Child result is missing, uncertain or operationally incomplete')
@@ -361,8 +373,14 @@ def verify_main_terminal(repo, plan, ref, pair):
     """Actual saved two-Run proof; no historical pair participates in this gate."""
     from research import acquisition_readiness
     result_ref = _check_result(plan, ref, pair)
-    assignment = selected_pairs(plan, pair)[0]
-    batch = scope_root(plan, pair)
+    return verify_pair_terminal(repo,plan,ref,pair,result_ref)
+
+
+def verify_pair_terminal(repo,plan,ref,pair,result_ref):
+    """Shared evidence verifier after a typed owner's result has been checked."""
+    from research import acquisition_readiness
+    assignment=next(p for p in plan['assignments'] if p['pair']==pair)
+    batch=live_pilot.safe_path(Path(plan['batch'])/('pair-'+str(pair)))
     journal = pair_execution.state(batch / '_control/pair-journal.jsonl')
     if (set(journal['dispatch']) != {case['run_id'] for case in assignment['cases']}
             or len(journal['results']) != 2):
@@ -399,6 +417,57 @@ def verify_main_terminal(repo, plan, ref, pair):
         raise ValueError('Selected native/owned terminal proof differs')
     return dict(ready=True, plan=ref, pair=pair, result=result_ref, model_runs=2,
                 new_main_authorized=False, automatic_next_pair_start=False)
+
+
+def validate_launcher_terminal(repo,plan,ref,pipeline,*,controller_module):
+    """Typed recovery's actual independent child/verification closure, readonly."""
+    if plan.get('kind')!=live_pilot.RECOVERY_KIND or controller_module!='research.readiness_recovery':
+        raise ValueError('Explicit recovery launcher proof required')
+    directory=live_pilot.safe_path(Path(plan['batch'])/'_launcher')
+    intent=util.read_json(directory/'intent.json'); registration=util.read_json(directory/'registration.json')
+    result=util.read_json(directory/'result.json'); expected_source=util.sha256_file(Path(repo)/'research/live_pilot_launcher.py')
+    if (intent.get('kind')!='live_pilot_launcher_v1' or type(intent.get('schema_version')) is not int
+            or intent['schema_version']!=1 or intent.get('plan')!=ref or intent.get('selected_pair') is not None
+            or intent.get('phase_id')!=plan['phase_id'] or intent.get('source_sha256')!=expected_source
+            or intent.get('controller_source_commit')!=plan['source_commit']
+            or not re.fullmatch('[a-f0-9]{32}',intent.get('launch_id',''))
+            or any(type(intent.get(k)) is not int or intent[k]<=0 for k in ('launcher_pid','parent_pid'))
+            or {k:v for k,v in registration.items() if k!='child_pid'}!=intent
+            or type(registration.get('child_pid')) is not int or registration['child_pid']<=0):
+        raise ValueError('Recovery launcher intent/child binding differs')
+    expected=[sys.executable,'-B','-X','utf8','-m',controller_module,'execute',ref['path'],
+              '--repo',str(live_pilot.safe_path(repo)),'--approval',intent['approval']['path']]
+    if intent.get('command')!=expected: raise ValueError('Recovery launcher actual command differs')
+    approval=util.read_json(live_pilot.checked(intent['approval']))
+    if (approval.get('plan_sha256')!=ref['sha256'] or approval.get('authorized') is not True
+            or approval.get('approved_by')!='user' or not approval.get('authorization_reference')):
+        raise ValueError('Recovery launcher approval changed')
+    if (result.get('kind')!='live_pilot_launcher_result_v1' or result.get('plan')!=ref
+            or any(result.get(k)!=intent[k] for k in ('approval','controller_source_commit','launch_id','launcher_pid'))
+            or result.get('child_pid')!=registration['child_pid']
+            or result.get('source_sha256')!=expected_source or result.get('selected_pair') is not None
+            or result.get('operational_complete') is not True or result.get('watcher_shutdown_verified') is not True
+            or result.get('stop_requested') is not False or result.get('new_main_authorized') is not False
+            or type(result.get('model_runs')) is not int or result['model_runs']!=2
+            or any(type(result.get(k)) is not int or result[k]!=0 for k in ('child_exit_code','verification_child_exit_code'))
+            or type(result.get('verification_child_pid')) is not int or result['verification_child_pid']<=0):
+        raise ValueError('Recovery independent bounded launcher incomplete')
+    verify_registration=util.read_json(directory/'verification-registration.json')
+    if verify_registration.get('pid')!=result['verification_child_pid']:
+        raise ValueError('Recovery verification child differs')
+    started=datetime.fromisoformat(intent['started_at']); original=datetime.fromisoformat(plan['original_wall_start_utc'])
+    elapsed=result.get('elapsed_seconds')
+    if (started.tzinfo is None or started<original or type(elapsed) not in (int,float) or not 0<=elapsed<9000
+            or (started-original).total_seconds()+elapsed>=9000):
+        raise ValueError('Recovery original durable wall exceeded')
+    if (live_pilot.checked(result['terminal_proof'])!=directory/'terminal-proof.json'
+            or util.read_json(directory/'terminal-proof.json')!=pipeline):
+        raise ValueError('Recovery terminal verification proof differs')
+    for marker in (Path(plan['batch'])/'_control/dispatch-stop.json',directory/'stop.json'):
+        if marker.exists(): raise ValueError('Recovery STOP remains permanently held')
+    return dict(launcher_result=live_pilot.reference(directory/'result.json'),
+        launcher_intent=live_pilot.reference(directory/'intent.json'),
+        launcher_registration=live_pilot.reference(directory/'registration.json'))
 
 
 def supervise(repo, plan, ref, directory, child, started, pair=None):
@@ -440,7 +509,7 @@ def supervise(repo, plan, ref, directory, child, started, pair=None):
                                 terminal_proof=live_pilot.reference(proof_path), elapsed_seconds=time.monotonic()-started,
                                 verification_child_pid=verifier.pid, verification_child_exit_code=0,
                                 watcher_shutdown_verified=True,
-                                stop_requested=False, model_runs=4 if pair is None else 2, selected_pair=pair,
+                                stop_requested=False, model_runs=2 if plan['kind']==live_pilot.RECOVERY_KIND or pair is not None else 4, selected_pair=pair,
                                 new_main_authorized=False)
                     reason = 'terminal_proof_unconfirmed'; break
             time.sleep(POLL_SECONDS)
@@ -475,6 +544,8 @@ def launch(repo, plan_path, approval_path, pair=None):
     directory.mkdir(exist_ok=False)
     command = [sys.executable, '-B', '-X', 'utf8', '-m', 'research.live_pilot', 'execute',
                ref['path'], '--repo', str(repo), '--approval', approval_ref['path']]
+    if plan['kind']==live_pilot.RECOVERY_KIND:
+        command[5]='research.readiness_recovery'
     if pair is not None:
         command = [sys.executable, '-B', '-X', 'utf8', '-m', 'research.acquisition_readiness', 'execute-pair',
                    ref['path'], '--pair', str(pair), '--repo', str(repo), '--approval', approval_ref['path']]
@@ -538,8 +609,12 @@ def internal(action, repo, plan_path, directory, digest, instance=None):
         raise ValueError('Foreign launcher helper binding')
     if action == '_verify':
         from research import acquisition_readiness
-        proof = (acquisition_readiness._pilot_pipeline_evidence(repo, ref, _check_result(plan, ref, pair)) if pair is None
-                 else verify_main_terminal(repo, plan, ref, pair))
+        if plan['kind']==live_pilot.RECOVERY_KIND:
+            from research import readiness_recovery
+            proof=readiness_recovery.pipeline_evidence(repo,ref,_check_result(plan,ref))
+        else:
+            proof = (acquisition_readiness._pilot_pipeline_evidence(repo, ref, _check_result(plan, ref, pair)) if pair is None
+                     else verify_main_terminal(repo, plan, ref, pair))
         util.write_new_json(directory / 'terminal-proof.json', proof)
         return proof
     stop_paths = (Path(plan['batch']) / '_control/dispatch-stop.json', directory / 'stop.json')

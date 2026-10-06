@@ -147,6 +147,58 @@ def run_evaluator(command, repo, environment, out, err, timeout):
         raise
 
 
+def validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_path):
+    """Bind a repaired scoring to the current prepared lock and immutable build.
+
+    Historical build cleanliness is evidence, not current controller admission.
+    An amended controller needs a fresh lock; this does not repair old Runs.
+    """
+    from . import profiles
+    from research.repaired_runtime import validate_repaired_runtime_binding
+    repo, run_dir = Path(repo).resolve(), Path(run_dir).resolve()
+    if condition.get('schema_version') != 2 or condition.get('task_profile_revision') != 'evaluators-20261006':
+        raise ValueError('Repaired scoring requires a frozen revised isolated condition')
+    runtime_profile = condition.get('runtime') or {}
+    current_runtime = profiles.read(repo, 'runtimes', runtime_profile.get('id'))
+    if current_runtime != runtime_profile or util.read_json(run_dir/'profiles/runtime.json') != current_runtime:
+        raise ValueError('Repaired scoring runtime profile mismatch')
+    root = profiles.runtime_root(repo, condition['task_id'], current_runtime)
+    lock = util.read_json(root/'lock.json')
+    if condition.get('runtime_lock') != lock:
+        raise ValueError('Frozen repaired lock differs from current prepared lock')
+    validate_repaired_runtime_binding(repo, lock)
+    task = profiles.task_profile(repo, condition['task_id'], condition['task_profile_revision'])
+    if util.read_json(run_dir/'profiles/task.json') != task or condition.get('start_state') != task.get('start_state'):
+        raise ValueError('Repaired scoring frozen task profile mismatch')
+    evaluation = condition.get('evaluation') or {}
+    expected = dict(task['evaluation'], executor='docker',
+        spec_path='evaluation-assets/requirements.json', catalog_path='evaluation-assets/catalog.json',
+        evaluator_sha256=lock['evaluator_sha256'], evaluator_build=lock['evaluator_build'])
+    if evaluation != expected:
+        raise ValueError('Repaired scoring evaluation/build differs from accepted binding')
+    assets = run_dir/'evaluation-assets'
+    bundle = assets/'evaluator'
+    if (util.tree_hashes(bundle) != lock['evaluator_files']
+            or Path(evaluator_path).resolve() != (bundle/evaluation['assembly']).resolve()
+            or util.sha256_file(evaluator_path) != lock['evaluator_sha256']):
+        raise ValueError('Repaired scoring copied evaluator bundle mismatch')
+    expected_assets = {}
+    for key, destination in [('spec_path', 'requirements.json'), ('catalog_path', 'catalog.json')]:
+        expected_assets[destination] = util.sha256_file(repo/task['evaluation'][key])
+    for source, destination in task['evaluation'].get('extra_assets', {}).items():
+        if Path(destination).name != destination or ':' in destination or '\\' in destination:
+            raise ValueError('Invalid extra evaluator asset name')
+        original = (repo/source).resolve()
+        if not original.is_relative_to(repo):
+            raise ValueError('Extra evaluator asset escaped repository')
+        expected_assets[destination] = util.sha256_file(original)
+    actual_assets = {name: entry['sha256'] for name, entry in util.tree_hashes(assets).items()
+                     if not name.startswith('evaluator/')}
+    if actual_assets != expected_assets:
+        raise ValueError('Repaired scoring specification/catalog/extra assets mismatch')
+    return True
+
+
 def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None,
               sequence=None, timeout=SCORING_TIMEOUT_SECONDS):
     repo = Path(repo).resolve()
@@ -185,7 +237,12 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     evaluator_sha256 = util.sha256_file(evaluator_path)
     pinned_evaluator = evaluation.get('evaluator_sha256')
     pinned_build = evaluation.get('evaluator_build') or {}
-    if pinned_evaluator:
+    if (condition.get('task_profile_revision') == 'evaluators-20261006'
+            or (condition.get('runtime') or {}).get('id') in ('deepseek-music-repaired-v1', 'deepseek-education-repaired-v1')
+            or 'repaired_runtime_binding' in (condition.get('runtime_lock') or {})
+            or pinned_build.get('binding_kind') == 'accepted_bundle_reuse_v1'):
+        validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_path)
+    elif pinned_evaluator:
         # A pinned hash without its build provenance cannot be diagnosed later,
         # so it is refused as a condition error rather than scored and rejected.
         # `clean_worktree` is the source bytes: the hash moves with the line

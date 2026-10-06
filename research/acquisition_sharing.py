@@ -135,6 +135,17 @@ def _checked_reference(ref):
 
 
 def validate_gate(value, current, number):
+    from research import proof_session
+    path = _checked_reference(value['main_plan'])
+    repo = live_pilot.safe_path(value['source_repo'])
+    plan = readiness.verify_main_phase(path, repo, check_tree=False)
+    # Current journal/UUID state is part of the key, never an admission bool.
+    arguments = dict(value=value,current=current,number=number,plan=plan)
+    return proof_session.use('normal-gate',arguments,
+        lambda: _validate_gate_proof(value,current,number,plan))
+
+
+def _validate_gate_proof(value, current, number, plan):
     """Saved actual transport validator; no network, extraction, repair or writes."""
     fields = {'pair','plan_sha256','cohort','run_instances','evidence_files','publication_receipt',
         'roundtrip_receipt','cleanup_receipt','phase_sha256','main_plan','child_phase','finalization',
@@ -145,7 +156,6 @@ def validate_gate(value, current, number):
         raise ValueError('Explicit publication-only main gate required')
     path = _checked_reference(value['main_plan'])
     repo = live_pilot.safe_path(value['source_repo'])
-    plan = readiness.verify_main_phase(path, repo)
     ref = live_pilot.reference(path)
     selected = next((a for a in plan['assignments'] if a['pair'] == number), None)
     if selected is None: raise ValueError('Unassigned main gate pair')
@@ -250,6 +260,8 @@ def validate_gate(value, current, number):
     if util.sha256_file(before) != util.sha256_file(after) or restored['extraction_sha256'] != util.sha256_file(before):
         raise ValueError('Original and relocated extraction differ')
     targets = [workspace/'public', workspace/'package', Path(restored['workspace'])/'download', Path(restored['workspace'])/'restored']
+    from research.proof_session import watch_absence
+    for target in targets: watch_absence(target)
     if (cleanup.get('targets') != [str(t) for t in targets] or any(live_pilot.safe_path(t).exists() for t in targets)
             or cleanup.get('original_runs_deleted') is not False): raise ValueError('Owned cleanup scope/absence differs')
     return True

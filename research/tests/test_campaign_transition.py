@@ -24,6 +24,8 @@ class CampaignTransitionTests(unittest.TestCase):
         (self.repo/transition.PIN).write_bytes(Path(transition.__file__).read_bytes())
         from research import validation_scope
         (self.repo/transition.SCOPE_PIN).write_bytes(Path(validation_scope.__file__).read_bytes())
+        from research import proof_session
+        (self.repo/'research/proof_session.py').write_bytes(Path(proof_session.__file__).read_bytes())
         self.old_root, self.new_root = self.base/'p26', self.base/'p27'
         self.old_root.mkdir()
         self.old_path, self.path = self.base/'old-plan.json', self.base/'new-plan.json'

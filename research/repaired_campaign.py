@@ -29,7 +29,6 @@ BOUNDS = dict(max_pair_attempts=300, max_run_attempts=600, active_pairs=2,
     disk_free_min_bytes=8*1024**3)
 EXTRA_PINS = ('research/repaired_campaign.py', 'research/campaign_launcher.py',
               'research/campaign_reassessment.py','research/campaign_recovery.py')
-_CLEARANCE_CACHE=set()
 
 
 def document(ref):
@@ -96,7 +95,9 @@ def validate_readiness(repo,path):
     source=live_pilot.safe_path(p['readiness_source_repo'])
     if live_pilot.checked(base['launch_supervisor'])!=source/'research/live_pilot_launcher.py':
         raise ValueError('Accepted readiness checkout binding changed')
-    return readiness.readiness_for_main(source,base)
+    from research import proof_session
+    return proof_session.use('readiness',dict(repo=str(source),plan=base),
+        lambda: readiness.readiness_for_main(source,base))
 
 
 @scoped_validation
@@ -107,7 +108,7 @@ def create(repo, path, base_path, batch, authorization):
     base = document(base_ref)
     from research import next_phase, repaired_runtime
     if next_phase.git(repo,'status','--porcelain'): raise ValueError('Clean committed checkout required')
-    names = set(base['source_pins']) | set(EXTRA_PINS) | {'research/validation_scope.py'}
+    names = set(base['source_pins']) | set(EXTRA_PINS) | {'research/validation_scope.py','research/proof_session.py'}
     pins = {name:util.sha256_file(repo/name) for name in sorted(names)}
     commit = next_phase.git(repo,'rev-parse','HEAD')
     repaired_runtime._committed_files(repo,commit,pins)
@@ -166,13 +167,10 @@ def campaign_stop_pending(p):
         if clearance.get('campaign')!=campaign_ref:raise ValueError('Foreign STOP clearance')
         wave_path=live_pilot.checked(closure['wave'])
         # Recheck the actual retained transport and ownership proof, never a success flag alone.
-        key=(str(file),util.sha256_file(file),clearance['wave_closure']['sha256'],closure['recovery']['sha256'])
         live_pilot.checked(closure['recovery'])
-        if key not in _CLEARANCE_CACHE:
-            from research import campaign_recovery
-            campaign_recovery.validate_closure(Path(clearance['source_repo']),campaign_ref['path'],
-                wave_path,closure['recovery'])
-            _CLEARANCE_CACHE.add(key)
+        from research import campaign_recovery
+        campaign_recovery.validate_closure(Path(clearance['source_repo']),campaign_ref['path'],
+            wave_path,closure['recovery'])
         acknowledged.update(clearance['stops'])
     return any(acknowledged.get(str(path))!=util.sha256_file(path) for path in paths)
 
@@ -370,6 +368,9 @@ class CampaignWatch(live_pilot.PilotWatch):
     def __init__(self,child,digest,campaign,prior,origin,owner_pid,wave_dir):
         super().__init__(child,digest,wall_started_at=origin)
         self.campaign,self.prior=campaign,prior
+        from research import proof_session
+        reference=proof_session.current_reference()
+        self.proof_client=proof_session.Client(reference) if reference else None
         self.owner_pid,self.wave_dir=owner_pid,Path(wave_dir)
         self.owner_handle=None
         if os.name=='nt':
@@ -411,12 +412,18 @@ class CampaignWatch(live_pilot.PilotWatch):
                 self.latch(type(exc).__name__);return
 
     def _check_locked(self):
+        from research import proof_session
+        with proof_session.bind(self.proof_client):
+            return self._check_live_locked()
+
+    def _check_live_locked(self):
         if self.fault is not None: raise RuntimeError('Campaign wave fault latched')
         if self.owner_handle:
             import ctypes
             if self.kernel.WaitForSingleObject(ctypes.c_void_p(self.owner_handle),0)!=258:
                 raise RuntimeError('Campaign supervisor ownership lost')
         elif os.getppid()!=self.owner_pid: raise RuntimeError('Campaign supervisor ownership lost')
+        if self.proof_client is not None: self.proof_client.check()
         if campaign_stop_pending(self.campaign): raise RuntimeError('Campaign STOP')
         if (self.base/'_control/dispatch-stop.json').exists(): raise RuntimeError('Epoch STOP')
         if self.source_repo is not None: live_pilot.verify_pins(self.source_repo,self.plan['source_pins'])
@@ -645,7 +652,7 @@ def reconcile_recovery(repo,path,wave_path,recovery_closure_ref):
     return dict(reconciled=True,clearance=not campaign_stop_pending(p),closure=live_pilot.reference(target))
 
 
-def main():
+def _main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=('check','epoch','reserve-wave','close-wave','_wave','status'))
     parser.add_argument('plan',type=Path);parser.add_argument('--repo',type=Path,required=True)
@@ -660,6 +667,12 @@ def main():
     p=validate(a.repo,a.plan);events=ledger(p)
     return dict(initial_logical_denominator=100,accepted_pairs=len([e for e in events if e['kind']=='pair_accepted']),
         reserved_attempts=len([e for e in events if e['kind']=='pair_attempt_reserved']),usage=observed_usage(p))
+
+
+def main():
+    from research.proof_session import cli_session
+    with cli_session():
+        return _main()
 
 
 if __name__=='__main__':

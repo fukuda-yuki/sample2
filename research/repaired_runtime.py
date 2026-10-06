@@ -48,16 +48,39 @@ def _git(repo, *args):
 
 
 def _committed_files(repo, commit, names):
+    """One read-only Git process, exact blob framing and unchanged SHA256 checks."""
+    names = list(names)
+    if not names:
+        return
     for name in names:
         _relative(name)
-        # git show must retain bytes: command()'s text mode normalizes CRLF.
-        import subprocess
-        from outer.harness.security import child_environment
-        result = subprocess.run(['git', '-c', 'safe.directory=' + repo.as_posix(),
-                                 'show', commit + ':' + name], cwd=repo,
-                                env=child_environment(), capture_output=True, check=True)
-        if util.sha256_bytes(result.stdout) != util.sha256_file(repo / name):
+        if '\n' in name or '\r' in name:
+            raise ValueError('Git batch path contains a line break')
+    if not isinstance(commit, str) or '\n' in commit or '\r' in commit:
+        raise ValueError('Invalid Git revision')
+    from outer.harness.security import child_environment
+    import subprocess
+    request = ''.join(commit + ':' + name + '\n' for name in names).encode()
+    result = subprocess.run(['git', '-c', 'safe.directory=' + repo.as_posix(),
+        'cat-file', '--batch'], input=request, cwd=repo,
+        env=child_environment(), capture_output=True, check=True)
+    data = result.stdout; offset = 0
+    for name in names:
+        boundary = data.find(b'\n', offset)
+        if boundary < 0:
+            raise ValueError('Truncated Git blob header')
+        fields = data[offset:boundary].split()
+        if len(fields) != 3 or fields[1] != b'blob' or not fields[2].isdigit():
+            raise ValueError('Missing or non-blob committed source: ' + name)
+        size = int(fields[2]); offset = boundary + 1
+        blob = data[offset:offset + size]; offset += size
+        if len(blob) != size or data[offset:offset + 1] != b'\n':
+            raise ValueError('Truncated Git blob content')
+        offset += 1
+        if util.sha256_bytes(blob) != util.sha256_file(repo / name):
             raise ValueError('Current file differs from committed Git blob: ' + name)
+    if offset != len(data):
+        raise ValueError('Unexpected extra Git batch output')
 
 
 def _receipt_binding(repo, bundle, receipt, family):

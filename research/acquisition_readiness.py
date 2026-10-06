@@ -91,7 +91,20 @@ def assignments():
     return result
 
 
-def verify_main_phase(path,repo):
+def verify_main_phase(path,repo, *, check_tree=True):
+    # Current tree membership is fresh; closed-gate callers inspect their exact
+    # original roots instead of walking every unrelated historical pair again.
+    from research import proof_session
+    path, repo = live_pilot.safe_path(path), live_pilot.safe_path(repo)
+    value = util.read_json(path)
+    base = live_pilot.safe_path(value['batch'])
+    if check_tree and base.exists():
+        for item in base.rglob('*'): live_pilot.safe_path(item)
+    return proof_session.use('main-phase-static', dict(path=str(path),repo=str(repo)),
+        lambda: _verify_main_phase_static(path,repo))
+
+
+def _verify_main_phase_static(path,repo):
     """Strict read-only validation used by the independent live observer."""
     path=live_pilot.safe_path(path); repo=live_pilot.safe_path(repo)
     p=util.read_json(path)
@@ -117,8 +130,6 @@ def verify_main_phase(path,repo):
     for old in [repo,*map(live_pilot.safe_path,protected)]:
         if live_pilot.within(base,old) or live_pilot.within(old,base):
             raise ValueError('Fresh cohort overlaps protected/source tree')
-    if base.exists():
-        for item in base.rglob('*'): live_pilot.safe_path(item)
     cases=p.get('assignments')
     expected=assignments()
     if not isinstance(cases,list) or len(cases)!=100: raise ValueError('Exactly 100 pairs required')

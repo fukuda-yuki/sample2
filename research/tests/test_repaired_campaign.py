@@ -7,12 +7,49 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 from unittest.mock import patch
+from unittest.mock import Mock
 
 from research import repaired_campaign as c
 from research import catalog_delivery
 
 
 class CampaignTests(unittest.TestCase):
+    def test_first_supervisor_exception_is_preserved_before_stop(self):
+        from outer.harness import util
+        with tempfile.TemporaryDirectory() as tmp:
+            w=object.__new__(c.CampaignWatch);w.wave_dir=Path(tmp)
+            (w.wave_dir/'spec.json').write_text('{}')
+            w.campaign={'_plan_sha256':'a'*64};w.done=Mock()
+            w.done.wait.return_value=False
+            w.check=Mock(side_effect=RuntimeError('Independent observer status stale or unbound'))
+            def stopped(reason):
+                evidence=util.read_json(w.wave_dir/'watcher-exception.json')
+                self.assertEqual(reason,'RuntimeError')
+                self.assertEqual(evidence['message'],'Independent observer status stale or unbound')
+                self.assertIn('RuntimeError',evidence['traceback'])
+            w.latch=Mock(side_effect=stopped)
+            w._loop();w.latch.assert_called_once_with('RuntimeError')
+
+    def test_exception_evidence_write_failure_does_not_suppress_stop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            w=object.__new__(c.CampaignWatch);w.wave_dir=Path(tmp)
+            (w.wave_dir/'spec.json').write_text('{}')
+            w.campaign={'_plan_sha256':'a'*64};w.done=Mock();w.done.wait.return_value=False
+            w.check=Mock(side_effect=RuntimeError('observer fault'));w.latch=Mock()
+            with patch.object(c.util,'write_new_json',side_effect=OSError('disk unavailable')):
+                w._loop()
+            w.latch.assert_called_once_with('RuntimeError')
+
+    def test_inherited_attempts_keep_the_same_finite_budget(self):
+        from research import campaign_transition
+        with tempfile.TemporaryDirectory() as tmp:
+            p={'batch':tmp,'predecessor':{'history':{}}}
+            old=[{'kind':'pair_attempt_reserved'} for _ in range(300)]
+            with patch.object(campaign_transition,'history_events',return_value=old),patch.object(c,'validate',return_value=p):
+                self.assertEqual(c.ledger(p),old)
+                with self.assertRaisesRegex(ValueError,'budget exhausted'):
+                    c.reserve_wave(Path(tmp),Path(tmp)/'plan.json',{},[1])
+
     def test_logical_slot_keeps_task_order_and_stratum(self):
         pair=dict(pair=1,task='MS1-CONT-B',source_family='music',cases=[
             dict(pair=1,slot=1,condition='explore',attempt=6001,run_id='a',run_instance_id='b'),

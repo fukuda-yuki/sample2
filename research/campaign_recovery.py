@@ -7,6 +7,7 @@ Fault publication is explicitly distinct from an acquisition success gate.
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -15,11 +16,98 @@ from outer.harness import evaluate, live_usage, preserve, run, util
 from outer.harness.security import child_environment
 from research import campaign_reassessment as assessment
 from research import catalog_delivery as delivery, catalog_share as sharing
-from research import live_pilot, pair_execution
+from research import live_pilot, pair_execution, repaired_runtime
 
 KIND = 'repaired_campaign_factual_recovery_v1'
 GATE_KIND = 'repaired_campaign_fault_publication_v1'
 VALID = {'already_evaluable', 'normal_product_failure_partial_observation'}
+CONTROLLER_KIND = 'repaired_campaign_recovery_controller_v1'
+CONTROLLER_MINIMUM = frozenset(('research/campaign_recovery.py',
+    'research/campaign_reassessment.py', 'research/saved_reassessment.py',
+    'research/repaired_campaign.py', 'research/live_pilot.py',
+    'research/pair_execution.py', 'research/catalog_delivery.py',
+    'research/catalog_share.py', 'research/repaired_runtime.py',
+    'outer/harness/preserve.py'))
+INTENT_FIELDS = ('kind', 'campaign', 'wave', 'source_commit', 'recovery_controller',
+    'launcher_closure', 'original_paths', 'original_inventory',
+    'initial_logical_denominator', 'model_calls', 'acquisition_count_increment')
+
+
+def complete_byte_inventory(root):
+    """Inventory complete Windows paths without changing historical readers."""
+    return {name: entry['sha256'] for name, entry in preserve.tree(root).items()}
+
+
+def _pins_digest(pins):
+    return util.sha256_bytes(json.dumps(pins, sort_keys=True, separators=(',', ':')).encode('utf-8'))
+
+
+def _controller_names(repo, acquisition_plan):
+    # Pin the existing acquisition applicability names using the RECOVERY
+    # checkout's bytes, plus every local controller/helper this adapter may use.
+    # Discover from the recorded checkout so a future reader need not have the
+    # same controller inventory as the historical recovery implementation.
+    return (set(acquisition_plan['source_pins']) | CONTROLLER_MINIMUM
+        | set(assessment.saved.controller_inventory(repo))
+        | {p.relative_to(repo).as_posix() for p in (repo/'research').glob('*.py')})
+
+
+def _validate_controller(value, acquisition_plan):
+    """Verify recorded code independently of this reader's import location."""
+    if not isinstance(value, dict):
+        raise ValueError('Missing recovery controller provenance')
+    source_repo = value.get('source_repo')
+    if not isinstance(source_repo, str) or not source_repo or not Path(source_repo).is_absolute():
+        raise ValueError('Invalid recovery controller source path')
+    repo = live_pilot.safe_path(source_repo)
+    pins = value.get('source_pins')
+    commit = value.get('source_commit', '')
+    if (value.get('kind') != CONTROLLER_KIND
+            or value.get('entrypoint') != 'research/campaign_recovery.py'
+            or value.get('clean_committed_at_creation') is not True
+            or not isinstance(commit, str) or not re.fullmatch('[a-f0-9]{40}', commit)
+            or not isinstance(pins, dict) or not pins
+            or any(not isinstance(h, str) or not re.fullmatch('[a-f0-9]{64}', h) for h in pins.values())
+            or value.get('pins_sha256') != _pins_digest(pins)):
+        raise ValueError('Invalid recovery controller provenance')
+    if not _controller_names(repo, acquisition_plan) <= pins.keys():
+        raise ValueError('Recovery controller applicability pins are incomplete')
+    for name, digest in pins.items():
+        repaired_runtime._relative(name)
+        path = repo/name
+        if path.is_symlink() or path.is_junction() or util.sha256_file(path) != digest:
+            raise ValueError('Recovery controller source changed: ' + name)
+    # A clean historical checkout and its exact HEAD are retained separately
+    # from the acquisition checkout. Never silently substitute current imports.
+    if (repaired_runtime._git(repo, 'rev-parse', 'HEAD') != commit
+            or repaired_runtime._git(repo, 'status', '--porcelain')):
+        raise ValueError('Recovery controller checkout changed')
+    repaired_runtime._committed_files(repo, commit, pins)
+    return value
+
+
+def _capture_controller(acquisition_plan):
+    """Require the actual executing checkout before creating any new output."""
+    from research import repaired_campaign as campaign
+    repo = Path(__file__).resolve().parents[1]
+    if repaired_runtime._git(repo, 'status', '--porcelain'):
+        raise ValueError('Clean committed recovery controller checkout required')
+    commit = repaired_runtime._git(repo, 'rev-parse', 'HEAD')
+    names = _controller_names(repo, acquisition_plan) | set(campaign.EXTRA_PINS)
+    pins = {name: util.sha256_file(repo/name) for name in sorted(names)}
+    # A mixed sys.path must not label old imported helpers as new controller code.
+    for name, module in list(sys.modules.items()):
+        if not (name.startswith('research.') or name.startswith('outer.harness.')):
+            continue
+        source = getattr(module, '__file__', None)
+        if source and Path(source).suffix == '.py' and '.tests.' not in name:
+            source = Path(source).resolve()
+            if not source.is_relative_to(repo) or source.relative_to(repo).as_posix() not in pins:
+                raise ValueError('Recovery controller imports a different source checkout')
+    value = dict(kind=CONTROLLER_KIND, source_repo=str(repo), source_commit=commit,
+        source_pins=pins, pins_sha256=_pins_digest(pins),
+        entrypoint='research/campaign_recovery.py', clean_committed_at_creation=True)
+    return _validate_controller(value, acquisition_plan)
 
 
 def _read(ref):
@@ -210,6 +298,19 @@ def decide_pair(arms):
     return 'replacement_eligible'
 
 
+def _acquisition_outcome(root, case):
+    """Preserve acquisition termination separately from later evaluability."""
+    path = Path(root)/'manifest.json'
+    if not path.exists():
+        return dict(manifest=None, end_reason=None, end_reason_observed=False)
+    manifest = util.read_json(path)
+    if (manifest.get('run_id') != case['run_id']
+            or manifest.get('run_instance_id') != case['run_instance_id']):
+        raise ValueError('Acquisition termination evidence has a foreign Run identity')
+    return dict(manifest=live_pilot.reference(path), end_reason=manifest.get('end_reason'),
+        end_reason_observed='end_reason' in manifest)
+
+
 def _assess_arm(ctx, case, root, holder):
     outcome_path = holder/'outcome.json'
     if outcome_path.exists():
@@ -221,6 +322,7 @@ def _assess_arm(ctx, case, root, holder):
     observation = assessment.classify(repo=ctx['repo'], source=root, main_plan_ref=ctx['wave']['epoch_plan'])
     usage = usage_evidence(root, case)
     value = dict(case=case, observation=observation, usage=usage,
+        acquisition_outcome=_acquisition_outcome(root, case),
         technical_evidence=_technical(root, case, usage), opportunity='not_applicable',
         assessment=None, assessment_adopted=False, assessment_valid_product_failure=False,
         valid_data=observation.get('classification') in VALID)
@@ -273,13 +375,14 @@ def recover_wave(repo, campaign_plan_path, wave_path, destination):
     if target.exists():
         ref = live_pilot.reference(target); validate_recovery(repo, ref, campaign_plan_path, wave_path)
         return ref
+    controller = _capture_controller(ctx['plan'])
     with assessment._existing_lock(Path(ctx['plan']['batch'])/'_control/dispatch.lock'):
         closure = _owned_closure(ctx)
         sources = {'wave':ctx['wave_path'].parent}
         sources.update({'pair-'+str(n):Path(ctx['epoch']['batch'])/('pair-'+str(n)) for n in ctx['wave']['pairs']})
-        inventory = {name:assessment.saved.byte_inventory(path) for name,path in sources.items()}
+        inventory = {name:complete_byte_inventory(path) for name,path in sources.items()}
         intent = dict(kind=KIND, campaign=ctx['campaign'], wave=ctx['wave_ref'],
-            source_commit=ctx['plan']['source_commit'], launcher_closure=closure,
+            source_commit=ctx['plan']['source_commit'], recovery_controller=controller, launcher_closure=closure,
             original_paths={n:str(p) for n,p in sources.items()}, original_inventory=inventory,
             initial_logical_denominator=100, model_calls=0, acquisition_count_increment=0)
         _write(destination/'intent.json', intent)
@@ -289,7 +392,9 @@ def recover_wave(repo, campaign_plan_path, wave_path, destination):
         else:
             archive = preserve.pack(destination/'private-archive', 'failed-wave-'+ctx['wave_ref']['sha256'][:24],
                 sources, metadata=dict(kind=KIND, campaign_sha256=ctx['campaign']['sha256'],
-                    wave_sha256=ctx['wave_ref']['sha256'], initial_logical_denominator=100))
+                    wave_sha256=ctx['wave_ref']['sha256'], initial_logical_denominator=100,
+                    recovery_controller_commit=controller['source_commit'],
+                    recovery_controller_pins_sha256=controller['pins_sha256']))
             _write(archive_path, archive)
         preserved = preserve.verify(destination/'private-archive', archive['package_id'], archive['sha256'])
         expected = {name+'/'+rel:digest for name,rows in inventory.items() for rel,digest in rows.items()}
@@ -306,8 +411,9 @@ def recover_wave(repo, campaign_plan_path, wave_path, destination):
                 quality={k:a.get('reassessed_quality',a['observation'].get('quality')) for k,a in arms.items()},
                 numeric_complete=all((a.get('assessment_adopted') or a['observation'].get('classification')=='already_evaluable') for a in arms.values()))
             decisions[str(pair['pair'])]['quality_complete']=decisions[str(pair['pair'])]['numeric_complete']
-        if any(assessment.saved.byte_inventory(path) != inventory[name] for name,path in sources.items()):
+        if any(complete_byte_inventory(path) != inventory[name] for name,path in sources.items()):
             raise ValueError('Original evidence changed during separate recovery')
+        _validate_controller(controller, ctx['plan'])
         from research import repaired_campaign as campaign
         prior = campaign.ledger(ctx['plan'])
         attempts = max(sum(e.get('kind')=='pair_attempt_reserved' and e.get('slot')==n for e in prior)
@@ -332,8 +438,12 @@ def validate_recovery(repo, recovery_ref, campaign_plan_path, wave_path):
             or value.get('launcher_closure')!=_owned_closure(ctx)
             or value.get('source_commit')!=ctx['plan']['source_commit']):
         raise ValueError('Foreign recovery decision')
+    intent = util.read_json(path.parent/'intent.json')
+    if set(intent) != set(INTENT_FIELDS) or intent != {k:value.get(k) for k in INTENT_FIELDS}:
+        raise ValueError('Recovery decision differs from its immutable intent')
+    _validate_controller(value.get('recovery_controller'), ctx['plan'])
     for name, original in value['original_paths'].items():
-        current=assessment.saved.byte_inventory(live_pilot.safe_path(original))
+        current=complete_byte_inventory(live_pilot.safe_path(original))
         expected=value['original_inventory'][name]
         extra=set(current)-set(expected)
         # The campaign appends one administrative wrapper only after this
@@ -362,6 +472,8 @@ def validate_recovery(repo, recovery_ref, campaign_plan_path, wave_path):
             arm = decision['arms'][case['condition']]
             if arm['case'] != case: raise ValueError('Recovery arm identity differs')
             root=Path(ctx['epoch']['batch'])/('pair-'+str(pair['pair']))/case['run_id']
+            if arm.get('acquisition_outcome') != _acquisition_outcome(root,case):
+                raise ValueError('Recovery changed the preserved acquisition end reason')
             if arm['usage']!=usage_evidence(root,case): raise ValueError('Recovery usage differs from saved originals')
             technical=_technical(root,case,arm['usage'])
             if arm['observation'].get('classification') in VALID:
@@ -414,7 +526,11 @@ def _public_data(value, slot):
     arms = {}
     for condition, arm in decision['arms'].items():
         usage = arm['usage']
+        outcome = arm['acquisition_outcome']
         arms[condition] = dict(run_id=arm['case']['run_id'],run_instance_id=arm['case']['run_instance_id'],
+            acquisition_end_reason=outcome['end_reason'],
+            acquisition_end_reason_observed=outcome['end_reason_observed'],
+            acquisition_manifest_sha256=outcome['manifest']['sha256'] if outcome['manifest'] else None,
             classification=arm['observation']['classification'],valid_data=arm['valid_data'],
             assessment_adopted=arm['assessment_adopted'],quality=decision['quality'][condition],
             assessment_valid_product_failure=arm.get('assessment_valid_product_failure',False),
@@ -425,6 +541,9 @@ def _public_data(value, slot):
             assessment_receipt_sha256=arm['assessment']['sha256'] if arm.get('assessment') else None)
     return dict(kind=KIND,campaign_sha256=value['campaign']['sha256'],wave_sha256=value['wave']['sha256'],
         source_commit=value['source_commit'],initial_logical_denominator=100,slot=slot,
+        acquisition_source_commit=value['source_commit'],
+        recovery_controller_commit=value['recovery_controller']['source_commit'],
+        recovery_controller_pins_sha256=value['recovery_controller']['pins_sha256'],
         disposition=decision['disposition'],numeric_complete=decision['numeric_complete'],arms=arms,
         original_pair_inventory=value['original_inventory']['pair-'+str(slot)],
         private_archive_sha256=value['original_archive']['sha256'],model_calls_for_recovery=0,

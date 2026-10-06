@@ -537,6 +537,42 @@ def serialized_postprocess(process,lock=None):
     return wrapped
 
 
+def retire_observer(monitor,budget_watch,*,owned_terminal_confirmed):
+    """Atomically leave active health checks, then verify bounded shutdown.
+
+    A normal pair may retire only after both owned terminal proofs. Failure
+    paths must already have latched the owner. The shared lock orders removal
+    against check()'s copied monitor list; shutdown waits never hold that lock.
+    """
+    try:
+        with budget_watch.lock:
+            if budget_watch.fault is None:
+                if not owned_terminal_confirmed or monitor not in budget_watch.monitors:
+                    raise RuntimeError('Observer retirement lacks owned terminal confirmation')
+                # A pre-existing observer fault/exit is not authorized shutdown.
+                budget_watch.check()
+            if monitor in budget_watch.monitors: budget_watch.monitors.remove(monitor)
+    except Exception as exc:
+        budget_watch.latch(type(exc).__name__)
+        with budget_watch.lock:
+            if monitor in budget_watch.monitors: budget_watch.monitors.remove(monitor)
+    try:
+        ack=monitor.stop()
+        confirmation=util.read_json(Path(monitor.directory)/'shutdown-ack.json') if ack else {}
+        # The process can latch between the last active check and its exit.
+        # Stop's bound ACK/exit plus these final bytes close that race without
+        # weakening checks for another pair while this observer shuts down.
+        faulted=((Path(monitor.directory)/'fault-latch.json').exists()
+                 or confirmation.get('fault_latched') is True)
+        if faulted:
+            budget_watch.latch('observer_fault_during_shutdown')
+        ack=ack and confirmation.get('fault_latched') is False and not faulted
+    except Exception:
+        ack=False
+    if not ack: budget_watch.latch('observer_shutdown_unconfirmed')
+    return ack
+
+
 def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,postprocess_lock=None):
     """One real production pair and observer session; no publication/resend."""
     from research.resource_supervisor import ProcessMonitor
@@ -598,10 +634,11 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
     # shares this lock across pairs; historical one-pair owners need none.
     postprocess=serialized_postprocess(browser_process,postprocess_lock)
     # Initial healthy samples precede registering this monitor with the watcher.
-    ack=False
+    ack=False; owned_terminal_confirmed=False
     try:
         monitor.start()
-        monitor.enroll_ready(scope()); budget_watch.monitors.append(monitor)
+        monitor.enroll_ready(scope())
+        with budget_watch.lock: budget_watch.monitors.append(monitor)
         result=pair_execution.execute_pair(dict(plan_sha256=digest,cohort=phase['cohort'],
             runtime=phase['runtime'],pair_concurrency=2,require_fixed_instances=True),
             phase['assignments'][0]['cases'],batch,repo=repo,concurrency=2,
@@ -617,13 +654,12 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
             budget_watch.native_sessions.update(sessions)
             util.write_new_json(batch/'owned-terminal-proof.json',dict(plan_sha256=digest,
                 phase_sha256=util.sha256_file(phase_path),runs=proofs))
+            owned_terminal_confirmed=True
         return result
     except BaseException as exc:
         budget_watch.latch(type(exc).__name__); raise
     finally:
-        try: ack=monitor.stop()
-        except Exception: ack=False
-        if monitor in budget_watch.monitors: budget_watch.monitors.remove(monitor)
+        ack=retire_observer(monitor,budget_watch,owned_terminal_confirmed=owned_terminal_confirmed)
         terminal=observer_terminal_receipt(monitor,owner_plan_path,phase_path,ack)
         if terminal['observer_ack_verified'] is not True: budget_watch.latch('observer_shutdown_unconfirmed')
         util.write_new_json(batch/'observer-terminal.json',dict(plan_sha256=digest,

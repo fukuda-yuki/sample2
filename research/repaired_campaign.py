@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import threading
 import time
+import traceback
 import uuid
 
 from outer.harness import live_usage, run, util
@@ -69,6 +70,11 @@ def validate(repo, path):
         raise ValueError('Research acquisition policy changed')
     if p.get('storage_policy')!='new_campaign_ntfs_compression_originals_retained':
         raise ValueError('Explicit bounded new-root storage policy required')
+    if p.get('predecessor'):
+        if 'research/campaign_transition.py' not in p['source_pins']:
+            raise ValueError('Successor transition controller must be pinned')
+        from research import campaign_transition
+        campaign_transition.validate_predecessor(repo,p)
     return p
 
 
@@ -130,7 +136,11 @@ def create(repo, path, base_path, batch, authorization):
 
 
 def ledger(p):
-    return pair_execution.events(Path(p['batch'])/'attempts.jsonl')
+    inherited=[]
+    if p.get('predecessor'):
+        from research import campaign_transition
+        inherited=campaign_transition.history_events(p)
+    return inherited+pair_execution.events(Path(p['batch'])/'attempts.jsonl')
 
 
 def stop_markers(p):
@@ -176,6 +186,9 @@ def epoch(repo,path):
     base['protected_roots']=p['protected_roots']
     used={c['run_instance_id'] for q in document(p['base_plan'])['assignments'] for c in q['cases']}
     used.update(readiness.protected_instance_ids())
+    if p.get('predecessor'):
+        from research import campaign_transition
+        used.update(campaign_transition.reserved_instance_ids(p))
     for previous in (root/'epochs').glob('*/plan.json'):
         used.update(c['run_instance_id'] for q in util.read_json(previous)['assignments'] for c in q['cases'])
     for pair in base['assignments']:
@@ -368,6 +381,25 @@ class CampaignWatch(live_pilot.PilotWatch):
         for key in ('requests','observed_tokens','accumulated_run_seconds'):
             result[key]+=self.prior[key]
         return result
+
+    def _loop(self):
+        while not self.done.wait(1):
+            try: self.check()
+            except Exception as exc:
+                # Preserve the first local supervisory exception before its
+                # durable stop makes secondary observer faults inevitable.
+                # No model payloads or process environment are captured here.
+                try:
+                    target=self.wave_dir/'watcher-exception.json'
+                    if not target.exists():
+                        util.write_new_json(target,dict(at=run.now(),
+                            where='CampaignWatch.check',exception_type=type(exc).__name__,
+                            message=str(exc),traceback=traceback.format_exc(),
+                            plan_sha256=self.campaign['_plan_sha256'],
+                            wave_sha256=util.sha256_file(self.wave_dir/'spec.json')))
+                except Exception:
+                    pass  # Evidence-write failure must never suppress STOP.
+                self.latch(type(exc).__name__);return
 
     def _check_locked(self):
         if self.fault is not None: raise RuntimeError('Campaign wave fault latched')

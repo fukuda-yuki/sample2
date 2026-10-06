@@ -58,3 +58,25 @@ executes explicit wave/recovery operations, and verifies the ledger. It does not
 hide faults behind unattended retries. Completion requires 100 adopted logical
 slots, preserved initial-slot failures/missingness and every attempt, real
 publication gates, and verified absence of owned model/observer resources.
+
+Normal observer retirement now requires the owned terminal proof and a healthy
+observer while holding the watch lock. The observer is removed from active
+checks before shutdown, and its shutdown acknowledgement is still validated.
+Unexpected exits, missing proofs, fault latches and bad acknowledgements retain
+their stop behavior. The first watch exception records its message and traceback
+before STOP; a failure to write that diagnostic cannot suppress STOP.
+
+Fault recovery inventories use the preservation layer's Windows native paths,
+including files beyond the ordinary path length limit. Historical assessment
+inventory and readiness implementations remain unchanged. Recovery records pin
+the clean committed recovery checkout separately from the acquisition checkout;
+public evidence distinguishes both commits and retains acquisition end reasons.
+An unsuccessful recovery directory is retained and a retry uses a new directory.
+
+An explicit controller succession preserves the same campaign ID, 100 logical
+slots, settings, budgets, original start time, attempts, adoptions and usage.
+It requires every old wave closed and owned resources inactive, then permanently
+fences the old root with a new stop event. Immutable history binds the old ledger,
+all old epoch UUID reservations and closures. The successor uses a separate clean
+committed checkout and storage root, and excludes all previously reserved UUIDs.
+Succession does not reset the denominator or resource and elapsed-time budgets.

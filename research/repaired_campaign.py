@@ -528,8 +528,6 @@ def _execute_wave(repo,path,wave_path,owner_pid):
     return outcome
 
 
-@scoped_validation
-
 OWNED_CLOSURE_KIND = 'owned_operational_v1'
 OWNED_PAIR_GATE_KIND = 'owned_pair_completion_receipt_v1'
 
@@ -538,6 +536,7 @@ def _owned_policy(p):
     return (p.get('policy') or {}).get('next_wave_requires') == 'owned_operational_archive_and_resource_release'
 
 
+@scoped_validation
 def verify_closure(repo,path,wave_path,closure_path):
     w=wave_spec(repo,path,wave_path);c=util.read_json(closure_path)
     if c.get('wave')!=live_pilot.reference(wave_path) or c.get('closed') is not True:

@@ -30,6 +30,23 @@ def _reference_json(ref):
     return util.read_json(live_pilot.checked(ref))
 
 
+def validate_failed_launcher(launched,registration,plan_ref):
+    """Failed launcher stores its owned-child disposition in nested child."""
+    child=launched.get('child')
+    if (launched.get('kind')!='live_pilot_launcher_result_v1'
+            or launched.get('plan')!=plan_ref or launched.get('operational_complete') is not False
+            or registration.get('plan')!=plan_ref
+            or type(registration.get('child_pid')) is not int or registration['child_pid']<=0
+            or type(launched.get('child_pid')) is not int
+            or launched['child_pid']!=registration['child_pid'] or not isinstance(child,dict)
+            or type(child.get('pid')) is not int or child['pid']!=registration['child_pid']
+            or type(child.get('initial_exit_code')) is not int or child['initial_exit_code']!=0
+            or type(child.get('exit_code')) is not int or child['exit_code']!=0
+            or child.get('unknown') is not False or child.get('terminated') is not False
+            or child.get('killed') is not False):
+        raise ValueError('Original failed launcher owned child closure is missing or foreign')
+
+
 def sealed_original(plan):
     """Full read-only origin check, including all retained original files."""
     closeout=_reference_json(plan['original_closeout'])
@@ -49,6 +66,7 @@ def sealed_original(plan):
         raise ValueError('Sealed original bytes changed')
     result=_reference_json(closeout['original_result'])
     launched=_reference_json(closeout['original_launcher_result'])
+    validate_failed_launcher(launched,util.read_json(origin/'_launcher/registration.json'),plan['original_plan'])
     if (live_pilot.checked(closeout['original_result'])!=origin/'result.json'
             or live_pilot.checked(closeout['original_launcher_result'])!=origin/'_launcher/result.json'):
         raise ValueError('Original terminal references must belong to sealed root')
@@ -63,7 +81,6 @@ def sealed_original(plan):
             or result.get('pilot_operational_complete') is not False or result.get('fault') is None
             or result.get('watcher_shutdown_verified') is not True
             or launched.get('plan')!=plan['original_plan'] or launched.get('operational_complete') is not False
-            or launched.get('child_exit_code')!=0
             or stop.get('plan_sha256')!=plan['original_plan']['sha256']
             or intent.get('plan')!=plan['original_plan']
             or execution.get('plan_sha256')!=plan['original_plan']['sha256']):

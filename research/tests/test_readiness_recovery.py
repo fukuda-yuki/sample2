@@ -79,8 +79,11 @@ class RecoveryControls(unittest.TestCase):
             plan_sha256=oldref['sha256'],pilot_operational_complete=False,fault={'reason':'postprocess_fault'},
             watcher_shutdown_verified=True))
         launcherpath=self.original/'_launcher/result.json'
-        util.write_new_json(launcherpath,dict(plan=oldref,operational_complete=False,child_exit_code=0))
+        util.write_new_json(launcherpath,dict(kind='live_pilot_launcher_result_v1',plan=oldref,
+            operational_complete=False,child_pid=3,child=dict(pid=3,initial_exit_code=0,
+                terminated=False,killed=False,exit_code=0,unknown=False)))
         util.write_new_json(self.original/'_launcher/intent.json',dict(plan=oldref,started_at=self.start))
+        util.write_new_json(self.original/'_launcher/registration.json',dict(plan=oldref,child_pid=3))
         util.write_new_json(self.original/'execution-intent.json',dict(plan_sha256=oldref['sha256'],started_at=self.start))
         util.write_new_json(self.original/'_control/dispatch-stop.json',dict(plan_sha256=oldref['sha256']))
         journal={'dispatch':{c['run_id']:c for c in oldcases[0]['cases']}}
@@ -315,6 +318,21 @@ class RecoveryControls(unittest.TestCase):
                 main.create(fixture.repo,fixture.plan_path)
             writer.assert_not_called(); self.assertEqual(before,util.tree_hashes(fixture.root))
             fixture.dispatch.assert_not_called()
+
+    def test_actual_failed_launcher_nested_child_schema_and_negative_identity(self):
+        plan,journal,_=self.sealed_fixture()
+        launched=util.read_json(self.original/'_launcher/result.json')
+        registration=util.read_json(self.original/'_launcher/registration.json')
+        before=util.tree_hashes(self.root)
+        recovery.validate_failed_launcher(launched,registration,plan['original_plan'])
+        for key,value in [('pid',99),('exit_code',1),('exit_code',False),('unknown',True),('unknown',None)]:
+            wrong=copy.deepcopy(launched); wrong['child'][key]=value
+            with self.assertRaises(ValueError): recovery.validate_failed_launcher(wrong,registration,plan['original_plan'])
+        wrong=copy.deepcopy(launched); wrong['child_pid']=99
+        with self.assertRaises(ValueError): recovery.validate_failed_launcher(wrong,registration,plan['original_plan'])
+        wrong=copy.deepcopy(launched); del wrong['child']; wrong['child_exit_code']=0
+        with self.assertRaises(ValueError): recovery.validate_failed_launcher(wrong,registration,plan['original_plan'])
+        self.assertEqual(before,util.tree_hashes(self.root))
 
 
 if __name__=='__main__': unittest.main()

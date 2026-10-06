@@ -705,15 +705,6 @@ def share_public(repo,recovery_ref,slot,workspace,review):
 
 def _verify_publication(ref,recovery_ref,slot):
     path=live_pilot.checked(ref); gate=util.read_json(path); value=_read(recovery_ref)
-    if gate.get('kind')=='owned_recovery_completion_v1':
-        if (gate.get('recovery')!=recovery_ref or gate.get('slot')!=slot
-                or gate.get('campaign')!=value['campaign'] or gate.get('wave')!=value['wave']
-                or gate.get('source_commit')!=value['source_commit']
-                or gate.get('quality_acceptance') is not False
-                or gate.get('acquisition_success') is not False
-                or gate.get('publication_performed') is not False):
-            raise ValueError('Owned recovery completion gate invalid')
-        return gate
     if (path.name!='fault-gate.json' or gate.get('kind')!=GATE_KIND or gate.get('recovery')!=recovery_ref
             or gate.get('slot')!=slot or gate.get('campaign')!=value['campaign'] or gate.get('wave')!=value['wave']
             or gate.get('quality_acceptance') is not False or gate.get('acquisition_success') is not False
@@ -751,24 +742,8 @@ def _verify_publication(ref,recovery_ref,slot):
 
 
 @scoped_validation
-def close_recovery(repo,campaign_plan_path,wave_path,recovery_ref,publication_refs=None,*,owned_completion=False):
+def close_recovery(repo,campaign_plan_path,wave_path,recovery_ref,publication_refs):
     value=validate_recovery(repo,recovery_ref,campaign_plan_path,wave_path)
-    plan=util.read_json(campaign_plan_path)
-    allow_owned=((plan.get('policy') or {}).get('next_wave_requires')=='owned_operational_archive_and_resource_release')
-    if owned_completion or (allow_owned and publication_refs is None):
-        if not allow_owned:
-            raise ValueError('Owned recovery closure not permitted by campaign policy')
-        publication_refs={}
-        root=Path(recovery_ref['path']).parent
-        for slot in value['decisions']:
-            gate_path=root/f'owned-recovery-gate-{slot}.json'
-            if not gate_path.exists():
-                util.write_new_json(gate_path,dict(kind='owned_recovery_completion_v1',recovery=recovery_ref,
-                    slot=int(slot),campaign=value['campaign'],wave=value['wave'],
-                    source_commit=value['source_commit'],quality_acceptance=False,
-                    acquisition_success=False,publication_performed=False,
-                    disposition=value['decisions'][slot]['disposition']))
-            publication_refs[slot]=live_pilot.reference(gate_path)
     if set(publication_refs)!=set(value['decisions']): raise ValueError('Every wave pair needs factual publication')
     for slot,ref in publication_refs.items(): _verify_publication(ref,recovery_ref,int(slot))
     closure=dict(kind=KIND,closed=True,campaign=value['campaign'],wave=value['wave'],recovery=recovery_ref,

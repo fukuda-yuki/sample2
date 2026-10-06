@@ -67,7 +67,7 @@ def validate(repo, path):
     for old in [repo,*map(live_pilot.safe_path,p['protected_roots'])]:
         if live_pilot.within(root,old) or live_pilot.within(old,root):
             raise ValueError('Campaign overlaps protected source/data')
-    if p.get('policy') not in policies_allowed():
+    if p.get('policy') != policy():
         raise ValueError('Research acquisition policy changed')
     if p.get('storage_policy')!='new_campaign_ntfs_compression_originals_retained':
         raise ValueError('Explicit bounded new-root storage policy required')
@@ -84,15 +84,8 @@ def policy():
         low_quality_replacement=False, ambiguous_send='reconcile_never_blind_resend',
         technical_failure='saved_same_version_assessment_before_whole_pair_replacement',
         cross_attempt_arm_composition=False, all_attempts_and_usage_retained=True,
-        next_wave_requires='owned_operational_archive_and_resource_release',
+        next_wave_requires='actual_publication_restore_cleanup_and_owned_closure',
         balance=False, paid_fallback=False, purchases=False)
-
-
-def policies_allowed():
-    owned=policy()
-    published=dict(owned)
-    published['next_wave_requires']='actual_publication_restore_cleanup_and_owned_closure'
-    return (owned, published)
 
 
 @scoped_validation
@@ -535,14 +528,6 @@ def _execute_wave(repo,path,wave_path,owner_pid):
     return outcome
 
 
-OWNED_CLOSURE_KIND = 'owned_operational_v1'
-OWNED_PAIR_GATE_KIND = 'owned_pair_completion_receipt_v1'
-
-
-def _owned_policy(p):
-    return (p.get('policy') or {}).get('next_wave_requires') == 'owned_operational_archive_and_resource_release'
-
-
 @scoped_validation
 def verify_closure(repo,path,wave_path,closure_path):
     w=wave_spec(repo,path,wave_path);c=util.read_json(closure_path)
@@ -551,22 +536,6 @@ def verify_closure(repo,path,wave_path,closure_path):
     if 'recovery' in c:
         from research import campaign_recovery
         campaign_recovery.validate_closure(repo,path,wave_path,c['recovery'])
-        return True
-    if c.get('closure_kind') == OWNED_CLOSURE_KIND:
-        p=validate(repo,path)
-        if not _owned_policy(p):
-            raise ValueError('Owned operational closure not permitted by campaign policy')
-        launch=util.read_json(Path(wave_path).parent/'_launcher'/'result.json')
-        if (launch.get('operational_complete') is not True or launch.get('owned_closure_confirmed') is not True
-                or launch.get('plan')!=live_pilot.reference(path) or launch.get('wave')!=live_pilot.reference(wave_path)):
-            raise ValueError('Owned operational closure lacks launcher terminal proof')
-        if set(c.get('gates',{}))!={str(n) for n in w['pairs']}:raise ValueError('Both wave owned gates required')
-        for n in w['pairs']:
-            gate=document(c['gates'][str(n)])
-            if (gate.get('kind')!=OWNED_PAIR_GATE_KIND or gate.get('pair')!=n
-                    or gate.get('wave')!=live_pilot.reference(wave_path)
-                    or gate.get('publication_performed') is not False):
-                raise ValueError('Owned pair completion receipt invalid')
         return True
     from research import acquisition_sharing
     child=document(w['epoch_plan'])
@@ -601,24 +570,6 @@ def _close_wave(repo,path,wave_path):
         return _record_closed_wave(p,w,util.read_json(target))
     from research import campaign_reassessment
     gates={}; observations={}
-    if _owned_policy(p):
-        for n in w['pairs']:
-            batch=Path(child['batch'])/f'pair-{n}'
-            receipt=directory/f'owned-pair-{n}-completion.json'
-            if not receipt.exists():
-                util.write_new_json(receipt,dict(kind=OWNED_PAIR_GATE_KIND,pair=n,
-                    wave=live_pilot.reference(wave_path),epoch_plan=w['epoch_plan'],
-                    launcher=live_pilot.reference(directory/'_launcher'/'result.json'),
-                    journal=live_pilot.reference(batch/'_control'/'pair-journal.jsonl'),
-                    publication_performed=False,at=run.now()))
-            gates[str(n)]=live_pilot.reference(receipt)
-            observations[str(n)]={case['condition']:campaign_reassessment.classify(repo=repo,
-                source=batch/case['run_id'],main_plan_ref=w['epoch_plan']) for case in child['assignments'][n-1]['cases']}
-        closure=dict(wave=live_pilot.reference(wave_path),closed=True,closure_kind=OWNED_CLOSURE_KIND,
-            gates=gates,observations=observations,publication_performed=False,at=run.now())
-        util.write_new_json(target,closure)
-        verify_closure(repo,path,wave_path,target)
-        return _record_closed_wave(p,w,closure)
     for n in w['pairs']:
         batch=Path(child['batch'])/f'pair-{n}'
         current=pair_execution.state(batch/'_control/pair-journal.jsonl')

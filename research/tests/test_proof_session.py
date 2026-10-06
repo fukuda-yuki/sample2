@@ -52,6 +52,15 @@ class ProofSessionTests(unittest.TestCase):
             with self.assertRaises(OSError):self.payload.rename(self.root/'renamed')
         self.payload.rename(self.root/'renamed')
 
+    def test_existing_lease_remains_observable_under_byte_guard(self):
+        from research.campaign_reassessment import _existing_lock
+        lock=self.root/'controller.lock'
+        lock.write_bytes(b'0')
+        with proof.local_session():
+            self.assertEqual(proof.use('lock-bytes',{},lambda:lock.read_bytes()),b'0')
+            with _existing_lock(lock):pass
+            self.assertEqual(proof.use('lock-bytes',{},lambda:lock.read_bytes()),b'0')
+
     def test_added_member_invalidates_before_a_hit(self):
         validate=Mock(side_effect=lambda: sorted(x.name for x in self.root.iterdir()))
         with proof.local_session():

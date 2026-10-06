@@ -28,7 +28,9 @@ VERSIONS = {'MS1-CONT-A': '1.6.0', 'MS1-CONT-B': '1.6.0',
 def _existing_lock(path):
     """Observe ownership using an existing lock without changing source bytes."""
     import os
-    with Path(path).open('r+b') as stream:
+    # LockFile accepts a read handle; preserve compatibility with immutable
+    # proof guards without requesting permission to change source bytes.
+    with Path(path).open('rb') as stream:
         if not stream.read(1):
             raise ValueError('Uninitialized source ownership lock')
         stream.seek(0)

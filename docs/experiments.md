@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `source-information-two-families-20261003-v5-100p2` | 原100ペア・200割付。固定済み要求・評価器による原結果を保持 | [原報告書](../research/source-info-v5-final-analysis-20261005/REPORT-ja.md) | [専用Release](https://github.com/fukuda-yuki/sample2/releases/tag/source-info-v5-100p2-f39b38adc6bb-final)の`analysis.zip`、[再計算と必要データ](../research/source-info-v5-final-analysis-20261005/README.md) |
 | 同実験の分析追補v2 | 原100ペアの再分析。新規取得・再採点を増やさない | [追補v2](../research/source-info-v5-analysis-v2-20261006/REPORT-ADDENDUM-v2-ja.md) | 同Releaseの`analysis-v2-iterative-20261006.zip`、[データ・コード・再計算](../research/source-info-v5-analysis-v2-20261006/README-ja.md) |
-| 評価器修正後の保存生成物再評価 | 修正版の新`assessment_id`と`evaluation_version`で原`run_instance_id`・`artifact_sha256`へ結合する別評価。実取得件数に加算しない | 実行済みの評価receiptと報告書が揃ってから、この行へ固定linkを追加する | 原採点・原Releaseのbytesを維持。新評価の結果・比較表・コードを別パッケージに置く |
+| 評価器修正と保存生成物再評価の準備 | 修正版の新`assessment_id`と`evaluation_version`で原`run_instance_id`・`artifact_sha256`へ結合する別評価。実取得件数に加算しない | [修正・有限受入・実行ブロック](evaluator-repair-20261006.md)。保存例5件の実行は起動前の自動承認拒否で未実施 | 原採点・原Releaseのbytesを維持。新評価の実行receiptと結果が揃ってから、別パッケージの固定linkを追加する |
 | 次の取得campaign | 新campaign UUID、新Run UUID、新保存先、新固定条件による取得。今回のアダプター試験は取得実験ではない | 未取得 | [ID・保存・配布の契約と開始前の統合ゲート](experiment-identity.md) |
 
 Release内のMANIFESTだけを自己証明として信頼せず、Release本文の固定SHA256と取得ファイルを照合してください。元報告書と追補は、その時点での結論です。評価器修正後の結果を原評価器による結果へ置き換えません。

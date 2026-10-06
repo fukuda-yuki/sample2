@@ -243,7 +243,16 @@ class MainAdmissionControls(ReadinessFixture):
         # Real ref/hash checks remain exercised. Pipeline admission is mocked
         # here; its durable synthetic journal controls are covered separately.
         for key in ('readiness_pilot_plan', 'readiness_pilot_result'):
-            path = self.root / (key + '.json'); util.write_new_json(path, {'synthetic': True})
+            data={'synthetic':True}
+            if key=='readiness_pilot_plan':
+                # Identity reservations are now independently validated even
+                # when the actual pipeline adoption leaf below is mocked.
+                data=dict(kind=live_pilot.KIND,assignments=[dict(pair=n,cases=[
+                    dict(task=task,condition=arm,pair=n,slot=slot,attempt=1,
+                         run_id=run.run_id_for(task,arm,1),run_instance_id=uuid.uuid4().hex)
+                    for slot,arm in enumerate(('explore','preload'),1)])
+                    for n,task in enumerate(('MS1-CONT-A','CU1-ENR-C'),1)])
+            path = self.root / (key + '.json'); util.write_new_json(path, data)
             self.plan[key] = live_pilot.reference(path)
         self.write_plan(); self.allocate()
 

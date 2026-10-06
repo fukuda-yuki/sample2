@@ -21,6 +21,8 @@ from research import pair_execution, next_phase_execution
 KIND = 'live_go_readiness_pilot_v1'
 MAIN_KIND = 'source_info_repaired_v6_main'
 OBSERVER_KIND = 'live_go_readiness_pilot_observer_v1'
+RECOVERY_KIND = 'repaired_pilot_readiness_recovery_v1'
+RECOVERY_OBSERVER_KIND = 'repaired_pilot_readiness_recovery_observer_v1'
 BOUNDS = dict(max_pairs=2, max_runs=4, run_seconds=1800, provider_seconds=600,
     accumulated_run_seconds=7200, request_count=600, observed_tokens=30000000,
     wall_seconds=9000, disk_free_min_bytes=8 * 1024**3)
@@ -190,14 +192,18 @@ def owner_plan(path, repo):
     if kind==MAIN_KIND:
         from research import acquisition_readiness
         return acquisition_readiness.verify_main_phase(path,repo)
+    if kind==RECOVERY_KIND:
+        from research import readiness_recovery
+        return readiness_recovery.validate_plan(plan,repo)
     raise ValueError('Unsupported live owner kind')
 
 
 def observer_phase(plan, plan_reference, pair_number, *, batch=None, cohort=None):
-    if plan.get('kind') not in (KIND,MAIN_KIND): raise ValueError('Unsupported live owner kind')
+    if plan.get('kind') not in (KIND,MAIN_KIND,RECOVERY_KIND): raise ValueError('Unsupported live owner kind')
     selected=next(p for p in plan['assignments'] if p['pair']==pair_number)
     task=selected['cases'][0]['task']
-    return dict(schema_version=1,kind=OBSERVER_KIND if plan['kind']==KIND else MAIN_KIND,owner_kind=plan['kind'],
+    observer_kind={KIND:OBSERVER_KIND,MAIN_KIND:MAIN_KIND,RECOVERY_KIND:RECOVERY_OBSERVER_KIND}[plan['kind']]
+    return dict(schema_version=1,kind=observer_kind,owner_kind=plan['kind'],
         original_bundle=plan_reference,phase_id=plan['phase_id']+'-p'+str(pair_number),
         batch=str(batch or Path(plan['batch'])/('pair-'+str(pair_number))),
         cohort=cohort or plan['cohort']+'/pair-'+str(pair_number),
@@ -207,8 +213,8 @@ def observer_phase(plan, plan_reference, pair_number, *, batch=None, cohort=None
 
 
 def validate_observer_phase(phase,repo):
-    if (phase.get('kind') not in (OBSERVER_KIND,MAIN_KIND) or phase.get('owner_kind') not in (KIND,MAIN_KIND)
-            or phase['kind']!=(OBSERVER_KIND if phase['owner_kind']==KIND else MAIN_KIND)):
+    kinds={KIND:OBSERVER_KIND,MAIN_KIND:MAIN_KIND,RECOVERY_KIND:RECOVERY_OBSERVER_KIND}
+    if phase.get('owner_kind') not in kinds or phase.get('kind')!=kinds[phase['owner_kind']]:
         raise ValueError('Explicit new live observer required')
     path=checked(phase['original_bundle']); plan=owner_plan(path,repo)
     if plan['kind']!=phase['owner_kind']: raise ValueError('Foreign live owner')

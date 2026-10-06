@@ -188,7 +188,12 @@ def execute(stage, *, repo, timeout=1800):
         if (stage/'STOP').exists():
             record['operation_status'] = 'stopped_after_http'
             code = 2
-        if code == 0 and not timed_out and (http/'evaluation.json').is_file():
+        if browser_review.http_phase_eligible(condition,http,exit_code=record['evaluator_exit_code'],
+                timed_out=timed_out,cleanup_confirmed=record['cleanup_confirmed'],
+                stopped=(stage/'STOP').exists(),frozen=stage/'frozen',
+                artifact_hash=assessment['source_artifact_sha256'],
+                spec=stage/'evaluation-assets/requirements.json',spec_hash=assessment['new_spec_sha256'],
+                evaluator_hash=assessment['evaluator_sha256']):
             if browser_review.required(assessment['evaluation_version']):
                 code = browser_review.complete_evaluation(repo, condition, stage/'frozen', http,
                     work/'publish', stage/'evaluation-assets', output, assessment['assessment_id'], 1)
@@ -348,12 +353,20 @@ def revalidate(stage, destination, *, repo=None):
         receipt['original_result_sha256'] = util.sha256_file(stage/'result.json')
         require(original.get('assessment_id') == assessment['assessment_id']
                 and original.get('cleanup_confirmed') is True and original.get('source_unchanged') is True
-                and original.get('evaluator_exit_code') == 0 and original.get('timed_out') is False
+                and type(original.get('evaluator_exit_code')) is int
+                and original.get('evaluator_exit_code') in (0,2) and original.get('timed_out') is False
                 and original.get('errors') == [] and original.get('operation_status') in
                     ('evaluation_finished', 'evaluation_partial_or_fault'), 'original_execution_confirmations')
         out, http = stage/'output', stage/'output/http-only'
         require(original.get('raw_result') == 'output/evaluation.json', 'original_output_path')
         output = util.read_json(out/'evaluation.json'); baseline = util.read_json(http/'evaluation.json')
+        require((original['evaluator_exit_code']==0 and assessment['evaluation_version']!='1.6.0')
+            or browser_review.http_phase_eligible(condition,http,
+            exit_code=original['evaluator_exit_code'],timed_out=original['timed_out'],
+            cleanup_confirmed=original['cleanup_confirmed'],stopped=(stage/'STOP').exists(),
+            frozen=stage/'frozen',artifact_hash=assessment['source_artifact_sha256'],
+            spec=spec_path,spec_hash=assessment['new_spec_sha256'],evaluator_hash=assessment['evaluator_sha256']),
+            'http_browser_phase_eligibility')
         for directory, result in ((out, output), (http, baseline)):
             require(not evaluate.check_mismatches(result, condition, assessment['evaluation_version'],
                     stage/'frozen', assessment['source_artifact_sha256'], spec_path, assessment['new_spec_sha256']), 'output_identity')

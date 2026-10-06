@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `source-information-two-families-20261003-v5-100p2` | 原100ペア・200割付。固定済み要求・評価器による原結果を保持 | [原報告書](../research/source-info-v5-final-analysis-20261005/REPORT-ja.md) | [専用Release](https://github.com/fukuda-yuki/sample2/releases/tag/source-info-v5-100p2-f39b38adc6bb-final)の`analysis.zip`、[再計算と必要データ](../research/source-info-v5-final-analysis-20261005/README.md) |
 | 同実験の分析追補v2 | 原100ペアの再分析。新規取得・再採点を増やさない | [追補v2](../research/source-info-v5-analysis-v2-20261006/REPORT-ADDENDUM-v2-ja.md) | 同Releaseの`analysis-v2-iterative-20261006.zip`、[データ・コード・再計算](../research/source-info-v5-analysis-v2-20261006/README-ja.md) |
-| 評価器修正と保存生成物再評価の準備 | 修正版の新`assessment_id`と`evaluation_version`で原`run_instance_id`・`artifact_sha256`へ結合する別評価。実取得件数に加算しない | [修正・保存例5件の実行・採用判定](evaluator-repair-20261006.md)。初回5件はcomplete 3件/partial 2件、Music1.5追加2件はcomplete 1件/partial 1件。原本不変・終了確認7/7、新モデル取得0 | 原採点・原Releaseのbytesを維持。新assessment/validation IDとprivate実行receiptを報告書で対応づける。新結果の公開packageは未作成 |
+| 評価器修正と保存生成物再評価 | 新`assessment_id`と`evaluation_version`を原`run_instance_id`・`artifact_sha256`へ結合する別評価。実取得件数に加算しない | [19試行/7生成物・有限受入](evaluator-repair-closeout-20261006.md)。本文15評価はcomplete5/partial7/fault3、別HTTP-only4試行は未validation/nullのまま。非モデル2campaign/4Run・再評価1件の終了と原本不変を確認、新モデル取得0 | [専用Release](https://github.com/fukuda-yuki/sample2/releases/tag/evaluator-acceptance-20261006-b014b3479c18)のphase Aは実匿名download/restore/recompute済み。phase Bは封印済みだが追加公開承認で停止、実匿名復元と最終統合は未完了。固定SHA・証跡・制限は報告書 |
 | 次の取得campaign | 新campaign UUID、新Run UUID、新保存先、新固定条件による取得。今回のアダプター試験は取得実験ではない | 未取得 | [ID・保存・配布の契約と開始前の統合ゲート](experiment-identity.md) |
 
 Release内のMANIFESTだけを自己証明として信頼せず、Release本文の固定SHA256と取得ファイルを照合してください。元報告書と追補は、その時点での結論です。評価器修正後の結果を原評価器による結果へ置き換えません。

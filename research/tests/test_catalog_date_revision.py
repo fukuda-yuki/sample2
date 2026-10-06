@@ -19,6 +19,7 @@ from research import catalog_delivery as delivery, catalog_confirmatory as analy
 from research import catalog_observations as observations, catalog_pilot as pilot
 from research.catalog_allocation_review import read, sha256, write_new
 from research.tests.test_catalog_identity import run_input, body, save_request
+from research.tests.catalog_frozen_fixture import materialize_r3_fixture
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -29,12 +30,7 @@ class RevisionTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.repo = Path(self.temp.name)
         self.old = read(REPO / revision.OLD_PATH)
-        for name in [revision.OLD_PATH, *self.old['execution']['code_hashes'], *revision.ADDED_CODE,
-                     'inner/spec/requirements.json', 'inner/spec/requirements-1.2.0.json']:
-            target = self.repo / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(REPO / name, target)
-        shutil.copytree(REPO / 'research/sharing', self.repo / 'research/sharing', dirs_exist_ok=True)
+        materialize_r3_fixture(self.repo)
         self.batch = self.repo / self.old['runs_dir']
         self.control = self.batch / '_control'
         self.control.mkdir(parents=True)

@@ -18,11 +18,14 @@ public sealed class RunState : IDisposable
 
     public string EvaluationVersion { get; set; } = Program.DefaultEvaluationVersion;
 
-    public bool ExplicitOrderContract => EvaluationVersion is "1.2.0" or "1.3.0" or "1.4.0" or "1.5.0";
+    public bool ExplicitOrderContract => EvaluationVersion is "1.2.0" or "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0";
 
     public MigrationContinuity Migration { get; set; }
 
     public bool AppReady { get; set; }
+    public bool InitialReadinessObserved { get; set; }
+    public bool InitialAppReady { get; set; }
+    public bool StartupReady => EvaluationVersion=="1.6.0" && InitialReadinessObserved ? InitialAppReady : AppReady;
 
     public string AppStartDetail { get; set; } = string.Empty;
 
@@ -153,6 +156,8 @@ public sealed class CartResult : ScenarioResult
 
 public sealed class OrderResult : ScenarioResult
 {
+    public WebResponse CartBeforeSecondCheckout { get; set; }
+    public OrderStore.Probe OrderRowBeforeSecond { get; set; }
     public WebResponse CartBeforeCheckout { get; set; }
 
     public List<Html.CartLine> LinesBeforeCheckout { get; set; } = new List<Html.CartLine>();
@@ -182,6 +187,7 @@ public sealed class OrderResult : ScenarioResult
 
 public sealed class RestartResult : ScenarioResult
 {
+    public WebResponse CartBeforeCheckout { get; set; }
     public int? GenreCount { get; set; }
 
     public int? RockCount { get; set; }
@@ -203,6 +209,7 @@ public sealed class RestartResult : ScenarioResult
 
 public sealed class InvalidCheckoutResult : ScenarioResult
 {
+    public List<InvalidFieldObservation> AddressCases { get; } = new();
     public bool AllMissingAddressFieldsPreserved { get; set; }
     public List<string> MissingAddressObservations { get; } = new();
     public OrderStore.Snapshot OrdersBefore { get; set; }
@@ -230,6 +237,11 @@ public sealed class InvalidCheckoutResult : ScenarioResult
 
 public sealed class IsolationResult : ScenarioResult
 {
+    public bool ForeignRemovalObserved { get; set; }
+    public WebResponse CartBeforeA { get; set; }
+    public WebResponse CartBeforeB { get; set; }
+    public WebResponse CartAfterA { get; set; }
+    public WebResponse CartAfterB { get; set; }
     public List<Html.CartLine> LinesInSessionA { get; set; } = new List<Html.CartLine>();
 
     public decimal? TotalInSessionA { get; set; }
@@ -239,6 +251,16 @@ public sealed class IsolationResult : ScenarioResult
     public decimal? TotalInSessionB { get; set; }
 
     public bool ForeignRemovalPreserved { get; set; }
+}
+
+public sealed class InvalidFieldObservation
+{
+    public string Field { get; set; }
+    public WebResponse Before { get; set; }
+    public WebResponse Response { get; set; }
+    public WebResponse After { get; set; }
+    public OrderStore.Snapshot OrdersBefore { get; set; }
+    public OrderStore.Snapshot OrdersAfter { get; set; }
 }
 
 public sealed class StaticResult : ScenarioResult
@@ -322,6 +344,15 @@ public static class Scenarios
         }
     }
 
+    private static T Guard<T>(RunState state, T result, Func<T,T> body) where T : ScenarioResult, new()
+    {
+        if (state.EvaluationVersion != "1.6.0") return Guard(() => body(result));
+        try { return body(result); }
+        catch (PreconditionException ex) { result.Fault=Judgement.Blocked; result.FaultDetail=ex.Message; }
+        catch (Exception ex) { result.Fault=Judgement.Error; result.FaultDetail=ex.GetType().Name+": "+ex.Message; }
+        return result;
+    }
+
     private static void RequireReady(RunState state)
     {
         if (!state.AppReady)
@@ -330,10 +361,9 @@ public static class Scenarios
         }
     }
 
-    public static BrowseResult RunBrowse(RunState state) => Guard(() =>
+    public static BrowseResult RunBrowse(RunState state) => Guard(state, new BrowseResult(), result =>
     {
         RequireReady(state);
-        var result = new BrowseResult();
         var session = state.Session("browse");
 
         result.Root = session.Get("/");
@@ -358,24 +388,23 @@ public static class Scenarios
         return result;
     });
 
-    public static CartResult RunCart(RunState state) => Guard(() =>
+    public static CartResult RunCart(RunState state) => Guard(state, new CartResult(), result =>
     {
         RequireReady(state);
-        var result = new CartResult();
         var session = state.Session("cart");
 
         session.Get("/ShoppingCart/AddToCart/1");
         session.Get("/ShoppingCart/AddToCart/1");
         result.CartAfterTwoAdds = session.Get("/ShoppingCart");
-        result.LinesAfterTwoAdds = Html.CartLines(result.CartAfterTwoAdds.Body);
-        result.TotalAfterTwoAdds = Html.Money(result.CartAfterTwoAdds.Body);
+        result.LinesAfterTwoAdds = Html.CartLines(result.CartAfterTwoAdds.Body,state.EvaluationVersion);
+        result.TotalAfterTwoAdds = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(result.CartAfterTwoAdds.Body).Value:Html.Money(result.CartAfterTwoAdds.Body));
 
         if (result.LinesAfterTwoAdds.Count > 0)
         {
             result.RecordId = result.LinesAfterTwoAdds[0].RecordId;
         }
 
-        result.RemoveFromTwo = ObserveRemoval(state.EvaluationVersion, result.LinesAfterTwoAdds, 2, result.RecordId, id =>
+        result.RemoveFromTwo = state.EvaluationVersion=="1.6.0" && Html.ObserveCart16(result.CartAfterTwoAdds.Body).Violations.Count>0 ? null : ObserveRemoval(state.EvaluationVersion, result.LinesAfterTwoAdds, 2, result.RecordId, id =>
         {
             return session.PostForm("/ShoppingCart/RemoveFromCart", new[]
             {
@@ -383,10 +412,10 @@ public static class Scenarios
             });
         });
         result.CartAfterRemoveFromTwo = session.Get("/ShoppingCart");
-        result.LinesAfterRemoveFromTwo = Html.CartLines(result.CartAfterRemoveFromTwo.Body);
-        result.TotalAfterRemoveFromTwo = Html.Money(result.CartAfterRemoveFromTwo.Body);
+        result.LinesAfterRemoveFromTwo = Html.CartLines(result.CartAfterRemoveFromTwo.Body,state.EvaluationVersion);
+        result.TotalAfterRemoveFromTwo = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(result.CartAfterRemoveFromTwo.Body).Value:Html.Money(result.CartAfterRemoveFromTwo.Body));
 
-        result.RemoveFromOne = ObserveRemoval(state.EvaluationVersion, result.LinesAfterRemoveFromTwo, 1, result.RecordId, id =>
+        result.RemoveFromOne = state.EvaluationVersion=="1.6.0" && Html.ObserveCart16(result.CartAfterRemoveFromTwo.Body).Violations.Count>0 ? null : ObserveRemoval(state.EvaluationVersion, result.LinesAfterRemoveFromTwo, 1, result.RecordId, id =>
         {
             return session.PostForm("/ShoppingCart/RemoveFromCart", new[]
             {
@@ -394,15 +423,16 @@ public static class Scenarios
             });
         });
         result.CartAfterRemoveFromOne = session.Get("/ShoppingCart");
-        result.LinesAfterRemoveFromOne = Html.CartLines(result.CartAfterRemoveFromOne.Body);
-        result.TotalAfterRemoveFromOne = Html.Money(result.CartAfterRemoveFromOne.Body);
+        result.LinesAfterRemoveFromOne = Html.CartLines(result.CartAfterRemoveFromOne.Body,state.EvaluationVersion);
+        result.TotalAfterRemoveFromOne = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(result.CartAfterRemoveFromOne.Body).Value:Html.Money(result.CartAfterRemoveFromOne.Body));
 
+        if (state.EvaluationVersion == "1.6.0") session = state.Session("cart-total");
         session.Get("/ShoppingCart/AddToCart/1");
         session.Get("/ShoppingCart/AddToCart/1");
         session.Get("/ShoppingCart/AddToCart/1");
         result.CartAfterThreeAdds = session.Get("/ShoppingCart");
-        result.LinesAfterThreeAdds = Html.CartLines(result.CartAfterThreeAdds.Body);
-        result.TotalAfterThreeAdds = Html.Money(result.CartAfterThreeAdds.Body);
+        result.LinesAfterThreeAdds = Html.CartLines(result.CartAfterThreeAdds.Body,state.EvaluationVersion);
+        result.TotalAfterThreeAdds = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(result.CartAfterThreeAdds.Body).Value:Html.Money(result.CartAfterThreeAdds.Body));
 
         return result;
     });
@@ -413,28 +443,30 @@ public static class Scenarios
     public static WebResponse ObserveRemoval(string version, IReadOnlyList<Html.CartLine> lines, int quantity,
         int historicalRecordId, Func<int, WebResponse> submit)
     {
-        if (version == "1.5.0" && !RemovalPrecondition(lines, quantity)) return null;
+        if (version is "1.5.0" or "1.6.0" && !RemovalPrecondition(lines, quantity)) return null;
         // The current line is the prerequisite for this distinct check. A
         // legitimate application may replace a row while decrementing it.
-        return submit(version == "1.5.0" ? lines[0].RecordId : historicalRecordId);
+        return submit(version is "1.5.0" or "1.6.0" ? lines[0].RecordId : historicalRecordId);
     }
 
-    public static OrderResult RunOrder(RunState state) => Guard(() =>
+    public static WebResponse ObserveCheckout(string version, WebResponse cart, Func<WebResponse> submit) =>
+        version=="1.6.0" && !(cart?.Status==200 && Html.ObserveCart16(cart.Body).Violations.Count==0 && Attribution16.Populated(Html.CartLines(cart.Body,version))) ? null : submit();
+
+    public static OrderResult RunOrder(RunState state) => Guard(state, new OrderResult(), result =>
     {
         RequireReady(state);
-        var result = new OrderResult();
         var session = state.Session("order");
 
         session.Get("/ShoppingCart/AddToCart/1");
         session.Get("/ShoppingCart/AddToCart/1");
         session.Get("/ShoppingCart/AddToCart/2");
         result.CartBeforeCheckout = session.Get("/ShoppingCart");
-        result.LinesBeforeCheckout = Html.CartLines(result.CartBeforeCheckout.Body);
-        result.TotalBeforeCheckout = Html.Money(result.CartBeforeCheckout.Body);
+        result.LinesBeforeCheckout = Html.CartLines(result.CartBeforeCheckout.Body,state.EvaluationVersion);
+        result.TotalBeforeCheckout = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(result.CartBeforeCheckout.Body).Value:Html.Money(result.CartBeforeCheckout.Body));
 
         result.CheckoutFormGet = session.Get("/Checkout/AddressAndPayment");
-        result.CheckoutPost = session.PostForm("/Checkout/AddressAndPayment", OrderFields("FREE"));
-        result.OrderId = ParseOrderId(result.CheckoutPost.Location);
+        result.CheckoutPost = ObserveCheckout(state.EvaluationVersion, result.CartBeforeCheckout, () => session.PostForm("/Checkout/AddressAndPayment", OrderFields("FREE")));
+        result.OrderId = ParseOrderId(result.CheckoutPost?.Location);
 
         if (result.OrderId.HasValue)
         {
@@ -442,8 +474,8 @@ public static class Scenarios
         }
 
         result.CartAfterOrder = session.Get("/ShoppingCart");
-        result.LinesAfterOrder = Html.CartLines(result.CartAfterOrder.Body);
-        result.TotalAfterOrder = Html.Money(result.CartAfterOrder.Body);
+        result.LinesAfterOrder = Html.CartLines(result.CartAfterOrder.Body,state.EvaluationVersion);
+        result.TotalAfterOrder = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(result.CartAfterOrder.Body).Value:Html.Money(result.CartAfterOrder.Body));
 
         if (result.OrderId.HasValue)
         {
@@ -451,18 +483,32 @@ public static class Scenarios
             result.OtherSessionComplete = other.Get("/Checkout/Complete/" + result.OrderId.Value.ToString(CultureInfo.InvariantCulture));
         }
 
-        session.Get("/ShoppingCart/AddToCart/2");
-        result.SecondCheckoutPost = session.PostForm("/Checkout/AddressAndPayment",
-            OrderFields(state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0" ? "fReE" : "FREE"));
-        result.SecondOrderId = ParseOrderId(result.SecondCheckoutPost.Location);
+        if (state.EvaluationVersion == "1.6.0")
+        {
+            if (result.OrderId > 0) result.OrderRowBeforeSecond = OrderStore.OrderRowExists(state.Host.DatabasePath,result.OrderId.Value);
+            if (Attribution16.Accepted(result.CheckoutPost,result.OrderId,state.Host.BaseUrl) && result.OrderRowBeforeSecond?.Found == true
+                && Attribution16.CartReady(result.CartBeforeCheckout) && Attribution16.Populated(result.LinesBeforeCheckout)
+                && Attribution16.CartReady(result.CartAfterOrder) && result.LinesAfterOrder.Count==0 && Attribution16.Money(result.CartAfterOrder.Body).Value==0m)
+            {
+                session.Get("/ShoppingCart/AddToCart/2");
+                result.CartBeforeSecondCheckout=session.Get("/ShoppingCart");
+                result.SecondCheckoutPost=ObserveCheckout(state.EvaluationVersion,result.CartBeforeSecondCheckout,
+                    () => session.PostForm("/Checkout/AddressAndPayment",OrderFields("fReE")));
+            }
+        }
+        else
+        {
+            session.Get("/ShoppingCart/AddToCart/2");
+            result.SecondCheckoutPost=session.PostForm("/Checkout/AddressAndPayment",OrderFields(state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0" ? "fReE" : "FREE"));
+        }
+        result.SecondOrderId=ParseOrderId(result.SecondCheckoutPost?.Location);
 
         return result;
     });
 
-    public static RestartResult RunRestart(RunState state, int? orderIdBefore) => Guard(() =>
+    public static RestartResult RunRestart(RunState state, int? orderIdBefore) => Guard(state, new RestartResult { OrderIdBefore = orderIdBefore }, result =>
     {
         RequireReady(state);
-        var result = new RestartResult { OrderIdBefore = orderIdBefore };
 
         // 再起動前の注文行を、再起動の前に観測しておく。再起動後に同じ行が残って
         // いるかを見るための比較対象であり、注文番号の差では代替しない。
@@ -497,27 +543,27 @@ public static class Scenarios
         }
 
         session.Get("/ShoppingCart/AddToCart/3");
-        result.CheckoutPost = session.PostForm("/Checkout/AddressAndPayment", OrderFields("FREE"));
-        result.OrderIdAfter = ParseOrderId(result.CheckoutPost.Location);
+        if(state.EvaluationVersion=="1.6.0") result.CartBeforeCheckout=session.Get("/ShoppingCart");
+        result.CheckoutPost=ObserveCheckout(state.EvaluationVersion,result.CartBeforeCheckout,()=>session.PostForm("/Checkout/AddressAndPayment",OrderFields("FREE")));
+        result.OrderIdAfter=ParseOrderId(result.CheckoutPost?.Location);
 
         return result;
     });
 
-    public static InvalidCheckoutResult RunInvalidCheckout(RunState state) => Guard(() =>
+    public static InvalidCheckoutResult RunInvalidCheckout(RunState state) => Guard(state, new InvalidCheckoutResult(), result =>
     {
         RequireReady(state);
-        var result = new InvalidCheckoutResult();
         var session = state.Session("invalid");
 
         session.Get("/ShoppingCart/AddToCart/1");
         result.CartBefore = session.Get("/ShoppingCart");
-        result.LinesBefore = Html.CartLines(result.CartBefore.Body);
+        result.LinesBefore = Html.CartLines(result.CartBefore.Body,state.EvaluationVersion);
 
         if (state.ExplicitOrderContract) result.OrdersBefore = OrderStore.ReadIds(state.Host.DatabasePath);
 
         result.WrongPromo = session.PostForm("/Checkout/AddressAndPayment", OrderFields("NOT_FREE"));
         result.CartAfterWrongPromo = session.Get("/ShoppingCart");
-        result.LinesAfterWrongPromo = Html.CartLines(result.CartAfterWrongPromo.Body);
+        result.LinesAfterWrongPromo = Html.CartLines(result.CartAfterWrongPromo.Body,state.EvaluationVersion);
 
         if (state.ExplicitOrderContract)
         {
@@ -531,11 +577,25 @@ public static class Scenarios
 
         result.MissingField = session.PostForm("/Checkout/AddressAndPayment", OrderFields("FREE", firstName: string.Empty));
         result.CartAfterMissingField = session.Get("/ShoppingCart");
-        result.LinesAfterMissingField = Html.CartLines(result.CartAfterMissingField.Body);
+        result.LinesAfterMissingField = Html.CartLines(result.CartAfterMissingField.Body,state.EvaluationVersion);
         if (state.ExplicitOrderContract) result.OrdersAfterMissing = OrderStore.ReadIds(state.Host.DatabasePath);
 
-        if (state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0")
+        if (state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0")
         {
+            if(state.EvaluationVersion=="1.6.0")
+            {
+                foreach(var field in Attribution16.AddressFields)
+                {
+                    var trial=new InvalidFieldObservation {Field=field}; result.AddressCases.Add(trial);
+                    var fresh=state.Session("invalid-fields-"+field);
+                    fresh.Get("/ShoppingCart/AddToCart/1");trial.Before=fresh.Get("/ShoppingCart");
+                    trial.OrdersBefore=OrderStore.ReadIds(state.Host.DatabasePath);
+                    var data=OrderFields("FREE").ToDictionary(x=>x.Key,x=>x.Value);data[field]="";
+                    trial.Response=fresh.PostForm("/Checkout/AddressAndPayment",data);
+                    trial.After=fresh.Get("/ShoppingCart");trial.OrdersAfter=OrderStore.ReadIds(state.Host.DatabasePath);
+                }
+                return result;
+            }
             var addressSession = state.Session("invalid-fields");
             addressSession.Get("/ShoppingCart/AddToCart/1");
             var originalCart = addressSession.Get("/ShoppingCart");
@@ -557,32 +617,43 @@ public static class Scenarios
         return result;
     });
 
-    public static IsolationResult RunIsolation(RunState state) => Guard(() =>
+    public static IsolationResult RunIsolation(RunState state) => Guard(state, new IsolationResult(), result =>
     {
         RequireReady(state);
-        var result = new IsolationResult();
         var sessionA = state.Session("isolation-a");
         var sessionB = state.Session("isolation-b");
 
         sessionA.Get("/ShoppingCart/AddToCart/1");
         var cartA = sessionA.Get("/ShoppingCart");
-        result.LinesInSessionA = Html.CartLines(cartA.Body);
-        result.TotalInSessionA = Html.Money(cartA.Body);
+        result.CartBeforeA=cartA;
+        result.LinesInSessionA = Html.CartLines(cartA.Body,state.EvaluationVersion);
+        result.TotalInSessionA = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(cartA.Body).Value:Html.Money(cartA.Body));
 
         var cartB = sessionB.Get("/ShoppingCart");
-        result.LinesInSessionB = Html.CartLines(cartB.Body);
-        result.TotalInSessionB = Html.Money(cartB.Body);
+        result.CartBeforeB=cartB;
+        result.LinesInSessionB = Html.CartLines(cartB.Body,state.EvaluationVersion);
+        result.TotalInSessionB = (state.EvaluationVersion=="1.6.0"?Attribution16.Money(cartB.Body).Value:Html.Money(cartB.Body));
 
-        if (state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0" && result.LinesInSessionA.Count == 1)
+        if (state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0" && result.LinesInSessionA.Count == 1
+            && (state.EvaluationVersion!="1.6.0" || cartA.Status==200 && cartB.Status==200
+                && Html.ObserveCart16(cartA.Body).Violations.Count==0 && Html.ObserveCart16(cartB.Body).Violations.Count==0 && Attribution16.Populated(result.LinesInSessionA)))
         {
             sessionB.PostForm("/ShoppingCart/RemoveFromCart", new Dictionary<string,string>
             { ["id"] = result.LinesInSessionA[0].RecordId.ToString(CultureInfo.InvariantCulture) });
+            result.ForeignRemovalObserved=true;
             var afterA = sessionA.Get("/ShoppingCart");
+            result.CartAfterA=afterA;
             var afterB = sessionB.Get("/ShoppingCart");
-            result.ForeignRemovalPreserved = Html.SameCart(cartA.Body, afterA.Body)
-                && Html.CartLines(cartB.Body).Select(x => (x.RecordId, x.AlbumId, x.Count))
-                    .SequenceEqual(Html.CartLines(afterB.Body).Select(x => (x.RecordId, x.AlbumId, x.Count)))
-                && Html.Money(cartB.Body).HasValue && Html.Money(cartB.Body) == Html.Money(afterB.Body);
+            result.CartAfterB=afterB;
+            result.ForeignRemovalPreserved = (state.EvaluationVersion=="1.6.0"
+                ? Html.CartLines(cartA.Body,state.EvaluationVersion).Select(x=>(x.AlbumId,x.Count)).OrderBy(x=>x).SequenceEqual(Html.CartLines(afterA.Body,state.EvaluationVersion).Select(x=>(x.AlbumId,x.Count)).OrderBy(x=>x))
+                    && Attribution16.Money(cartA.Body).Value.HasValue && Attribution16.Money(cartA.Body).Value==Attribution16.Money(afterA.Body).Value
+                : Html.SameCart(cartA.Body, afterA.Body))
+                && Html.CartLines(cartB.Body,state.EvaluationVersion).Select(x => (x.RecordId, x.AlbumId, x.Count))
+                    .SequenceEqual(Html.CartLines(afterB.Body,state.EvaluationVersion).Select(x => (x.RecordId, x.AlbumId, x.Count)))
+                && (state.EvaluationVersion=="1.6.0"?Attribution16.Money(cartB.Body).Value:Html.Money(cartB.Body)).HasValue
+                && (state.EvaluationVersion=="1.6.0"?Attribution16.Money(cartB.Body).Value:Html.Money(cartB.Body))
+                    == (state.EvaluationVersion=="1.6.0"?Attribution16.Money(afterB.Body).Value:Html.Money(afterB.Body));
         }
 
         return result;

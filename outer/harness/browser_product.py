@@ -90,7 +90,7 @@ def validated_checks(review, receipt, instance, artifact_hash, spec_hash):
         request = util.read_json(request_path)
         if any(request.get(k) != receipt.get(k) for k in
                ('runInstanceId', 'artifactSha256', 'specSha256', 'baseUrl', 'evaluationVersion')): return []
-        if request.get('evaluationVersion') not in ('education-1.1.0', '1.4.0', '1.5.0'): return []
+        if request.get('evaluationVersion') not in ('education-1.1.0', '1.4.0', '1.5.0', '1.6.0'): return []
         for item in receipt.get('productFailures', []):
             try:
                 ref = item['evidence']; path = (review/ref['path']).resolve()

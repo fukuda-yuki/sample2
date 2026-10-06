@@ -287,7 +287,11 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                 stopped = runtime.docker('rm', '-f', container_name, check=False)
                 if stopped.returncode != 0:
                     raise RuntimeError('Evaluator container stop could not be confirmed: ' + container_name)
-    if browser_required and not timed_out and exit_code == 0 and (http_out / 'evaluation.json').is_file():
+    if browser_required and browser_cart.http_phase_eligible(condition,http_out,
+            exit_code=exit_code,timed_out=timed_out,
+            cleanup_confirmed=container_name is None or stopped.returncode==0,
+            stopped=(run_dir/'STOP').exists(),frozen=frozen,artifact_hash=independent_hash,
+            spec=spec,spec_hash=spec_sha256,evaluator_hash=evaluator_sha256):
         if isolated:
             exit_code = browser_cart.complete_evaluation(repo, condition, frozen, http_out, work_dir / 'publish',
                 run_dir / 'evaluation-assets', temporary, manifest.get('run_instance_id'), sequence)

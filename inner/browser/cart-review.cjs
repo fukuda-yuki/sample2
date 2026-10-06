@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { chromium } = require('playwright');
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const out = process.argv[3];
-const repaired = ['1.4.0', '1.5.0'].includes(input.evaluationVersion);
+const repaired = ['1.4.0', '1.5.0', '1.6.0'].includes(input.evaluationVersion);
 const recorder = repaired ? require('./product-response.cjs').recorder : null;
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -28,17 +28,59 @@ if (repaired) conditions.productResponseHelperSha256 = sha(fs.readFileSync(path.
 
 // Read-only projection excludes rows hidden by the application's own UI updates.
 async function observe(page) {
-  return page.evaluate(() => {
+  return page.evaluate(genericRows => {
     const visible = e => !!(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden';
-    const rows = [...document.querySelectorAll('tr[id^="row-"]')].filter(visible);
+    const rows = [...document.querySelectorAll(genericRows ? '[id^="row-"]' : 'tr[id^="row-"]')].filter(visible);
     const totals = [...document.querySelectorAll('[id="cart-total"]')].filter(visible);
     const status = [...document.querySelectorAll('[id="cart-status"]')].filter(visible);
-    return {
+    const reasons = [], seen = new Set();
+    const integer = text => typeof text === 'string' && /^[0-9]+$/.test(text)
+      && Number(text) <= 2147483647 ? Number(text) : null;
+    const projected = rows.map(e => {
+      if (!genericRows) return { id: e.id, count: e.querySelector('[id="item-count-' + e.id.slice(4) + '"]')?.textContent.trim(),
+        album: [...e.querySelectorAll('a[href]')].map(a => new URL(a.href).pathname).find(p => /^\/Store\/Details\/\d+\/?$/i.test(p)) };
+      const record = integer(e.id.slice(4));
+      const counters = record === null ? [] : [...e.querySelectorAll('[id^="item-count-"]')]
+        .filter(counter => integer(counter.id.slice(11)) === record);
+      const count = counters.length === 1 ? integer(counters[0].textContent.trim()) : null;
+      const albums = [...new Set([...e.querySelectorAll('a[href]')].map(a => {
+        const match = /^\/Store\/Details\/([0-9]+)\/?$/i.exec(new URL(a.href).pathname);
+        return match ? integer(match[1]) : null;
+      }).filter(id => id !== null))];
+      if (record === null || seen.has(record) || count === null || albums.length !== 1)
+        reasons.push({ rowId: e.id, reason: 'invalid_or_ambiguous_row_identity_quantity_or_album' });
+      if (record !== null) seen.add(record);
+      // Keep every marker, including undecodable rows. Never drop malformed
+      // rows and then infer an empty cart from an empty decoded list.
+      return { id: e.id, count: count === null ? null : String(count),
+        album: albums.length === 1 ? '/Store/Details/' + albums[0] : null };
+    });
+    const orphans = genericRows ? [...document.querySelectorAll('[id^="item-count-"]')]
+      .filter(e => visible(e) && !rows.some(row => row.contains(e))) : [];
+    if (orphans.length) reasons.push({ reason: 'quantity_marker_without_declared_row', count: orphans.length });
+    function projectedMarkup(e) {
+      // HTML parsers discard standalone table cells. Preserve the observed
+      // element bytes inside valid table ancestry, without changing live DOM.
+      switch (e.tagName) {
+        case 'TD': case 'TH': return '<table><tbody><tr>' + e.outerHTML + '</tr></tbody></table>';
+        case 'TR': return '<table><tbody>' + e.outerHTML + '</tbody></table>';
+        case 'THEAD': case 'TBODY': case 'TFOOT': case 'CAPTION': case 'COLGROUP':
+          return '<table>' + e.outerHTML + '</table>';
+        case 'COL': return '<table><colgroup>' + e.outerHTML + '</colgroup></table>';
+        default: return e.outerHTML;
+      }
+    }
+    const selected = genericRows ? [...new Set([...rows, ...totals, ...status, ...orphans])] : [];
+    // Deduplicate projected DOM identities/containment, never marker IDs.
+    // A marker already inside a row is retained once; genuine duplicates stay.
+    const roots = selected.filter(e => !selected.some(parent => parent !== e && parent.contains?.(e)));
+    const state = {
       html: document.documentElement.outerHTML, url: location.href,
-      visibleCartHtml: '<table>' + rows.map(e => e.outerHTML).join('') + '<tr>' + totals.map(e => e.outerHTML).join('') + '</tr></table>' + status.map(e => e.outerHTML).join(''),
+      visibleCartHtml: genericRows
+        ? '<section>' + roots.map(projectedMarkup).join('') + '</section>'
+        : '<table>' + rows.map(e => e.outerHTML).join('') + '<tr>' + totals.map(e => e.outerHTML).join('') + '</tr></table>' + status.map(e => e.outerHTML).join(''),
       cartStatus: status.map(e => e.textContent.trim()),
-      rows: rows.map(e => ({ id: e.id, count: e.querySelector('[id="item-count-' + e.id.slice(4) + '"]')?.textContent.trim(),
-        album: [...e.querySelectorAll('a[href]')].map(a => new URL(a.href).pathname).find(p => /^\/Store\/Details\/\d+\/?$/i.test(p)) })),
+      rows: projected,
       totals: totals.map(e => e.textContent.trim()),
       // Keep potential alternate controls as evidence. A selector miss alone is
       // not proof of an absent feature (custom widgets remain unsupported).
@@ -46,21 +88,49 @@ async function observe(page) {
         .filter(e => !(e.matches('a[href]') && /^\/(Store(\/(Index|Browse|Details\/\d+))?|ShoppingCart|Checkout\/AddressAndPayment)?\/?$/i.test(new URL(e.href).pathname)))
         .map(e => e.outerHTML),
     };
-  });
+    if (genericRows) state.rowMarkerObservation = { kind: reasons.length ? 'unknown' : 'known', visibleMarkerCount: rows.length, reasons };
+    return state;
+  }, input.evaluationVersion === '1.6.0');
 }
 function matches(state, quantity) {
-  return state.totals.length === 1 && state.totals[0] === (input.price * quantity).toFixed(2)
+  if (input.evaluationVersion === '1.6.0' && state.rowMarkerObservation?.kind !== 'known') return false;
+  if (input.evaluationVersion === '1.6.0' && quantity > 0 && !positiveRowIdentity(state)) return false;
+  const total = input.evaluationVersion === '1.6.0' && state.totals.length === 1
+    ? moneyObservation(state.totals[0]) : null;
+  const expected = input.evaluationVersion === '1.6.0' ? moneyObservation((input.price * quantity).toFixed(2)) : null;
+  return state.totals.length === 1 && (input.evaluationVersion === '1.6.0'
+    ? total.kind === 'known' && expected.kind === 'known' && total.minor === expected.minor
+    : state.totals[0] === (input.price * quantity).toFixed(2))
     && (!input.requireCartStatus || state.cartStatus.length === 1 && state.cartStatus[0] === 'Cart (' + quantity + ')')
     && (quantity === 0 ? state.rows.length === 0 : state.rows.length === 1
       && state.rows[0].count === String(quantity) && state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId);
 }
 function populated(state, quantity) {
+  if (input.evaluationVersion === '1.6.0' && state.rowMarkerObservation?.kind !== 'known') return false;
+  if (input.evaluationVersion === '1.6.0' && !positiveRowIdentity(state)) return false;
   if (!input.structuralPrecondition) return matches(state, quantity);
   // A readable wrong price is a product defect, not inability to perform a
   // supported removal. Keep the independently expected price for judgement.
-  return state.totals.length === 1 && /^-?\d+\.\d{2}$/.test(state.totals[0])
+  return state.totals.length === 1 && (input.evaluationVersion === '1.6.0'
+    ? moneyObservation(state.totals[0]).kind === 'known' : /^-?\d+\.\d{2}$/.test(state.totals[0]))
     && state.rows.length === 1 && state.rows[0].count === String(quantity)
     && state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId;
+}
+function positiveRowIdentity(state) {
+  return state.rows.length === 1 && /^row-[0-9]+$/.test(state.rows[0].id)
+    && Number(state.rows[0].id.slice(4)) > 0 && Number(state.rows[0].id.slice(4)) <= 2147483647;
+}
+function moneyObservation(text) {
+  if (typeof text !== 'string' || !text.trim()) return { kind: 'invalid', reason: 'missing monetary marker value' };
+  const trimmed = text.trim();
+  const match = /^([+-]?)\s*(\p{Sc})?\s*([+-]?)\s*([0-9]+(?:\.[0-9]*)?)\s*(\p{Sc})?$/u.exec(trimmed);
+  if (!match || match[1] && match[3] || match[2] && match[5]) return { kind: 'unknown', reason: 'unsupported or ambiguous monetary representation' };
+  const numeric = (match[1] || match[3]) + match[4];
+  if (!/^[+-]?[0-9]+\.[0-9]{2}$/.test(numeric)) return { kind: 'invalid', reason: 'decimal point and two fractional digits required' };
+  const minor = BigInt(numeric.replace('.', ''));
+  const absolute = minor < 0n ? -minor : minor;
+  if (absolute > 79228162514264337593543950335n) return { kind: 'unknown', reason: 'outside exact decimal coefficient range' };
+  return { kind: 'known', minor: minor.toString() };
 }
 async function capture(page, tabId, name) {
   const state = await observe(page);
@@ -127,7 +197,8 @@ async function capture(page, tabId, name) {
             setupBefore: empty.dom, setupScreenshot: empty.screenshot, addCount: count });
         }
         if (!matches(empty.state, 0)) {
-          await unperformed(empty, 'not-run-precondition', 'empty_session_not_established');
+          await unperformed(empty, 'not-run-precondition', input.evaluationVersion === '1.6.0'
+            && empty.state.rowMarkerObservation.kind === 'unknown' ? 'cart_row_markers_unsupported' : 'empty_session_not_established');
           continue;
         }
         // Public AddToCart route is used only for preparation, before observation/click.
@@ -150,12 +221,16 @@ async function capture(page, tabId, name) {
         if (externalScriptFaults.length) throw new Error(checkId + ': external script observation incomplete: ' + JSON.stringify(externalScriptFaults));
         if (!populated(before.state, count)) {
           const knownQuantity = before.state.rows.length === 1 && /^\d+$/.test(before.state.rows[0].count)
-            && before.state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId;
-          await unperformed(before, 'not-run-precondition', count === 2 && knownQuantity
+            && before.state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId
+            && (input.evaluationVersion !== '1.6.0' || before.state.rowMarkerObservation.kind === 'known' && positiveRowIdentity(before.state));
+          await unperformed(before, 'not-run-precondition', input.evaluationVersion === '1.6.0'
+            && before.state.rowMarkerObservation.kind === 'unknown' ? 'cart_row_markers_unsupported'
+            : input.evaluationVersion === '1.6.0' && !positiveRowIdentity(before.state) ? 'positive_owned_row_id_not_established' : count === 2 && knownQuantity
             && before.state.rows[0].count !== '2' ? 'quantity_after_two_adds' : 'populated_state_not_established');
           continue;
         }
-        const row = page.locator('tr[id="' + before.state.rows[0].id + '"]');
+        const row = page.locator((input.evaluationVersion === '1.6.0' ? '[id="' : 'tr[id="')
+          + before.state.rows[0].id + '"]' + (input.evaluationVersion === '1.6.0' ? ':visible' : ''));
         // Public CSS identifier, semantic link/button name or form action; no implementation/Run-specific branch.
         const control = row.locator('.RemoveLink:visible, a[href*="RemoveFromCart"]:visible, form[action*="RemoveFromCart"] button:visible, form[action*="RemoveFromCart"] input[type="submit"]:visible')
           .or(row.getByRole('link', { name: /remove|delete|削除/i })).or(row.getByRole('button', { name: /remove|delete|削除/i }));

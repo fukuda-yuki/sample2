@@ -1,5 +1,7 @@
 # 評価器修正と有限受入の状態
 
+最新の実行数・検証・公開と残工程は[終了確認の現在地](evaluator-repair-closeout-20261006.md)を参照する。以下は各固定版での修正・実行履歴であり、最新状態へ置換しない。
+
 修正ソースは `6638246d8a0286647dfc338ca57efe8526c6504f` に固定した。原100ペア・200 Run、旧採点、凍結評価器、公開v1/v2の成果物は保全している。新モデル取得は行っていない。
 
 ## 修正と正解の根拠
@@ -77,6 +79,24 @@
 2件の原本・assessment bytes不変、所有container/network cleanup完了、reported DLL一致、observer fault 0件を確認した。5067のHTTP evidenceには削除POSTが存在しない。C-015のブラウザー成功で欠けたHTTP JSONを埋めず、C-016の未実施も保持する。先の1.4/Educationの5 assessment bytesと初回結果も不変である。合計7回の保存生成物評価は元の独立Run数へ加算しない。
 
 最初の1.5準備は長いdestinationでWinError206となった。assessment.json/execution-config/outputの作成前に停止し、scorer/browser起動0を確認した。失敗したコピーとv1計画を保全し、短い新rootのv2計画で同じ2保存例を準備した。原本全inventoryを再確認して実行したため、曖昧な再送ではない。準備失敗1件を評価成功数に含めない。
+
+## 継続中の全体受入
+
+上記は有限な評価器修正の実証であり、依頼された次取得→判定→公開の全体受入は未完だった。実評価7回の対象は5つの保存生成物で、うち2生成物を別評価版1.5で再評価した。独立した7 Runや新モデル取得として数えない。親の受入範囲再確認に従い、C014/注文系の具体的な失敗帰属、実dispatcher/session/停止ACKを含む非モデル2campaign＋再評価、専用公開packageの匿名download/別folder再現を継続する。旧7評価と原データは保全し、追加の修正・結果は別保存する。
+
+### Music1.6の実HTTP評価と制御経路の不備
+
+Music1.6の帰属修正は別commit `c39894822bceecc6f11d5e17cf4eab50048f29f2`、別DLL SHA256 `eb62763802d6b11d0b5a5915f3454fb727775fbe76d6c3e24406082168938f0d` に固定した。[帰属の校正と限定](evaluator-attribution-acceptance-20261006.md)の同一入力による旧版失敗・新版成功5例、配布DLL220 assertions、共通金額58 assertions、legacy24例、同SDK・同compile pathの二重build一致を確認した。
+
+固定した保存5011・5061・5067・5096の実HTTP評価4件は別rootで終了し、原本不変・所有資源終了を確認した。ただし1.6の正常なHTTP部分評価の終了コード2を外側controllerが拒否し、4件とも必須ブラウザーは起動しなかった。5096のHTTP33checkはpassだったが、品質はnullである。これを製品退行、完全評価成功、評価器故障なしによる品質保証とは扱わない。旧4件の実結果は保全し、制御経路の修正後は新root・新assessment UUIDで同じ4生成物を評価する。
+
+旧HTTP-only assessmentは5011=`94b8952b113e4339aea34ec471b9550a`、5061=`b8fbf64be23a40e6a7737f1649abbf61`、5067=`b704cf16b9db435c9bed6453c546d559`、5096=`19329d73eb5f47698808618b345a7f7c`。固定計画SHAは `119a1b9a515a2f16c5e20cc6f6b6eafe4a63e6654e2dbff5405d1c0db32342b0`、実4件aggregate SHAは `3c5b6ecb0327b4d11d88280d22b5be69b70242e1061a36df4cfd4ff3b719e620`。ブラウザー未実行の4件は独立validation済み評価へ昇格させない。
+
+### 非モデル運用の未実行試行と復旧
+
+`op6b`のroot監督は原本の重複した実行前検証中にtool sessionと実controllerを観測できなくなった。終了receiptはなく、終了原因は未確認である。実OS照合でcontroller/wrapper不在を確認し、campaign・observer・runtime・dispatch記録が作られる前だったことを確認した。SDK session・dummy Run・モデル呼出しはすべて0。失われた試行を成功に数えず、同一割付の曖昧な再送もしない。保全receipt SHAは `71d3a9417c1ac29520aa0483bf1aa598fec96e8b7cd9716f373073f6256b2dc1`。
+
+新計画は排他的な別root・新4 Run UUIDで準備する。既に確定した8保護tree・240,224ファイルの実行前inventory SHA `c737285624c9b9e0fb37b37b449dded18ea8828ccc4d7c52ac4a003edbec56c0` を再利用し、そのhash・保護対象・コピー入力・分離を検証する。実行後の原本全bytes照合は省略せず、不一致・未完了なら運用受入を合格にしない。実SDK/session起動、途中停止、保存、実公開、匿名復元・再計算はこの段階では未実測である。
 
 ## 次取得を判断する境界
 

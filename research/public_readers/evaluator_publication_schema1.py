@@ -13,7 +13,7 @@ import re
 import uuid
 import zipfile
 
-SCHEMA = 2
+SCHEMA = 1
 MAX_BYTES = 64 * 1024 * 1024
 JUDGEMENTS = {'pass', 'fail', 'blocked', 'error', None}
 ROW_KEYS = {'kind', 'assessment_id', 'validation_id', 'source_run_id', 'source_run_instance_id',
@@ -308,7 +308,7 @@ def derive_assessment(row,scope=None):
         'model_calls':0, 'new_acquisition_runs':0}
 
 
-def _derive_assessments_only(data):
+def derive(data):
     required={'schema_version','kind','original_experiment','assessments','operational_acceptance'}
     require(required<=set(data)<=required|{'observation_scopes'}, 'Unreviewed dataset fields')
     require(data['schema_version']==SCHEMA and data['kind']=='evaluator_repair_public_projection', 'Unknown dataset schema')
@@ -397,7 +397,6 @@ def validate_operational(value):
 README = '''# 評価器修正と保存生成物の別版再評価
 
 INDEX.md → report/REPORT.md → data/assessments.json → code/evaluator_publication.py の順に読めます。
-schema2は報告用assessment行と未検証HTTP-only試行を別type・別fileで保全します。未検証試行はquality null・validation ID nullのままです。
 原100ペア・200 Runと今回の保存再評価は異なる単位です。モデル呼出し・新取得Run増分は0です。
 異なる評価版のassessmentを元Run UUID・artifact SHAへ結合し、旧評価を置き換えません。
 非モデルの2 campaign / 4 dummy Run / 1 reassessmentは研究サンプルへ加算しません。
@@ -437,9 +436,29 @@ def package_inventory(root):
     return dict(sorted(result.items()))
 
 
+def seal_package(destination, *, data, report, policy, operational_code=None):
+    summary=derive(data)
+    check_policy(data,policy)
+    require(isinstance(report,bytes) and report and re.fullmatch(r'[A-Za-z0-9_-]+',policy['package_id']), 'Report and safe package ID required')
+    public_text(report.decode('utf8'))
+    destination=Path(destination).resolve();require(not destination.exists(), 'Package destination already exists')
+    files={'INDEX.md':b'[Report](report/REPORT.md) | [Data](data/assessments.json) | [Offline reproduction](README-ja.md)\n',
+        'README-ja.md':README.encode(), 'report/REPORT.md':report,'data/assessments.json':encode(data),
+        'results/summary.json':encode(summary),'code/evaluator_publication.py':Path(__file__).read_bytes(),
+        'NOTICE.txt':b'This package contains an explicit reviewed projection of research metadata and a new standard-library recomputation reader. No private oracle, evaluator binary, database, raw log, or third-party application source is included. This notice does not grant a blanket license for the original repository or omitted third-party materials.\n'}
+    for name,content in (operational_code or {}).items():
+        relative(name);require(name.startswith('code/') and name not in files and isinstance(content,bytes), 'Explicit extra code allowlist only')
+        public_text(content.decode('utf8'));files[name]=content
+    destination.mkdir(parents=True,exist_ok=False)
+    for name,content in files.items():
+        p=destination/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(content)
+    manifest={'schema_version':SCHEMA,'kind':'sealed_evaluator_repair_public_package','package_id':policy['package_id'],
+        'seal_policy':policy,'files':package_inventory(destination),'limits':'Public derived recomputation, not private-oracle evaluator replay'}
+    (destination/'MANIFEST.json').write_bytes(encode(manifest))
+    return manifest
 
 
-def _check_assessment_policy_only(data,policy):
+def check_policy(data,policy):
     require(set(policy)=={'package_id','expected_assessment_ids','expected_assessment_versions','required_history_assessment_ids',
         'required_history_row_sha256','required_evaluation_versions','required_phase'}, 'Explicit exact seal policy required')
     ids={r['assessment_id'] for r in data['assessments']}
@@ -461,6 +480,17 @@ def _check_assessment_policy_only(data,policy):
     require(policy['required_phase']==data['operational_acceptance']['publication_phase'], 'Package phase differs from observed operational phase')
 
 
+def verify_package(root, expected_manifest_sha256):
+    root=Path(root).resolve();require(sha(root/'MANIFEST.json')==hash_value(expected_manifest_sha256), 'Manifest external digest mismatch')
+    manifest=read(root/'MANIFEST.json')
+    require(manifest.get('schema_version')==SCHEMA and manifest.get('kind')=='sealed_evaluator_repair_public_package', 'Package not sealed')
+    require(package_inventory(root)==manifest['files'], 'Package bytes or inventory mismatch')
+    names=list(manifest['files']);require(len(names)==len({n.casefold() for n in names}), 'Nonportable case alias')
+    require(all(n in manifest['files'] for n in ('INDEX.md','README-ja.md','data/assessments.json','results/summary.json','report/REPORT.md','code/evaluator_publication.py')), 'Reader route missing')
+    data=read(root/'data/assessments.json');summary=derive(data);policy=manifest['seal_policy']
+    check_policy(data,policy)
+    require(encode(summary)==(root/'results/summary.json').read_bytes(), 'Recomputation differs from published summary')
+    return manifest,summary
 
 
 def reproduce(root, output, expected_manifest_sha256):
@@ -472,9 +502,6 @@ def reproduce(root, output, expected_manifest_sha256):
     receipt={'schema_version':SCHEMA,'kind':'actual_public_recomputation','package_id':manifest['package_id'],
         'manifest_sha256':expected_manifest_sha256,'summary_sha256':sha(output/'summary.json'),
         'verified_file_count':len(manifest['files']),'saved_assessment_count':summary['saved_assessment_count'],
-        'reported_assessment_count':summary['reported_assessment_count'],
-        'all_saved_reassessment_attempt_count':summary['all_saved_reassessment_attempt_count'],
-        'unvalidated_http_only_attempt_count':summary['unvalidated_http_only_attempt_count'],
         'model_calls':0,'new_acquisition_runs':0,'all_derived_bytes_match':True}
     (output/'receipt.json').write_bytes(encode(receipt));return receipt
 
@@ -484,188 +511,6 @@ def zip_package(root,destination,expected_manifest_sha256):
     with Path(destination).open('xb') as stream,zipfile.ZipFile(stream,'w',zipfile.ZIP_DEFLATED) as z:
         for name in sorted([*manifest['files'],'MANIFEST.json']):z.write(Path(root)/name,name)
     return sha(destination)
-
-
-
-# Schema2 adds immutable, unvalidated HTTP-only attempt records. The assessment
-# row schema remains unchanged; quality is derived only from receipted rows.
-ATTEMPT_KEYS = set(['acquisition_count_increment', 'assessment_id', 'browser_exit_code', 'browser_started', 'cleanup_confirmed', 'evaluation_version', 'evaluator_exit_code', 'evaluator_sha256', 'http_check_judgement_counts', 'http_has_observer_faults', 'http_has_unknown_observations', 'http_raw_research_status', 'http_raw_verdict', 'http_requirement_judgement_counts', 'kind', 'model_calls', 'new_spec_sha256', 'observed_stage', 'pipeline_complete', 'pipeline_gate_fault', 'plan_commit_declared', 'plan_sha256', 'provenance', 'quality', 'source_artifact_sha256', 'source_bytes_unchanged', 'source_campaign_identity_status', 'source_campaign_uuid', 'source_condition_sha256', 'source_evaluation_version', 'source_run_id', 'source_run_instance_id', 'source_spec_sha256', 'validated', 'validation_id'])
-ATTEMPT_PROVENANCE_KEYS = set(['assessment_metadata_sha256', 'evaluator_manifest_sha256', 'fixed_aggregate_sha256', 'http_evaluation_json_sha256', 'http_results_jsonl_sha256', 'initial_result_sha256', 'observed_stage_inventory_sha256'])
-ATTEMPTS_PATH = 'data/assessment-attempts.json'
-
-
-def normalize_unvalidated_attempt(*, stage, plan, aggregate, expected_plan_sha256, expected_aggregate_sha256):
-    """Preserve a pinned HTTP-only gate failure without asserting validation.
-
-    Binding checks here make a public projection eligible. They do not execute
-    the evaluator, create a validation receipt or adopt any numeric quality.
-    Source/cleanup booleans are copied from the historical execution receipt.
-    """
-    stage,plan,aggregate=Path(stage),Path(plan),Path(aggregate)
-    require(sha(plan)==hash_value(expected_plan_sha256) and sha(aggregate)==hash_value(expected_aggregate_sha256), 'Pinned attempt input changed')
-    before=evidence_inventory_digest(stage)
-    plan_data,group=read(plan),read(aggregate)
-    require(group['plan_sha256']==expected_plan_sha256, 'Attempt plan/aggregate mismatch')
-    for record in (plan_data,group):
-        for name in ('model_calls','acquisition_count_increment'):
-            require(type(record[name]) is int and record[name]==0, 'Attempt input cannot add model acquisition')
-    a,r=read(stage/'assessment.json'),read(stage/'result.json')
-    cases=[c for c in group['cases'] if c['assessment_id']==a['assessment_id']]
-    require(len(cases)==1 and cases[0]['source_run_id']==a['source_run_id'], 'Attempt not in fixed aggregate')
-    require(all(cases[0].get(k)==value for k,value in r.items()), 'Initial attempt result differs from fixed aggregate')
-    output=stage/'output/http-only';result=read(output/'evaluation.json');manifest=read(output/'evaluator-manifest.json')
-    require(isinstance(r.get('raw_result'),str), 'Attempt raw result reference missing')
-    raw_path=Path(r['raw_result']);raw_path=raw_path if raw_path.is_absolute() else stage/raw_path
-    require(raw_path.resolve()==(output/'evaluation.json').resolve(), 'Attempt raw result reference mismatch')
-    require(a['assessment_id']==r['assessment_id'] and a['evaluation_version']==result['evaluationVersion']==manifest['evaluationVersion']=='1.6.0', 'Attempt identity/version mismatch')
-    require(result['artifactSha256']==manifest['artifactSha256']==a['source_artifact_sha256'], 'Attempt artifact mismatch')
-    require(result['specSha256']==manifest['specSha256']==a['new_spec_sha256']==sha(stage/'evaluation-assets/requirements.json'), 'Attempt spec mismatch')
-    require(manifest['evaluatorSha256']==a['evaluator_sha256']==sha(stage/'evaluation-assets/evaluator/MusicStore.Evaluator.dll'), 'Attempt actual DLL mismatch')
-    require(r['evaluator_exit_code']==2 and r.get('browser_exit_code') is None and r['adopted'] is False
-        and r['quality'] is None and r['full_bound_browser_observation'] is False, 'Attempt cannot represent completed browser validation')
-    require(not (stage/'output/evaluation.json').exists() and not (stage/'output/results.jsonl').exists(), 'Attempt has composed output; classification needs review')
-    checks=[json.loads(line) for line in (output/'results.jsonl').read_text(encoding='utf8').splitlines() if line.strip()]
-    require(len(checks)==len({(c['requirementId'],c['checkId']) for c in checks}), 'Duplicate HTTP attempt check')
-    row={'kind':'unvalidated_saved_reassessment_attempt','assessment_id':a['assessment_id'],
-        'validation_id':None,'validated':False,'quality':None,
-        **{name:a[name] for name in ('source_run_id','source_run_instance_id','source_artifact_sha256','source_condition_sha256',
-            'source_spec_sha256','source_evaluation_version','evaluation_version','evaluator_sha256','new_spec_sha256')},
-        'source_campaign_uuid':None,'source_campaign_identity_status':'caller_asserted_unverified',
-        'plan_commit_declared':plan_data['source_commit'],'plan_sha256':expected_plan_sha256,
-        'observed_stage':'http_only','browser_started':False,'pipeline_complete':False,
-        'pipeline_gate_fault':'http_exit2_rejected_before_browser','evaluator_exit_code':2,'browser_exit_code':None,
-        'cleanup_confirmed':r['cleanup_confirmed'],'source_bytes_unchanged':r['source_unchanged'],
-        'model_calls':0,'acquisition_count_increment':0,'http_raw_verdict':result['verdict'],'http_raw_research_status':result.get('researchStatus'),
-        'http_requirement_judgement_counts':dict(sorted(Counter(x.get('judgement') or 'unknown' for x in result['requirements']).items())),
-        'http_check_judgement_counts':dict(sorted(Counter(x.get('judgement') or 'unknown' for x in checks).items())),
-        'http_has_unknown_observations':bool(result.get('uncheckedScope')) or any(x.get('unknownObservations') or x.get('judgement') in ('blocked',None) for x in checks),
-        'http_has_observer_faults':bool(result.get('evaluatorFaults')) or any(x.get('observationFaults') or x.get('judgement')=='error' for x in checks),
-        'provenance':{'assessment_metadata_sha256':sha(stage/'assessment.json'),'initial_result_sha256':sha(stage/'result.json'),
-            'http_evaluation_json_sha256':sha(output/'evaluation.json'),'http_results_jsonl_sha256':sha(output/'results.jsonl'),
-            'evaluator_manifest_sha256':sha(output/'evaluator-manifest.json'),'fixed_aggregate_sha256':expected_aggregate_sha256,
-            'observed_stage_inventory_sha256':before}}
-    validate_attempt(row)
-    require(evidence_inventory_digest(stage)==before, 'Attempt projection changed stage bytes')
-    return row
-
-
-def validate_attempt(row):
-    require(set(row)==ATTEMPT_KEYS and row['kind']=='unvalidated_saved_reassessment_attempt', 'Unreviewed attempt fields')
-    identity(row['assessment_id']);identity(row['source_run_instance_id'])
-    require(re.fullmatch(r'[A-Za-z0-9_-]+',row['source_run_id']), 'Unsafe source Run label')
-    require(row['validation_id'] is None and row['validated'] is False and row['quality'] is None, 'Unvalidated attempt cannot adopt quality or a validation ID')
-    require(row['source_campaign_uuid'] is None and row['source_campaign_identity_status']=='caller_asserted_unverified', 'Do not invent campaign identity')
-    for name in ('source_artifact_sha256','source_condition_sha256','source_spec_sha256','new_spec_sha256','evaluator_sha256','plan_sha256'):hash_value(row[name])
-    require(re.fullmatch(r'[a-f0-9]{7,40}',row['plan_commit_declared']), 'Invalid declared attempt commit')
-    require(row['evaluation_version']=='1.6.0' and re.fullmatch(r'[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*',row['source_evaluation_version']), 'Unreviewed gate-fault version')
-    require(row['observed_stage']=='http_only' and row['browser_started'] is False and row['pipeline_complete'] is False
-        and row['pipeline_gate_fault']=='http_exit2_rejected_before_browser', 'Unreviewed or promoted pipeline attempt')
-    require(type(row['evaluator_exit_code']) is int and row['evaluator_exit_code']==2 and row['browser_exit_code'] is None, 'Observed pipeline exit mismatch')
-    require(row['cleanup_confirmed'] is True and row['source_bytes_unchanged'] is True, 'Attempt preservation/cleanup confirmation missing')
-    for name in ('model_calls','acquisition_count_increment'):require(type(row[name]) is int and row[name]==0, 'Attempt cannot add model acquisition')
-    require(row['http_raw_verdict'] in ('pass','pass_auto','fail','fail_critical','blocked','error')
-        and row['http_raw_research_status'] in ('complete','incomplete'), 'Invalid HTTP diagnostic state')
-    for name,total in (('http_requirement_judgement_counts',31),('http_check_judgement_counts',33)):
-        counts=row[name];require(isinstance(counts,dict) and set(counts)<={'pass','fail','blocked','error','unknown'}
-            and all(type(n) is int and n>=0 for n in counts.values()) and sum(counts.values())==total, 'HTTP diagnostic inventory mismatch')
-    for name in ('http_has_unknown_observations','http_has_observer_faults'):require(type(row[name]) is bool, 'Expected coarse attempt boolean')
-    require(set(row['provenance'])==ATTEMPT_PROVENANCE_KEYS, 'Unreviewed attempt provenance')
-    for digest in row['provenance'].values():hash_value(digest)
-    public_text(row)
-
-
-def validate_attempt_sidecar(data,attempts):
-    require(isinstance(attempts,dict) and set(attempts)=={'schema_version','kind','attempts','limits'}
-        and attempts['schema_version']==SCHEMA and attempts['kind']=='unvalidated_saved_reassessment_attempts', 'Unknown attempt sidecar schema')
-    require(isinstance(attempts['limits'],list) and all(isinstance(s,str) for s in attempts['limits']), 'Expected attempt limitations')
-    reference=data['attempts_reference']
-    require(set(reference)=={'path','sha256'} and relative(reference['path'])==ATTEMPTS_PATH
-        and hash_value(reference['sha256'])==hashlib.sha256(encode(attempts)).hexdigest(), 'Attempt reference/path/digest mismatch')
-    rows=attempts['attempts'];require(isinstance(rows,list) and len(rows)==4, 'Preserve exactly the four HTTP-only attempts')
-    ids=[r['assessment_id'] for r in rows];require(len(ids)==len(set(ids)), 'Duplicate attempt UUID')
-    followups=data['attempt_followups']
-    require(isinstance(followups,dict) and set(followups)==set(ids) and len(set(followups.values()))==4,
-        'Exact four distinct designated attempt followups required')
-    for target in followups.values():identity(target)
-    main=data['assessments'];main_ids={r['assessment_id'] for r in main}|{r['validation_id'] for r in main}
-    require(not set(ids)&main_ids, 'Attempt and assessment/validation UUID collide')
-    for row in rows:
-        validate_attempt(row)
-        matches=[r for r in main if r['assessment_id']==followups[row['assessment_id']]]
-        require(len(matches)==1, 'Designated attempt followup is missing')
-        match=matches[0]
-        for name in ('source_run_id','source_run_instance_id','source_artifact_sha256','source_condition_sha256','source_spec_sha256','source_evaluation_version','evaluation_version','evaluator_sha256','new_spec_sha256'):
-            require(match[name]==row[name], 'Attempt/followup lineage mismatch: '+name)
-    public_text(attempts)
-
-
-def derive(data,attempts=None):
-    require({'attempts_reference','attempt_followups'}<=set(data), 'Explicit schema2 attempt reference and followups required')
-    core={k:v for k,v in data.items() if k not in ('attempts_reference','attempt_followups')}
-    summary=_derive_assessments_only(core)
-    validate_attempt_sidecar(data,attempts)
-    rows=attempts['attempts']
-    summary.update(reported_assessment_count=len(data['assessments']),
-        all_saved_reassessment_attempt_count=len(data['assessments'])+len(rows),
-        unvalidated_http_only_attempt_count=len(rows),
-        unvalidated_pipeline_gate_fault_count=len(rows),
-        unvalidated_http_observer_fault_count=sum(r['http_has_observer_faults'] for r in rows),
-        unvalidated_http_unknown_scope_count=sum(r['http_has_unknown_observations'] for r in rows),
-        unvalidated_attempts=[{'assessment_id':r['assessment_id'],'source_run_instance_id':r['source_run_instance_id'],
-            'followup_assessment_id':data['attempt_followups'][r['assessment_id']],
-            'evaluation_version':r['evaluation_version'],'quality':None,'validated':False,'validation_id':None,
-            'pipeline_gate_fault':r['pipeline_gate_fault'],'model_calls':0,'new_acquisition_runs':0} for r in sorted(rows,key=lambda r:r['assessment_id'])])
-    return summary
-
-
-def check_policy(data,policy,attempts=None):
-    extra={'expected_unvalidated_attempt_ids','required_unvalidated_attempt_row_sha256','expected_attempt_followups'}
-    require(extra<=set(policy), 'Exact immutable HTTP-only attempt policy required')
-    core={k:v for k,v in policy.items() if k not in extra}
-    _check_assessment_policy_only(data,core)
-    validate_attempt_sidecar(data,attempts)
-    require(policy['expected_attempt_followups']==data['attempt_followups'], 'Designated followup differs from exact policy')
-    ids={r['assessment_id'] for r in attempts['attempts']};expected=policy['expected_unvalidated_attempt_ids']
-    require(len(expected)==4 and len(set(expected))==4 and ids==set(expected), 'Unfilled or unexpected HTTP-only attempt slot')
-    hashes=policy['required_unvalidated_attempt_row_sha256']
-    require(isinstance(hashes,dict) and set(hashes)==ids, 'Pin all immutable HTTP-only attempts')
-    for row in attempts['attempts']:
-        require(hashlib.sha256(encode(row)).hexdigest()==hash_value(hashes[row['assessment_id']]), 'Preserved HTTP-only attempt changed')
-
-
-def seal_package(destination, *, data, report, policy, attempts=None, operational_code=None):
-    summary=derive(data,attempts);check_policy(data,policy,attempts)
-    require(isinstance(report,bytes) and report and re.fullmatch(r'[A-Za-z0-9_-]+',policy['package_id']), 'Report and safe package ID required')
-    public_text(report.decode('utf8'))
-    destination=Path(destination).resolve();require(not destination.exists(), 'Package destination already exists')
-    files={'INDEX.md':b'[Report](report/REPORT.md) | [Assessments](data/assessments.json) | [Unvalidated HTTP-only attempts](data/assessment-attempts.json) | [Offline reproduction](README-ja.md)\n',
-        'README-ja.md':README.encode(), 'report/REPORT.md':report,'data/assessments.json':encode(data),
-        ATTEMPTS_PATH:encode(attempts),'results/summary.json':encode(summary),'code/evaluator_publication.py':Path(__file__).read_bytes(),
-        'NOTICE.txt':b'This package contains reviewed metadata projections and an authored standard-library derived-value reader. It excludes private oracles, evaluator binaries, databases, raw logs and third-party application source. This notice grants no blanket license for omitted materials.\n'}
-    for name,content in (operational_code or {}).items():
-        relative(name);require(name.startswith('code/') and name not in files and isinstance(content,bytes), 'Explicit extra code allowlist only')
-        public_text(content.decode('utf8'));files[name]=content
-    destination.mkdir(parents=True,exist_ok=False)
-    for name,content in files.items():
-        path=destination/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(content)
-    manifest={'schema_version':SCHEMA,'kind':'sealed_evaluator_repair_public_package','package_id':policy['package_id'],
-        'seal_policy':policy,'files':package_inventory(destination),'limits':'Derived-value recomputation; unvalidated attempts remain quality null; no private-oracle scoring replay'}
-    (destination/'MANIFEST.json').write_bytes(encode(manifest));return manifest
-
-
-def verify_package(root,expected_manifest_sha256):
-    root=Path(root).resolve();require(sha(root/'MANIFEST.json')==hash_value(expected_manifest_sha256), 'Manifest external digest mismatch')
-    manifest=read(root/'MANIFEST.json')
-    require(manifest.get('schema_version')==SCHEMA and manifest.get('kind')=='sealed_evaluator_repair_public_package', 'Package not schema2 sealed')
-    require(package_inventory(root)==manifest['files'], 'Package bytes or inventory mismatch')
-    names=list(manifest['files']);require(len(names)==len({n.casefold() for n in names}), 'Nonportable case alias')
-    require(all(n in manifest['files'] for n in ('INDEX.md','README-ja.md','data/assessments.json',ATTEMPTS_PATH,
-        'results/summary.json','report/REPORT.md','code/evaluator_publication.py')), 'Reader/attempt route missing')
-    data=read(root/'data/assessments.json');attempts=read(root/ATTEMPTS_PATH)
-    require(sha(root/ATTEMPTS_PATH)==hash_value(data['attempts_reference']['sha256']), 'Attempt sidecar bytes changed')
-    summary=derive(data,attempts);check_policy(data,manifest['seal_policy'],attempts)
-    require(encode(summary)==(root/'results/summary.json').read_bytes(), 'Recomputation differs from published summary')
-    return manifest,summary
 
 
 def main():

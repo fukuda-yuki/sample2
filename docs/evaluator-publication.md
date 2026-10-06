@@ -4,6 +4,11 @@
 公開JSONだけからの報告値再計算を担当する。標準ライブラリだけを使い、provider・
 評価器・browser・Docker・Gitを呼ばない。原100ペアの公開物を置き換えない。
 
+現行readerはschema2である。schema1の凍結sourceは
+`research/public_readers/evaluator_publication_schema1.py`へbyte一致で保存した
+（SHA `636bbef89e836db6b75d590168082530f4e3f062a54506535b10c4e2e0ce5f28`）。
+旧7assessment rowとそのcanonical SHAは変更しない。
+
 入力は明示したassessment root、固定validation receipt SHA、事前計画である。
 `normalize_assessment`は固定validation digestとassessment全体のbyte inventory、保存出力・baseline両hashを照合し、UUID、親Run UUID、
 artifact/spec/DLL SHA、計画commitの宣言、台帳IDと判定ラベル、coarse確認だけを出力する。
@@ -40,6 +45,9 @@ required_history_assessment_ids  # 保全する原7assessment、重複なし
 required_history_row_sha256      # 原7公開行のcanonical JSON SHA
 required_evaluation_versions     # 新分類revisionを含む必須版
 required_phase                  # prepublication / final
+expected_unvalidated_attempt_ids # 旧HTTP-only 4 UUIDの正確な集合
+required_unvalidated_attempt_row_sha256 # 保全する旧4公開行のcanonical SHA
+expected_attempt_followups       # 旧HTTP-only UUID -> 指定する直接followup UUID
 ```
 
 新revisionの評価が未完了、operational receiptが未提供、IDの欠測・余分・衝突がある
@@ -52,6 +60,33 @@ packageにはINDEX、report、最小data、derived results、reader、README、N
 相対pathのmanifestを含める。追加コードもoperatorの明示allowlistだけを使う。
 公開review前にstaging全体を自動収集したり、private入力設定をZIPへ入れない。
 NOTICEは原repoや第三者素材への包括的licenseを作るものではない。
+
+## 未検証試行を分けるschema2
+
+main dataは固定relative path `data/assessment-attempts.json`とそのSHAを
+`attempts_reference`へ持つ。sidecarは別typeのHTTP-only 4試行を保全する。
+UUID、源Run/生成物/spec/DLL/版/計画commitの結合と、raw result・HTTP output・check rowsの
+SHAを保持する。validation IDはnull、validatedはfalse、qualityはnullのままである。
+HTTP診断の判定countsやunknown/fault boolを、採用済み品質へ変換しない。
+
+`normalize_unvalidated_attempt`のbyte binding照合は公開投影の入力適格性確認であり、
+独立validation receiptの作成や採用成功を意味しない。source unchanged/cleanupは
+旧実行receiptからのcoarse確認として扱う。旧4件の原本を書き換えない。
+
+`derive(data, attempts=sidecar)`と`seal_package(..., attempts=sidecar)`は明示的に両fileを扱う。
+`attempt_followups`は旧HTTP-only UUIDから直接followup UUIDへの明示mapであり、policyと一致させる。
+旧試行はmainの指定するちょうど1件の1.6評価へ同じ源Run UUID・artifact・spec・DLLで結合する。
+followupという関係からvalidation成功や品質採用を推定しない。同じ源生成物の追加collector修復評価も
+別UUIDのmain行として保全する。版と源Runだけで複数行のどれかを自動選択しない。
+main/validation UUIDとの衝突、旧4行の改変、missing sidecar、品質昇格、異なる源生成物を拒否する。
+新4件と実運用receiptが揃う前にはsealしない。
+
+報告用assessment行N、未検証HTTP-only試行4、保存再評価の全試行N+4、源生成物のunique数を
+別の指標として実行済みIDから再計算する。現在の計画は原7行とcontroller/collector修復の各4行を
+保全する計15行・19試行・源7 uniqueであり、実証が揃う前に完了とは呼ばない。
+Nは全件の数値品質採用を意味しない。complete/partialと品質はmain行からのみ
+再計算する。非モデル運用の4dummy Run/1assessmentは15や源7へ加算しない。
+recompute receiptにも報告行数・全試行数・未検証試行数を別fieldで保存する。
 
 ## 読者の再計算
 

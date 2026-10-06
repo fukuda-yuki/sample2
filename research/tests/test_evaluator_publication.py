@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import uuid
 
-from research import evaluator_publication as public
+from research.public_readers import evaluator_publication_schema1 as public
 
 
 def uid(value): return uuid.uuid5(uuid.NAMESPACE_URL, 'publication-fixture/' + value).hex

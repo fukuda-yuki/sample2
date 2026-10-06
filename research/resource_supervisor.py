@@ -26,9 +26,10 @@ FIXTURE_KIND = 'nonmodel_resource_supervisor_fixture_v1'
 LIVE_PILOT_KIND = 'live_go_readiness_pilot_observer_v1'
 REPAIRED_MAIN_KIND = 'source_info_repaired_v6_main'
 RECOVERY_KIND = 'repaired_pilot_readiness_recovery_observer_v1'
+TRIAL_KIND = 'education_go_readiness_trial_observer_v1'
 CADENCE_SECONDS, STALE_SECONDS = 10, 30
 STARTUP_SECONDS = 60
-STARTUP_KINDS = (REPAIRED_MAIN_KIND, RECOVERY_KIND)
+STARTUP_KINDS = (REPAIRED_MAIN_KIND, RECOVERY_KIND, TRIAL_KIND)
 
 
 def now():
@@ -308,10 +309,10 @@ class Supervisor:
         self.phase_path = checked(config['phase'])
         self.phase = util.read_json(self.phase_path)
         self.phase['_digest'] = config['phase']['sha256']
-        if self.phase['kind'] not in (KIND, V9_KIND, V10_KIND, FIXTURE_KIND, LIVE_PILOT_KIND, REPAIRED_MAIN_KIND, RECOVERY_KIND):
+        if self.phase['kind'] not in (KIND, V9_KIND, V10_KIND, FIXTURE_KIND, LIVE_PILOT_KIND, REPAIRED_MAIN_KIND, RECOVERY_KIND, TRIAL_KIND):
             raise ValueError('Independent observer requires its explicit frozen phase')
         source_root = Path(__file__).resolve().parents[1]
-        if self.phase['kind'] in (LIVE_PILOT_KIND, REPAIRED_MAIN_KIND, RECOVERY_KIND):
+        if self.phase['kind'] in (LIVE_PILOT_KIND, REPAIRED_MAIN_KIND, RECOVERY_KIND, TRIAL_KIND):
             from research.live_pilot import validate_observer_phase
             validate_observer_phase(self.phase, source_root)
         # A separately frozen nonmodel plan may opt into the same independent

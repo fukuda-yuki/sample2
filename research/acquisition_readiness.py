@@ -47,6 +47,20 @@ def protected_instance_ids():
 
 def readiness_instance_ids(plan):
     """Hash-bound logical pilot identities, including unsent origin reservations."""
+    trial_keys=('readiness_education_trial_plan','readiness_education_trial_result')
+    if any(k in plan for k in trial_keys):
+        from research import education_readiness_trial
+        if (not all(k in plan for k in trial_keys)
+                or any(k in plan for k in ('readiness_recovery_plan','readiness_recovery_result','readiness_pilot_plan','readiness_pilot_result'))):
+            raise ValueError('Complete unmixed independent trial readiness references required')
+        trial=util.read_json(live_pilot.checked(plan[trial_keys[0]]))
+        live_pilot.checked(plan[trial_keys[1]])
+        if trial.get('kind')!=education_readiness_trial.KIND:raise ValueError('Wrong typed trial owner')
+        origin=util.read_json(live_pilot.checked(trial['original_plan']))
+        ids=education_readiness_trial.validate_cases(trial,origin)
+        original_ids={c['run_instance_id'] for p in origin['assignments'] for c in p['cases']}
+        if origin.get('kind')!=live_pilot.KIND or len(original_ids)!=4:raise ValueError('Four original logical identities required')
+        return ids|original_ids
     if 'readiness_recovery_plan' in plan or 'readiness_recovery_result' in plan:
         if not all(k in plan for k in ('readiness_recovery_plan','readiness_recovery_result')):
             raise ValueError('Both recovery references required')
@@ -125,6 +139,12 @@ def verify_main_phase(path,repo):
             live_pilot.safe_path(base/('pair-'+str(pair['pair']))/case['run_id'])
     live_pilot.verify_pins(repo,p['source_pins'])
     if not set(EXTRA_PINS)<=p['source_pins'].keys(): raise ValueError('Main/repaired binding source pins required')
+    trial_keys=('readiness_education_trial_plan','readiness_education_trial_result')
+    if any(key in p for key in trial_keys):
+        from research import education_readiness_trial
+        if not set(education_readiness_trial.EXTRA_PINS)<=p['source_pins'].keys():
+            raise ValueError('Explicit trial readiness source pins required')
+        readiness_instance_ids(p)
     recovery_keys=('readiness_recovery_plan','readiness_recovery_result')
     if any(key in p for key in recovery_keys):
         from research import readiness_recovery
@@ -269,6 +289,13 @@ def pilot_ready(repo,plan_reference,result_reference):
 
 def readiness_for_main(repo,plan):
     """Explicit amended readiness never relabels the failed original pilot."""
+    trial_keys=('readiness_education_trial_plan','readiness_education_trial_result')
+    if any(k in plan for k in trial_keys):
+        if (not all(k in plan for k in trial_keys)
+                or any(k in plan for k in ('readiness_recovery_plan','readiness_recovery_result','readiness_pilot_plan','readiness_pilot_result'))):
+            raise ValueError('Complete unmixed independent trial readiness references required')
+        from research import education_readiness_trial
+        return education_readiness_trial.ready(repo,plan[trial_keys[0]],plan[trial_keys[1]])
     keys=('readiness_recovery_plan','readiness_recovery_result')
     if any(key in plan for key in keys):
         if not all(key in plan for key in keys): raise ValueError('Both explicit recovery references required')

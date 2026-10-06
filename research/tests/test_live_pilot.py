@@ -214,6 +214,7 @@ class PlanBoundaries(unittest.TestCase):
             stopped=0; admitted=[]; ack=True
             def __init__(self,phase,directory,scope):
                 self.phase_path=phase; self.directory=directory/'test'; self.session='fixture-session'; self.scope=scope
+                self.digest=util.sha256_file(phase); self.generation=1
             def start(self): pass
             def enroll_ready(self,scope): self.assert_scope=scope
             def admit(self,binding):
@@ -222,6 +223,10 @@ class PlanBoundaries(unittest.TestCase):
             def snapshot(self): return dict(host_healthy=True,resource_healthy=True,**pilot.DEFAULT_THRESHOLDS)
             def stop(self):
                 Monitor.stopped+=1
+                if Monitor.ack:
+                    util.write_json_atomic(self.directory/'shutdown-ack.json',dict(session=self.session,
+                        phase_sha256=self.digest,generation=self.generation,owned_resources_resolved=True,
+                        monitor_stop_confirmed=True,fault_latched=False))
                 return Monitor.ack and set(self.scope()['dispatched'])=={c['run_id'] for c in self.scope()['assignments']}
         def create(repo,batch,task,arm,attempt,runtime_id,**kw):
             b=kw['assignment']; root=batch/b['run_id']

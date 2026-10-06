@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlparse
@@ -129,20 +130,28 @@ class PreservationTests(unittest.TestCase):
         for case in self.cases:
             root=self.pair/case['run_id'];root.mkdir();(root/'STOP').write_text('original stop')
             (root/'private-original.bin').write_bytes(b'private-original')
+            util.write_new_json(root/'manifest.json',dict(run_id=case['run_id'],
+                run_instance_id=case['run_instance_id'],end_reason='operator_stop'))
         (self.pair/'journal.jsonl').write_text('original-journal')
         util.write_new_json(self.wave,{'pairs':[1]})
         self.plan=self.base/'plan.json';util.write_new_json(self.plan,{'fixed':100})
         self.launch=self.wave.parent/'_launcher'/'result.json';util.write_new_json(self.launch,{'retained':True})
-        self.context=dict(repo=self.repo,plan={'batch':str(self.batch),'protected_roots':[],
+        self.context=dict(repo=self.repo,plan={'batch':str(self.batch),'protected_roots':[], 'source_pins':{},
             'source_commit':'f'*40,'bounds':{'retry_backoff_seconds':[60,300,900,3600]}},
             campaign=live_pilot.reference(self.plan),wave_ref=live_pilot.reference(self.wave),
             epoch={'batch':str(self.epoch)},wave_path=self.wave,
             wave={'pairs':[1],'assignments':[{'pair':1,'cases':self.cases}],
                 'epoch_plan':{'path':str(self.base/'unused.json'),'sha256':'e'*64}})
         self.destination=self.base/'recovery'
+        self.controller=dict(kind=subject.CONTROLLER_KIND, source_repo=str(self.base/'separate-controller'),
+            source_commit='c'*40, source_pins={'research/campaign_recovery.py':'d'*64},
+            pins_sha256=subject._pins_digest({'research/campaign_recovery.py':'d'*64}),
+            entrypoint='research/campaign_recovery.py',clean_committed_at_creation=True)
         self.stack=[]
         for obj,name,kwargs in [(subject,'_context',{'return_value':self.context}),
                 (subject,'_owned_closure',{'return_value':live_pilot.reference(self.launch)}),
+                (subject,'_capture_controller',{'return_value':self.controller}),
+                (subject,'_validate_controller',{'side_effect':lambda value,plan:value}),
                 (subject.assessment,'classify',{'return_value':{'classification':'held_unresolved_evidence','recoverable':False}})]:
             patcher=patch.object(obj,name,**kwargs);patcher.start();self.addCleanup(patcher.stop)
         from research import repaired_campaign
@@ -159,6 +168,9 @@ class PreservationTests(unittest.TestCase):
         self.assertEqual(value['decisions']['1']['disposition'],'held')
         self.assertEqual(value['initial_logical_denominator'],100)
         self.assertEqual(value['backoff_seconds'],60)
+        self.assertEqual(value['source_commit'],'f'*40)
+        self.assertEqual(value['recovery_controller'],self.controller)
+        self.assertEqual(util.read_json(self.destination/'intent.json')['recovery_controller'],self.controller)
         package=subject.preserve.verify(self.destination/'private-archive',value['original_archive']['package_id'],value['original_archive']['sha256'])
         self.assertIn('pair-1/explore/private-original.bin',package['files'])
         self.assertIn('pair-1/explore/STOP',package['files'])
@@ -186,11 +198,51 @@ class PreservationTests(unittest.TestCase):
             subject.stage_public(self.repo,ref,1,public)
         raw=(public/'public/fault-data.json').read_text(encoding='utf-8')
         self.assertNotIn(str(self.base),raw)
+        facts=json.loads(raw)
+        self.assertEqual(facts['acquisition_source_commit'],'f'*40)
+        self.assertEqual(facts['recovery_controller_commit'],'c'*40)
+        self.assertEqual(facts['recovery_controller_pins_sha256'],self.controller['pins_sha256'])
+        self.assertEqual(facts['arms']['explore']['acquisition_end_reason'],'operator_stop')
+        self.assertTrue(facts['arms']['explore']['acquisition_end_reason_observed'])
         self.assertNotIn('private-original"',raw)
         files=subject.sharing.inventory(public/'public')
         self.assertEqual(set(files),{'fault-data.json','MANIFEST.json','README.md','reproduce.py'})
         extracted=subject._extract(public/'public',public/'extraction.json')
         self.assertEqual(subject._read(extracted),subject._public_data(subject._read(ref),1))
+
+    def test_creation_controller_rejection_writes_no_output_or_originals(self):
+        before=subject.complete_byte_inventory(self.epoch)
+        with patch.object(subject,'_capture_controller',side_effect=ValueError('Uncommitted controller')):
+            with self.assertRaisesRegex(ValueError,'Uncommitted controller'):
+                self.recover()
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(before,subject.complete_byte_inventory(self.epoch))
+
+    def test_decision_controller_tamper_disagrees_with_intent(self):
+        ref=self.recover();value=subject._read(ref)
+        value['recovery_controller']['source_commit']='e'*40
+        util.write_json_atomic(Path(ref['path']),value)
+        with self.assertRaisesRegex(ValueError,'immutable intent'):
+            subject.validate_recovery(self.repo,live_pilot.reference(ref['path']),self.plan,self.wave)
+
+    def test_existing_decision_uses_recorded_controller_not_new_capture(self):
+        ref=self.recover()
+        with patch.object(subject,'_capture_controller',side_effect=AssertionError('must not recapture')):
+            self.assertEqual(ref,self.recover())
+
+    def test_missing_controller_provenance_is_rejected(self):
+        ref=self.recover();value=subject._read(ref)
+        del value['recovery_controller']
+        util.write_json_atomic(Path(ref['path']),value)
+        with self.assertRaisesRegex(ValueError,'immutable intent'):
+            subject.validate_recovery(self.repo,live_pilot.reference(ref['path']),self.plan,self.wave)
+
+    def test_changed_acquisition_end_reason_is_rejected(self):
+        ref=self.recover();value=subject._read(ref)
+        value['decisions']['1']['arms']['explore']['acquisition_outcome']['end_reason']='completed'
+        util.write_json_atomic(Path(ref['path']),value)
+        with self.assertRaisesRegex(ValueError,'preserved acquisition end reason'):
+            subject.validate_recovery(self.repo,live_pilot.reference(ref['path']),self.plan,self.wave)
 
     def test_publication_without_exact_review_never_calls_transport(self):
         ref=self.recover();public=self.base/'public-fault'
@@ -277,6 +329,94 @@ class PreservationTests(unittest.TestCase):
         with patch.object(subject.delivery,'publish') as forbidden:
             recovered=subject.share_public(self.repo,ref,1,workspace,review)
         forbidden.assert_not_called();self.assertEqual(gate,recovered)
+
+
+class ControllerProvenanceTests(unittest.TestCase):
+    """Synthetic committed checkout; Git blob reads are mocked, never mutated."""
+
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.repo=Path(self.tmp.name)/'recorded-v2';self.repo.mkdir()
+        self.plan={'source_pins':{'profiles/acquisition.json':'a'*64}}
+        names=subject.CONTROLLER_MINIMUM | {'research/repair_spec.py','research/another_helper.py',
+            'outer/harness/util.py','inner/browser/observer.cjs','profiles/acquisition.json'}
+        for name in names:
+            path=self.repo/name;path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_bytes(('synthetic-controller:'+name).encode('utf-8'))
+        pins={name:util.sha256_file(self.repo/name) for name in sorted(names)}
+        self.value=dict(kind=subject.CONTROLLER_KIND,source_repo=str(self.repo),source_commit='c'*40,
+            source_pins=pins,pins_sha256=subject._pins_digest(pins),
+            entrypoint='research/campaign_recovery.py',clean_committed_at_creation=True)
+        self.git=patch.object(subject.repaired_runtime,'_git',
+            side_effect=lambda repo,*args:'c'*40 if args==('rev-parse','HEAD') else '')
+        self.git_mock=self.git.start();self.addCleanup(self.git.stop)
+        self.blobs=patch.object(subject.repaired_runtime,'_committed_files')
+        self.blob_mock=self.blobs.start();self.addCleanup(self.blobs.stop)
+
+    def validate(self,value=None):
+        return subject._validate_controller(self.value if value is None else value,self.plan)
+
+    def test_historical_record_validates_from_future_import_location(self):
+        with patch.object(subject,'__file__',str(self.repo.parent/'future-v3/research/campaign_recovery.py')):
+            self.assertEqual(self.validate(),self.value)
+        self.blob_mock.assert_called_once_with(self.repo,'c'*40,self.value['source_pins'])
+        self.assertTrue(all(call.args[0]==self.repo for call in self.git_mock.call_args_list))
+
+    def test_recorded_controller_byte_change_is_rejected(self):
+        (self.repo/'outer/harness/preserve.py').write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'source changed'):
+            self.validate()
+
+    def test_declared_pin_change_cannot_hide_source_change(self):
+        self.value['source_pins']['outer/harness/preserve.py']='0'*64
+        self.value['pins_sha256']=subject._pins_digest(self.value['source_pins'])
+        with self.assertRaisesRegex(ValueError,'source changed'):
+            self.validate()
+
+    def test_required_helper_omission_is_rejected_even_with_matching_digest(self):
+        del self.value['source_pins']['outer/harness/preserve.py']
+        self.value['pins_sha256']=subject._pins_digest(self.value['source_pins'])
+        with self.assertRaisesRegex(ValueError,'pins are incomplete'):
+            self.validate()
+
+    def test_pin_digest_change_is_rejected(self):
+        self.value['pins_sha256']='0'*64
+        with self.assertRaisesRegex(ValueError,'Invalid recovery controller provenance'):
+            self.validate()
+
+    def test_wrong_commit_is_rejected(self):
+        self.value['source_commit']='d'*40
+        with self.assertRaisesRegex(ValueError,'checkout changed'):
+            self.validate()
+
+    def test_wrong_source_repo_is_rejected(self):
+        self.value['source_repo']=str(self.repo.parent/'not-controller')
+        with self.assertRaises((ValueError,FileNotFoundError)):
+            self.validate()
+
+    def test_committed_blob_mismatch_is_not_accepted(self):
+        self.blob_mock.side_effect=ValueError('Current file differs from committed Git blob')
+        with self.assertRaisesRegex(ValueError,'committed Git blob'):
+            self.validate()
+
+    def test_dirty_recorded_checkout_is_rejected(self):
+        self.git_mock.side_effect=lambda repo,*args:'c'*40 if args==('rev-parse','HEAD') else ' M changed.py'
+        with self.assertRaisesRegex(ValueError,'checkout changed'):
+            self.validate()
+
+    def test_capture_binds_actual_imported_repo_not_acquisition_pins(self):
+        actual=Path(subject.__file__).resolve().parents[1]
+        value=subject._capture_controller({'source_pins':{'research/campaign_recovery.py':'0'*64}})
+        self.assertEqual(value['source_repo'],str(actual))
+        self.assertEqual(value['source_pins']['research/campaign_recovery.py'],
+            util.sha256_file(actual/'research/campaign_recovery.py'))
+        self.assertNotEqual(value['source_repo'],str(self.repo))
+
+    def test_capture_rejects_mixed_import_checkouts(self):
+        foreign=SimpleNamespace(__file__=str(self.repo/'research/another_helper.py'))
+        with patch.dict(subject.sys.modules,{'research.foreign_recovery_fixture':foreign}):
+            with self.assertRaisesRegex(ValueError,'different source checkout'):
+                subject._capture_controller({'source_pins':{}})
 
 
 if __name__=='__main__':unittest.main()

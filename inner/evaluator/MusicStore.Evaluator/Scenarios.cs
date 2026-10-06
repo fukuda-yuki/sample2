@@ -18,7 +18,7 @@ public sealed class RunState : IDisposable
 
     public string EvaluationVersion { get; set; } = Program.DefaultEvaluationVersion;
 
-    public bool ExplicitOrderContract => EvaluationVersion is "1.2.0" or "1.3.0";
+    public bool ExplicitOrderContract => EvaluationVersion is "1.2.0" or "1.3.0" or "1.4.0";
 
     public MigrationContinuity Migration { get; set; }
 
@@ -435,7 +435,7 @@ public static class Scenarios
 
         session.Get("/ShoppingCart/AddToCart/2");
         result.SecondCheckoutPost = session.PostForm("/Checkout/AddressAndPayment",
-            OrderFields(state.EvaluationVersion == "1.3.0" ? "fReE" : "FREE"));
+            OrderFields(state.EvaluationVersion is "1.3.0" or "1.4.0" ? "fReE" : "FREE"));
         result.SecondOrderId = ParseOrderId(result.SecondCheckoutPost.Location);
 
         return result;
@@ -516,7 +516,7 @@ public static class Scenarios
         result.LinesAfterMissingField = Html.CartLines(result.CartAfterMissingField.Body);
         if (state.ExplicitOrderContract) result.OrdersAfterMissing = OrderStore.ReadIds(state.Host.DatabasePath);
 
-        if (state.EvaluationVersion == "1.3.0")
+        if (state.EvaluationVersion is "1.3.0" or "1.4.0")
         {
             var addressSession = state.Session("invalid-fields");
             addressSession.Get("/ShoppingCart/AddToCart/1");
@@ -555,7 +555,7 @@ public static class Scenarios
         result.LinesInSessionB = Html.CartLines(cartB.Body);
         result.TotalInSessionB = Html.Money(cartB.Body);
 
-        if (state.EvaluationVersion == "1.3.0" && result.LinesInSessionA.Count == 1)
+        if (state.EvaluationVersion is "1.3.0" or "1.4.0" && result.LinesInSessionA.Count == 1)
         {
             sessionB.PostForm("/ShoppingCart/RemoveFromCart", new Dictionary<string,string>
             { ["id"] = result.LinesInSessionA[0].RecordId.ToString(CultureInfo.InvariantCulture) });

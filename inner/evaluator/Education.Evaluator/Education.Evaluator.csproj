@@ -9,7 +9,20 @@
     <EnableSourceLink>false</EnableSourceLink>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="obj/**;bin/**" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OfflineReferenceDirectory)' == ''">
     <PackageReference Include="AngleSharp" Version="1.8.1" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.31" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OfflineReferenceDirectory)' != ''">
+    <!-- Optional finite offline acceptance build. Record the actual dependency
+         hashes alongside its binary; this does not replace any frozen bundle. -->
+    <Reference Include="AngleSharp"><HintPath>$(OfflineReferenceDirectory)/AngleSharp.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Data.Sqlite"><HintPath>$(OfflineReferenceDirectory)/Microsoft.Data.Sqlite.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.core"><HintPath>$(OfflineReferenceDirectory)/SQLitePCLRaw.core.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(OfflineReferenceDirectory)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.provider.e_sqlite3"><HintPath>$(OfflineReferenceDirectory)/SQLitePCLRaw.provider.e_sqlite3.dll</HintPath></Reference>
+    <Content Include="$(OfflineReferenceDirectory)/runtimes/win-x64/native/e_sqlite3.dll" Link="e_sqlite3.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(OfflineReferenceDirectory)/runtimes/win-x64/native/e_sqlite3.dll')" />
   </ItemGroup>
 </Project>

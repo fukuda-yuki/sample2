@@ -1,12 +1,34 @@
 """Finite model-free checks: exact scope, unchanged faults, replay/finalization."""
 import copy
+import hashlib
 from pathlib import Path
+import subprocess
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
 from outer.harness import util
 from research import next_phase, next_phase_sharing, pair_execution, preservation_gate as pg, wave_dispatch, wave_plan
+
+
+def historical_v7_fixture_source():
+    """Prospective fixture predates the immutable accepted-history verifier.
+
+    Load the exact local Git blob, without replacing any executing module or
+    altering the current saved-history acceptance/hash guards.
+    """
+    commit = '7b81e5709f5cfa2557476dd4486d459af4cd9c69'
+    digest = '820bb8fe4513cb99a62464c1b2b61890d8b0bdf39ebbe83126c55e4afa0e7fc0'
+    repo = Path(__file__).resolve().parents[2]
+    blob = subprocess.run(['git', '-c', 'safe.directory=' + str(repo), 'cat-file', 'blob',
+        commit + ':research/wave_plan.py'], cwd=repo, capture_output=True, check=True, timeout=10).stdout
+    if hashlib.sha256(blob).hexdigest() != digest:
+        raise AssertionError('Historical V7 fixture source bytes changed')
+    module = types.ModuleType('historical_v7_prospective_fixture')
+    module.__file__ = str(repo / 'research/wave_plan.py')
+    exec(compile(blob, '<historical-v7:' + commit + '>', 'exec'), module.__dict__)
+    return module
 
 
 class PreservationGateTests(unittest.TestCase):
@@ -41,8 +63,16 @@ class PreservationGateTests(unittest.TestCase):
         self.gate['evidence_files']=refs
 
     def validate_fixture(self, gate=None, current=None):
-        with patch.object(pg,'validate_contract',return_value={'source_commit':'fixture'}):
+        # Only substitute the synthetic evidence leaf, leaving the current
+        # exact gate identity, retained fault, and common receipt guards active.
+        with patch.object(pg,'_validate_contract',side_effect=self.fixture_contract):
             return pair_execution._validate_gate(gate or self.gate,current or self.current,53)
+
+    def fixture_contract(self, reference, *, current=None, history=None):
+        if (reference != self.reference or history is not None
+                or util.read_json(pg.checked(reference)) != {'fixture_only': True}):
+            raise ValueError('Only this explicit synthetic contract fixture is covered')
+        return {'source_commit': 'fixture'}
 
     def test_normal_fault_guard_and_exact_fixture_preservation(self):
         original=copy.deepcopy(self.current)
@@ -115,7 +145,7 @@ class PreservationGateTests(unittest.TestCase):
 
     def test_strict_replay_requires_explicit_preservation_event(self):
         journal,phase=self.journal_fixture('pair_preservation_gate')
-        with patch.object(pg,'validate_contract',return_value={'source_commit':'fixture'}):
+        with patch.object(pg,'_validate_contract',side_effect=self.fixture_contract):
             state=wave_dispatch.state(journal,phase,pg.PHASE)
         self.assertEqual(set(state['gates']),{53})
         self.assertEqual(state['results'][pg.RUN]['row']['scoring']['state'],'evaluator_fault')
@@ -178,23 +208,32 @@ class PreservationGateTests(unittest.TestCase):
             'responsibility_counts':[sum(v==n for v in shards.values()) for n in range(1,5)],
             'two_pair_blocks':[list(range(i,min(i+2,101))) for i in range(54,101,2)],
             'predecessor_gates':{'53':gate},'preservation_acceptance':acceptance}
-        with patch.object(wave_plan,'predecessor_state',return_value=(previous,original,{})),\
+        # This prospective fixture is not the real immutable accepted history.
+        # Current code must reject it; never patch the saved hash constants or
+        # its loader/gate/contract verifier to make synthetic history accepted.
+        untouched = Path(acceptance['path']).read_bytes()
+        with patch.object(wave_plan,'predecessor_state',return_value=(previous,original,{})):
+            with self.assertRaisesRegex(ValueError, 'Wrong immutable historical phase/gate'):
+                wave_plan.validate_v7(phase)
+        self.assertEqual(Path(acceptance['path']).read_bytes(), untouched)
+        historical = historical_v7_fixture_source()
+        with patch.object(historical,'predecessor_state',return_value=(previous,original,{})),\
                 patch.object(pg,'validate_gate'),patch.object(pg,'validate_contract',return_value={
                     'source_commit':'handler','evidence':{'source_review':review,'nonmodel_acceptance':checks}}):
-            self.assertEqual(wave_plan.validate_v7(phase),original)
+            self.assertEqual(historical.validate_v7(phase),original)
             self.assertEqual(sum(len(p['cases']) for p in phase['assignments']),94)
             for field,value in [('assignments',assignments[52:]),('maximum_pairs',4),
                     ('resource_probe',{'different':True}),('thresholds',{'relaxed':0}),
                     ('model_id','different'),('internal_concurrency',2)]:
                 changed=copy.deepcopy(phase);changed[field]=value
-                with self.subTest(field=field),self.assertRaises(ValueError):wave_plan.validate_v7(changed)
+                with self.subTest(field=field),self.assertRaises(ValueError):historical.validate_v7(changed)
             changed=copy.deepcopy(phase);changed.pop('preservation_acceptance')
-            with self.assertRaises(ValueError):wave_plan.validate_v7(changed)
+            with self.assertRaises(ValueError):historical.validate_v7(changed)
             for key,reference in [('source_review',saved('other-review',util.read_json(review['path']))),
                                   ('nonmodel_acceptance',saved('other-checks',util.read_json(checks['path'])))]:
                 alternate=util.read_json(acceptance['path']);alternate[key]=reference
                 changed=copy.deepcopy(phase);changed['preservation_acceptance']=saved('other-acceptance-'+key,alternate)
-                with self.subTest(key=key),self.assertRaises(ValueError):wave_plan.validate_v7(changed)
+                with self.subTest(key=key),self.assertRaises(ValueError):historical.validate_v7(changed)
 
 
 if __name__=='__main__':unittest.main()

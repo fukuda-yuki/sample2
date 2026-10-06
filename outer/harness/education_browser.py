@@ -10,6 +10,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from datetime import date
 import re
+from urllib.parse import urlsplit
 
 from . import browser_cleanup, ownership, runtime, util, browser_prerequisite, browser_product
 from .security import child_environment
@@ -47,9 +48,23 @@ def stored_coverage_complete(directory, instance, artifact_hash, spec_hash, *, a
                 or output.get('artifactSha256') != artifact_hash or output.get('specSha256') != spec_hash
                 or util.sha256_file(path) != output['browserReviewEvidenceSha256']): return False
         receipt = util.read_json(path)
-        if (receipt.get('schemaVersion') != 1 or receipt.get('actor') != 'agent'
+        version = output.get('evaluationVersion')
+        schema = {VERSION: 1, 'education-1.1.0': 2}.get(version)
+        if (schema is None or type(receipt.get('schemaVersion')) is not int
+                or receipt.get('schemaVersion') != schema or receipt.get('actor') != 'agent'
                 or receipt.get('runInstanceId') != instance or receipt.get('artifactSha256') != artifact_hash
                 or receipt.get('specSha256') != spec_hash): return False
+        if version == 'education-1.1.0':
+            request_path = review/'request.json'
+            if (receipt.get('evaluationVersion') != version
+                    or util.sha256_file(request_path) != receipt.get('requestSha256')): return False
+            request = util.read_json(request_path)
+            if any(request.get(key) != receipt.get(key) for key in
+                   ('runInstanceId', 'artifactSha256', 'specSha256', 'evaluationVersion', 'baseUrl')): return False
+            base = urlsplit(receipt['baseUrl'])
+            if (base.scheme != 'http' or base.hostname not in ('127.0.0.1', '::1') or not base.port or base.port == 80
+                    or base.username or base.password or base.path not in ('', '/') or base.query or base.fragment): return False
+            if not isinstance(receipt.get('faults'), list) or (not allow_partial and receipt['faults']): return False
         # A partial output may preserve a confirmed HTTP failure. It may claim
         # a browser failure only when the measured Save and its evidence exist.
         if receipt.get('action') != 'create-edit-save': return False

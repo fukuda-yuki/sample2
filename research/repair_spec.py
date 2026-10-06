@@ -52,8 +52,24 @@ def revised(original):
             'severities, original requirement inventory and frozen source/oracle assets are unchanged.',
             'Owned operation HTTP500 preserves a finite product failure independently of observer faults; '
             'unperformed removals remain unknown and cannot yield complete quality.']
+    elif old == '1.4.0':
+        result['specVersion'] = '1.5.0'
+        if 'measurementRevision' in original:
+            result['priorMeasurementRevision'] = copy.deepcopy(original['measurementRevision'])
+        changes = [
+            'C-015 requires a single album-1 row of quantity 2 and a positive record ID before '
+            'the HTTP removal request; C-016 requires the current post-C-015 single row of '
+            'quantity 1 and its actual positive record ID. Missing preconditions are blocked, '
+            'not removal failures; no synthetic id=0 removal request is sent.',
+            'Owned AddToCart HTTP500 remains a finite independently bound product failure; '
+            'unperformed removal operations stay unknown and quality stays null when incomplete.',
+            'Browser observations do not manufacture an unobserved HTTP JSON result; independently '
+            'confirmed browser failures may be retained alongside HTTP observation faults.',
+            'Requirement/check IDs, severities, weights and frozen source/oracle assets are unchanged; '
+            'prior 1.4 evaluation outputs and evaluation semantics remain separate.'
+        ]
     else:
-        raise ValueError('Only the original frozen Education1.0/Music1.3 ledgers are supported')
+        raise ValueError('Supported ledger sources are Education1.0, Music1.3 and Music1.4')
     result['measurementRevision'] = {'sourceSpecVersion': old,
         'scope': 'new evaluation of same saved artifact, not historical labels or new acquisition',
         'changes': changes, 'humanReview': 'not_run'}

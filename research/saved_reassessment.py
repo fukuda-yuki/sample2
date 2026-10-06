@@ -247,6 +247,172 @@ def execute(stage, *, repo, timeout=1800):
     return record
 
 
+def _saved_cleanup_bound(directory, instance):
+    """Read existing ownership/removal receipts; never inspect or remove Docker."""
+    try:
+        state = util.read_json(Path(directory)/'browser-resources.json')
+        receipt = browser_cleanup.latest(directory)
+        if (receipt.get('confirmed') is not True or receipt.get('status') != 'complete'
+                or state.get('run_instance_id') != instance or receipt.get('run_instance_id') != instance
+                or state.get('owner') != receipt.get('owner')
+                or not re.fullmatch(r's2-browser-[0-9a-f]{32}', state.get('owner', ''))): return False
+        resources, removed = state.get('resources'), receipt.get('resources')
+        if not isinstance(resources, list) or not resources or not isinstance(removed, list): return False
+        keys = lambda items: [(r['kind'], r['name']) for r in items]
+        expected, actual = keys(resources), keys(removed)
+        if len(expected) != len(set(expected)) or len(actual) != len(set(actual)) or set(expected) != set(actual): return False
+        by_key = {(r['kind'], r['name']): r for r in removed}
+        for resource in resources:
+            item = by_key[(resource['kind'], resource['name'])]
+            if (resource['kind'] not in ('container', 'network')
+                    or not re.fullmatch(r's2-(?:browser|score)-[0-9a-f]{32}(?:-net)?', resource['name'])
+                    or item.get('confirmed') is not True or item.get('status') not in ('removed', 'absent')
+                    or resource.get('id') and resource['id'] != item.get('id')): return False
+            if item['status'] == 'removed' and not re.fullmatch(r'[0-9a-f]{64}', item.get('id', '')): return False
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def revalidate(stage, destination, *, repo=None):
+    """Validate saved execution with current readers, writing only a new receipt.
+
+    This does not repeat scoring, product/browser actions, cleanup, or acquisition.
+    Historical result and execution-controller bytes remain unchanged. A finite
+    reported failure is separate from full observation and numeric quality.
+    """
+    import math
+    stage, destination = Path(stage).resolve(), Path(destination).resolve()
+    repo = Path(repo or Path(__file__).resolve().parents[1]).resolve()
+    assessment = util.read_json(stage/'assessment.json')
+    source = Path(assessment['source_path_private']).resolve()
+    if (_inside(stage, source) or _inside(source, stage)
+            or _inside(destination, source) or _inside(destination, stage)):
+        raise ValueError('Validation receipt must remain outside source and assessment roots')
+    if destination.exists(): raise FileExistsError(destination)
+    receipt = {'schema_version':1, 'kind':'saved_assessment_read_only_validation',
+        'validation_id':uuid.uuid4().hex, 'assessment_id':assessment['assessment_id'],
+        'source_run_id':assessment['source_run_id'], 'source_run_instance_id':assessment['source_run_instance_id'],
+        'model_calls':0, 'acquisition_count_increment':0, 'adopted':False, 'quality':None,
+        'validation_status':'invalid_evidence', 'finite_failure':None,
+        'observer_fault':None, 'observer_faults':None,
+        'finite_failure_scope':'Bound reported requirement labels; not proof that every dependent operation was observed.',
+        'evaluation_controller_inventory':assessment.get('controller_inventory'),
+        'validation_controller_inventory':controller_inventory(repo), 'errors':[]}
+    receipt['evaluation_controller_matches_current'] = (
+        receipt['evaluation_controller_inventory'] == receipt['validation_controller_inventory'])
+    receipt['validation_implementation_sha256'] = util.sha256_file(Path(__file__).resolve())
+    source_before = stage_before = None
+    def require(ok, name):
+        if not ok: raise ValueError(name)
+    def inventory_digest(value):
+        return util.sha256_bytes(json.dumps(value, sort_keys=True, separators=(',', ':')).encode())
+    try:
+        source_before, stage_before = byte_inventory(source), byte_inventory(stage)
+        require(source_before == assessment['source_byte_inventory'], 'source_byte_inventory')
+        profiles.validate_run(source)
+        source_manifest, snapshot = util.read_json(source/'manifest.json'), util.read_json(source/'snapshot.json')
+        require(source_manifest.get('stop_confirmed') is True and source_manifest.get('submission_fixed') is True,
+                'source_stop_and_fixed')
+        require(source_manifest.get('run_id') == assessment['source_run_id']
+                and source_manifest.get('run_instance_id') == assessment['source_run_instance_id']
+                and snapshot.get('run_id') == assessment['source_run_id'], 'source_identity')
+        require(util.sha256_file(source/'condition.json') == assessment['source_condition_sha256'], 'source_condition')
+        source_condition = util.read_json(source/'condition.json')
+        require(source_condition['evaluation']['evaluation_version'] == assessment['source_evaluation_version']
+                and source_condition['evaluation']['spec_sha256'] == assessment['source_spec_sha256']
+                == util.sha256_file(source/'evaluation-assets/requirements.json')
+                and assessment['evaluation_version'] != assessment['source_evaluation_version'], 'source_evaluation_contract')
+        require(assessment.get('kind') == 'saved_artifact_reassessment'
+                and assessment.get('acquisition_count_increment') == 0
+                and re.fullmatch(r'[0-9a-f]{32}', assessment['assessment_id']) is not None, 'assessment_identity')
+        require(util.sha256_file(stage/'execution-config.json') == assessment['execution_config_sha256'], 'execution_config')
+        condition = util.read_json(stage/'execution-config.json'); config = condition['evaluation']
+        require(condition.get('schema_version') == 2 and config['evaluation_version'] == assessment['evaluation_version'], 'execution_version')
+        require(util.artifact_hash(stage/'frozen') == assessment['source_artifact_sha256']
+                == snapshot['artifact_sha256'] == util.artifact_hash(source/'frozen'), 'artifact_identity')
+        require(byte_inventory(stage/'evaluation-assets') == assessment['assessment_assets_inventory'], 'assessment_assets')
+        bundle = stage/'evaluation-assets/evaluator'
+        require(byte_inventory(bundle) == assessment['build_inventory'], 'actual_bundle')
+        assembly = config['assembly']
+        require(Path(assembly).name == assembly and assembly.endswith('.dll'), 'assembly_filename')
+        require(util.sha256_file(bundle/assembly) == assessment['evaluator_sha256'] == config['evaluator_sha256'], 'actual_dll')
+        require(condition['runtime_lock']['evaluator_sha256'] == assessment['evaluator_sha256']
+                and condition['runtime_lock']['evaluator_files'] == util.tree_hashes(bundle)
+                and condition['runtime_lock']['controller_files'] == assessment['controller_inventory'], 'historical_runtime_binding')
+        spec_path = stage/'evaluation-assets/requirements.json'
+        require(util.sha256_file(spec_path) == assessment['new_spec_sha256'] == config['spec_sha256'], 'spec_hash')
+        spec = util.read_json(spec_path)
+        require(spec['specVersion'] == assessment['evaluation_version'] and spec['taskId'] == condition['task_id'], 'spec_identity')
+        original = util.read_json(stage/'result.json')
+        receipt['original_result_sha256'] = util.sha256_file(stage/'result.json')
+        require(original.get('assessment_id') == assessment['assessment_id']
+                and original.get('cleanup_confirmed') is True and original.get('source_unchanged') is True
+                and original.get('evaluator_exit_code') == 0 and original.get('timed_out') is False
+                and original.get('errors') == [] and original.get('operation_status') in
+                    ('evaluation_finished', 'evaluation_partial_or_fault'), 'original_execution_confirmations')
+        out, http = stage/'output', stage/'output/http-only'
+        require(original.get('raw_result') == 'output/evaluation.json', 'original_output_path')
+        output = util.read_json(out/'evaluation.json'); baseline = util.read_json(http/'evaluation.json')
+        for directory, result in ((out, output), (http, baseline)):
+            require(not evaluate.check_mismatches(result, condition, assessment['evaluation_version'],
+                    stage/'frozen', assessment['source_artifact_sha256'], spec_path, assessment['new_spec_sha256']), 'output_identity')
+            require(evaluate._reported_evaluator_sha256(directory) == assessment['evaluator_sha256'], 'reported_dll')
+            require(_saved_cleanup_bound(directory, assessment['assessment_id']), 'owned_cleanup_receipts')
+        require(output.get('reviewRunInstanceId') == assessment['assessment_id'], 'output_assessment_identity')
+        require(output.get('baselineEvaluationSha256') == util.sha256_file(http/'evaluation.json')
+                and output.get('baselineResultsSha256') == util.sha256_file(http/'results.jsonl'), 'baseline_evidence_links')
+        require(original.get('raw_verdict') == output.get('verdict')
+                and original.get('evaluator_sha256_reported') == assessment['evaluator_sha256'], 'original_report_binding')
+        faults = output.get('evaluatorFaults')
+        require(isinstance(faults, list), 'observer_fault_inventory')
+        receipt['observer_faults'] = faults
+        receipt['observer_fault'] = bool(faults) or (out/'browser-fault.json').is_file()
+        receipt['browser_fault_receipt_sha256'] = (util.sha256_file(out/'browser-fault.json')
+            if (out/'browser-fault.json').is_file() else None)
+        evaluation_hash = util.sha256_file(out/'evaluation.json')
+        receipt.update(output_sha256=evaluation_hash, evaluation_version=assessment['evaluation_version'],
+                       raw_verdict=output.get('verdict'), raw_research_status=output.get('researchStatus'))
+        receipt['finite_failure'] = browser_review.stored_failure(out, assessment['assessment_id'],
+            assessment['source_artifact_sha256'], assessment['new_spec_sha256'], evaluation_hash, baseline_directory=http)
+        receipt['dependent_check_cascade_warning'] = (assessment['evaluation_version'] == '1.4.0'
+            and output.get('researchStatus') != 'complete'
+            and bool({'R-014','R-015'} & set((receipt['finite_failure'] or {}).get('requirements', []))))
+        if receipt['dependent_check_cascade_warning']:
+            receipt['finite_failure_scope'] += (' C-015/C-016 labels may follow a failed AddToCart prerequisite; '
+                'their reported failures do not establish actual removal failures. Raw labels are preserved.')
+        complete = (browser_review.coverage_complete(output)
+            and browser_review.stored_coverage_complete(out, assessment['assessment_id'],
+                assessment['source_artifact_sha256'], assessment['new_spec_sha256'])
+            and output.get('researchStatus') == 'complete' and receipt['observer_fault'] is False
+            and original['operation_status'] == 'evaluation_finished' and original.get('browser_exit_code') == 0)
+        quality = output.get('quality')
+        finite_quality = type(quality) in (int, float) and math.isfinite(quality) and 0 <= quality <= 100
+        receipt['adopted'] = complete and finite_quality
+        receipt['quality'] = quality if receipt['adopted'] else None
+        receipt['validation_status'] = ('complete_observation' if receipt['adopted'] else
+            'observer_fault' if receipt['observer_fault'] else 'partial_observation')
+    except (Exception, KeyboardInterrupt) as exc:
+        receipt['errors'].append({'type':type(exc).__name__, 'check':str(exc)})
+        receipt.update(validation_status='invalid_evidence', adopted=False, quality=None, finite_failure=None)
+    finally:
+        for name, root, before in (('source',source,source_before), ('assessment',stage,stage_before)):
+            try:
+                after = byte_inventory(root)
+                unchanged = before is not None and before == after
+                receipt[name+'_bytes_unchanged'] = unchanged
+                receipt[name+'_inventory_sha256_before'] = inventory_digest(before) if before is not None else None
+                receipt[name+'_inventory_sha256_after'] = inventory_digest(after)
+                if not unchanged:
+                    receipt.update(validation_status='input_changed_or_unverified', adopted=False, quality=None, finite_failure=None)
+            except Exception as exc:
+                receipt[name+'_bytes_unchanged'] = None
+                receipt['errors'].append({'type':type(exc).__name__, 'check':name+'_final_inventory'})
+                receipt.update(validation_status='input_changed_or_unverified', adopted=False, quality=None, finite_failure=None)
+        util.write_new_json(destination, receipt)
+    return receipt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
@@ -255,9 +421,12 @@ def main():
         prep.add_argument('--'+name, required=True)
     run = sub.add_parser('execute'); run.add_argument('stage'); run.add_argument('--repo', required=True)
     run.add_argument('--timeout', type=int, default=1800)
+    validation = sub.add_parser('revalidate', help='Read saved evidence; write a new separate validation receipt')
+    validation.add_argument('stage'); validation.add_argument('destination'); validation.add_argument('--repo')
     args = vars(parser.parse_args()); action = args.pop('action')
     if action == 'prepare': print(prepare(**args))
-    else: print(json.dumps(execute(**args), ensure_ascii=False, indent=2))
+    elif action == 'execute': print(json.dumps(execute(**args), ensure_ascii=False, indent=2))
+    else: print(json.dumps(revalidate(**args), ensure_ascii=False, indent=2))
 
 
 if __name__ == '__main__': main()

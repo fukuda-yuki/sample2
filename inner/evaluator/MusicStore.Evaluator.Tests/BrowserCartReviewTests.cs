@@ -119,6 +119,8 @@ static class BrowserCartReviewTests
         CheckUnperformed(check);
         CheckProductHttp(check);
         CheckProductComposition(check);
+        CheckRemovalPrerequisites(check);
+        CheckUnknownRemovalComposition(check);
     }
 
     static void CheckProductHttp(Action<string, bool> check)
@@ -341,5 +343,103 @@ static class BrowserCartReviewTests
         check("partial composition leaves first baseline bytes unchanged", beforeEval == MusicStore.Evaluator.Program.Sha256File(baselineFile)
             && beforeResults == MusicStore.Evaluator.Program.Sha256File(resultFile));
         check("new contract inherits explicit order rules", new RunState { EvaluationVersion = "1.4.0" }.ExplicitOrderContract);
+    }
+
+    static void CheckRemovalPrerequisites(Action<string, bool> check)
+    {
+        using var state = new RunState { AppReady = true, EvaluationVersion = "1.5.0", Catalog = Catalog,
+            Ledger = new Ledger { Requirements = new() { new() { Id = "R-014" }, new() { Id = "R-015" } } },
+            Cart = new CartResult { RemoveFromTwo = new WebResponse { Status = 404, Body = "" },
+                RemoveFromOne = new WebResponse { Status = 404, Body = "" }, TotalAfterRemoveFromTwo = 0m, TotalAfterRemoveFromOne = 0m } };
+        check("1.5 empty cart setup cannot prove quantity-two removal failure", Checks.Registry["C-015"](state).Judgement == Judgement.Blocked);
+        check("1.5 empty cart setup cannot prove quantity-one removal failure", Checks.Registry["C-016"](state).Judgement == Judgement.Blocked);
+        state.EvaluationVersion = "1.4.0";
+        check("1.4 retains historical cascade labels for both empty-setup removals", Checks.Registry["C-015"](state).Judgement == Judgement.Fail
+            && Checks.Registry["C-016"](state).Judgement == Judgement.Fail);
+        state.EvaluationVersion = "1.5.0";
+        state.Cart.LinesAfterTwoAdds = Html.CartLines(Cart(2,"17.98"));
+        state.Cart.RecordId = 7;
+        check("1.5 valid quantity-two prerequisite retains real HTTP removal failure", Checks.Registry["C-015"](state).Judgement == Judgement.Fail);
+        state.Cart.LinesAfterRemoveFromTwo = Html.CartLines(Cart(1,"8.99",9));
+        check("1.5 valid quantity-one prerequisite retains real HTTP removal failure", Checks.Registry["C-016"](state).Judgement == Judgement.Fail);
+        state.Cart.RemoveFromTwo.Body = "{\"itemCount\":1}"; state.Cart.TotalAfterRemoveFromTwo = 8.99m;
+        state.Cart.RemoveFromOne.Body = "{\"itemCount\":0}";
+        check("1.5 valid independent HTTP removal observations can pass", Checks.Registry["C-015"](state).Judgement == Judgement.Pass
+            && Checks.Registry["C-016"](state).Judgement == Judgement.Pass);
+        state.Cart.RemoveFromTwo = null;
+        check("1.5 absent request observation stays unknown despite populated cart", Checks.Registry["C-015"](state).Judgement == Judgement.Blocked);
+        state.Cart.LinesAfterRemoveFromTwo = Html.CartLines(Cart(2,"17.98",9));
+        check("1.5 failed decrement cannot satisfy following quantity-one prerequisite", Checks.Registry["C-016"](state).Judgement == Judgement.Blocked);
+        state.Cart.LinesAfterRemoveFromTwo = Html.CartLines(Cart(1,"8.99",0));
+        check("1.5 nonpositive record identity cannot satisfy removal prerequisite", Checks.Registry["C-016"](state).Judgement == Judgement.Blocked);
+        var submitted = new List<int>();
+        WebResponse Submit(int id) { submitted.Add(id); return new WebResponse { Body = "synthetic response" }; }
+        check("1.5 dispatch performs no removal request when setup is empty", Scenarios.ObserveRemoval("1.5.0", new List<Html.CartLine>(), 2, 0, Submit) == null && submitted.Count == 0);
+        Scenarios.ObserveRemoval("1.4.0", new List<Html.CartLine>(), 2, 0, Submit);
+        check("1.4 dispatch retains historical id-zero request", submitted.SequenceEqual(new[] { 0 }));
+        submitted.Clear();
+        Scenarios.ObserveRemoval("1.5.0", Html.CartLines(Cart(1,"8.99",9)), 1, 7, Submit);
+        check("1.5 dispatch uses current row identity after row replacement", submitted.SequenceEqual(new[] { 9 }));
+        submitted.Clear();
+        Scenarios.ObserveRemoval("1.5.0", Html.CartLines(Cart(2,"17.98",9)), 1, 7, Submit);
+        check("1.5 dispatch performs no request at wrong quantity", submitted.Count == 0);
+    }
+
+    static void CheckUnknownRemovalComposition(Action<string, bool> check)
+    {
+        using var f = new Fixture();
+        var artifact = Path.Combine(f.Root, "artifact"); Directory.CreateDirectory(artifact);
+        var baseline = Path.Combine(f.Root, "baseline"); Directory.CreateDirectory(baseline);
+        var ledger = new Ledger { TaskId = "MS1-synthetic-unknown", SpecVersion = "1.5.0", MigrationContract = new(), Requirements = new()
+        {
+            new() { Id = "R-014", Severity = "major", Checks = new() { new() { Id = "C-015" } } },
+            new() { Id = "R-015", Severity = "major", Checks = new() { new() { Id = "C-016" } } },
+        } };
+        var spec = f.File("spec.json", JsonSerializer.Serialize(ledger));
+        var catalog = f.File("catalog.json", JsonSerializer.Serialize(Catalog));
+        var ah = MusicStore.Evaluator.Program.Sha256Directory(artifact);
+        var request = f.File("request.json", JsonSerializer.Serialize(new { baseUrl = "http://127.0.0.1:43001", runInstanceId = Instance,
+            artifactSha256 = ah, specSha256 = spec.Sha256, evaluationVersion = "1.5.0" }));
+        f.Receipt.SchemaVersion = 3; f.Receipt.BaseUrl = "http://127.0.0.1:43001"; f.Receipt.RequestSha256 = request.Sha256;
+        f.Receipt.ArtifactSha256 = ah; f.Receipt.SpecSha256 = spec.Sha256;
+        var baseFile = Path.Combine(baseline,"evaluation.json"); var resultsFile = Path.Combine(baseline,"results.jsonl");
+        (EvaluationOutput Value, List<CheckResult> Results) Run(string name, string judgement, bool browserFail)
+        {
+            var before = new EvaluationOutput { TaskId = ledger.TaskId, SpecVersion = "1.5.0", EvaluationVersion = "1.5.0",
+                ArtifactSha256 = ah, SpecSha256 = spec.Sha256, Verdict = judgement == "error" ? "error" : judgement == "fail" ? "fail" : "blocked",
+                Quality = null, ResearchStatus = "incomplete", Requirements = ledger.Requirements.Select(r =>
+                    new RequirementOutcome { Id = r.Id, Judgement = judgement }).ToList() };
+            System.IO.File.WriteAllText(baseFile,JsonSerializer.Serialize(before));
+            System.IO.File.WriteAllLines(resultsFile,ledger.Requirements.Select(r => JsonSerializer.Serialize(new CheckResult {
+                RequirementId = r.Id, CheckId = r.Checks[0].Id, Judgement = judgement,
+                Observation = judgement == "error" ? "synthetic observer fault" : "synthetic HTTP prerequisite or result" })));
+            for (var i = 0; i < 2; i++)
+            {
+                var id = i == 0 ? "C-015" : "C-016"; var b = i == 0 ? 2 : 1; var a = b-1;
+                f.Receipt.Removals[i].Before = f.Capture(id+"-before.json", Cart(b,Html.Money2(b*8.99m))+ $"<b id='cart-status'>Cart ({b})</b>",false,url:"http://127.0.0.1:43001/ShoppingCart");
+                f.Receipt.Removals[i].After = f.Capture(id+"-after.json", Cart(a,browserFail ? "99.00" : Html.Money2(a*8.99m))+$"<b id='cart-status'>Cart ({a})</b>",true,url:"http://127.0.0.1:43001/ShoppingCart");
+            }
+            var receipt = f.File("receipt.json",JsonSerializer.Serialize(f.Receipt));
+            var oldBaseline = MusicStore.Evaluator.Program.Sha256File(baseFile); var oldResults = MusicStore.Evaluator.Program.Sha256File(resultsFile);
+            var output = Path.Combine(f.Root,name);
+            MusicStore.Evaluator.Program.Main(new[] {"--artifact",artifact,"--out",output,"--spec",Path.Combine(f.Root,spec.Path),
+                "--catalog",Path.Combine(f.Root,catalog.Path),"--evaluation-version","1.5.0","--browser-cart-baseline",baseline,
+                "--browser-cart-evidence",Path.Combine(f.Root,receipt.Path),"--review-run-instance-id",Instance});
+            check(name+" leaves baseline bytes unchanged",oldBaseline==MusicStore.Evaluator.Program.Sha256File(baseFile) && oldResults==MusicStore.Evaluator.Program.Sha256File(resultsFile));
+            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            return (JsonSerializer.Deserialize<EvaluationOutput>(System.IO.File.ReadAllText(Path.Combine(output,"evaluation.json")),opts),
+                System.IO.File.ReadLines(Path.Combine(output,"results.jsonl")).Select(t=>JsonSerializer.Deserialize<CheckResult>(t,opts)).ToList());
+        }
+        var finite = Run("unknown-browser-fail","blocked",true);
+        check("1.5 independent browser failure cannot erase HTTP coverage gap",finite.Value.Verdict=="fail" && finite.Value.ResearchStatus=="incomplete"
+            && finite.Value.Quality==null && finite.Value.FailedCount==2 && finite.Value.EvaluatorFaults.Count==0 && finite.Value.UncheckedScope.Count>=2);
+        var pass = Run("unknown-browser-pass","blocked",false);
+        check("1.5 browser pass cannot promote unknown HTTP JSON to pass",pass.Value.ResearchStatus=="incomplete" && pass.Value.Quality==null
+            && pass.Value.Requirements.All(r=>r.Judgement=="blocked"));
+        var fault = Run("fault-browser-fail","error",true);
+        check("1.5 independent browser failure retains HTTP observer faults",fault.Value.Verdict=="fail" && fault.Value.ResearchStatus=="incomplete"
+            && fault.Value.Quality==null && fault.Value.EvaluatorFaults.Count>0);
+        var sticky = Run("failed-browser-pass","fail",false);
+        check("1.5 established HTTP failure is not erased by another browser pass",sticky.Value.Requirements.All(r=>r.Judgement=="fail"));
     }
 }

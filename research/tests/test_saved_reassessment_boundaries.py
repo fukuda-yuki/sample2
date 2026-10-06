@@ -60,10 +60,16 @@ class ReassessmentBoundaryReviewTests(unittest.TestCase):
             assessment = util.read_json(stage/'assessment.json')
             if valid:
                 review = out/'browser-school'; review.mkdir()
-                receipt = {'schemaVersion': 1, 'actor': 'agent', 'action': 'create-edit-save',
+                receipt = {'schemaVersion': 2, 'actor': 'agent', 'action': 'create-edit-save',
                     'runInstanceId': assessment['assessment_id'],
                     'artifactSha256': assessment['source_artifact_sha256'],
-                    'specSha256': assessment['new_spec_sha256']}
+                    'specSha256': assessment['new_spec_sha256'],
+                    'evaluationVersion': assessment['evaluation_version'],
+                    'baseUrl': 'http://127.0.0.1:1234', 'faults': [], 'productFailures': []}
+                request = {key:receipt[key] for key in
+                    ('runInstanceId', 'artifactSha256', 'specSha256', 'evaluationVersion', 'baseUrl')}
+                util.write_new_json(review/'request.json', request)
+                receipt['requestSha256'] = util.sha256_file(review/'request.json')
                 for name in education_browser.REFERENCES:
                     path = review/(name + '.fixture')
                     path.write_bytes(('bound toy evidence:' + name).encode())

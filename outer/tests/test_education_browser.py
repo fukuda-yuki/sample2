@@ -46,6 +46,77 @@ class SchoolEvidenceTests(unittest.TestCase):
         self.receipt['after']['path'] = '../evaluation.json'; self.write()
         self.assertFalse(self.covered())
 
+    def new_contract_fixture(self):
+        self.output['evaluationVersion'] = 'education-1.1.0'
+        self.receipt.update(schemaVersion=2, evaluationVersion='education-1.1.0',
+                            baseUrl='http://127.0.0.1:1234', faults=[], productFailures=[])
+        request = {key:self.receipt[key] for key in
+                   ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+        util.write_new_json(self.review/'request.json', request)
+        self.receipt['requestSha256'] = util.sha256_file(self.review/'request.json')
+        self.write()
+
+    def test_new_complete_contract_adopts_schema_two_with_bound_request(self):
+        self.new_contract_fixture()
+        self.assertTrue(school.required('education-1.1.0'))
+        self.assertTrue(self.covered())
+
+    def test_legacy_and_new_schema_cannot_be_relabelled_between_contracts(self):
+        self.assertTrue(self.covered())
+        self.output['evaluationVersion'] = 'education-1.1.0'; self.write()
+        self.assertFalse(self.covered())
+        self.new_contract_fixture()
+        self.output['evaluationVersion'] = school.VERSION; self.write()
+        self.assertFalse(self.covered())
+        self.output['evaluationVersion'] = 'education-9.9.9'; self.write()
+        self.assertFalse(school.stored_coverage_complete(self.root, 'instance', 'artifact', 'spec'))
+
+    def test_new_schema_missing_or_changed_request_is_not_adopted(self):
+        self.new_contract_fixture()
+        (self.review/'request.json').write_text('changed request bytes')
+        self.assertFalse(self.covered())
+        (self.review/'request.json').unlink()
+        self.assertFalse(self.covered())
+
+    def test_new_schema_requires_an_integer_schema_number(self):
+        self.new_contract_fixture()
+        for malformed in (2.0, '2', None, True):
+            with self.subTest(schema=malformed):
+                self.receipt['schemaVersion']=malformed; self.write()
+                self.assertFalse(self.covered())
+
+    def test_legacy_schema_requires_integer_one_without_accepting_bool_float_or_string(self):
+        self.assertTrue(self.covered())
+        for malformed in (True, 1.0, '1', None):
+            with self.subTest(schema=malformed):
+                self.receipt['schemaVersion']=malformed; self.write()
+                self.assertFalse(self.covered())
+        self.receipt['schemaVersion']=1; self.write()
+        self.assertTrue(self.covered())
+
+    def test_new_schema_requires_matching_version_identity_and_owned_origin(self):
+        self.new_contract_fixture()
+        for key, value in [('evaluationVersion',school.VERSION),('runInstanceId','other'),
+                           ('artifactSha256','other'),('specSha256','other'),
+                           ('baseUrl','http://127.0.0.1:9999')]:
+            with self.subTest(key=key):
+                request={key_:self.receipt[key_] for key_ in
+                    ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+                request[key] = value
+                util.write_json_atomic(self.review/'request.json',request)
+                self.receipt['requestSha256']=util.sha256_file(self.review/'request.json'); self.write()
+                self.assertFalse(self.covered())
+        self.receipt['baseUrl']='http://foreign.example:1234'
+        request={key:self.receipt[key] for key in ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+        util.write_json_atomic(self.review/'request.json',request)
+        self.receipt['requestSha256']=util.sha256_file(self.review/'request.json'); self.write()
+        self.assertFalse(self.covered())
+
+    def test_new_observer_fault_cannot_claim_complete_but_bound_partial_evidence_is_retained(self):
+        self.new_contract_fixture(); self.receipt['faults']=['trace close failed']; self.write()
+        self.assertFalse(self.covered())
+        self.assertTrue(school.stored_coverage_complete(self.root,'instance','artifact','spec',allow_partial=True))
+
     def failure_fixture(self, known_http=False):
         baseline = self.root/'http-only'; baseline.mkdir()
         util.write_new_json(baseline/'evaluation.json', {'artifactSha256': 'artifact', 'specSha256': 'spec',

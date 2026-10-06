@@ -333,6 +333,9 @@ def observer_terminal_receipt(monitor,plan_path,phase_path,ack):
     try:
         directory=safe_path(monitor.directory)
         required=[directory/name for name in ('config.json','shutdown.json','shutdown-ack.json','status.json')]
+        from research.resource_supervisor import STARTUP_KINDS,validate_startup_ready
+        phase_data=util.read_json(phase_path)
+        if phase_data.get('kind') in STARTUP_KINDS: required.append(directory/'startup-ready.json')
         paths=set(required)|set(directory.glob('scope-*.json'))
         for path in paths:
             receipt['evidence_files'][safe_path(path).relative_to(directory).as_posix()]=util.sha256_file(path)
@@ -343,6 +346,8 @@ def observer_terminal_receipt(monitor,plan_path,phase_path,ack):
             ref={'path':path,'sha256':digest}; checked(ref)
             receipt['evidence_files'][safe_path(path).relative_to(directory).as_posix()]=digest
         config=util.read_json(directory/'config.json'); shutdown=util.read_json(directory/'shutdown.json')
+        if phase_data.get('kind') in STARTUP_KINDS:
+            validate_startup_ready(config,phase_data,receipt['observer_pid'],util.read_json(directory/'startup-ready.json'))
         confirmation=util.read_json(directory/'shutdown-ack.json')
         expected=dict(session=monitor.session,phase_sha256=util.sha256_file(phase_path),generation=monitor.generation)
         scope=monitor.last_scope or monitor.requested_scope

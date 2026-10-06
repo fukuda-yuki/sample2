@@ -169,6 +169,10 @@ class RecoveryControls(unittest.TestCase):
     def full_fixture(self):
         from research.tests.test_live_pilot import PlanBoundaries
         fixture=PlanBoundaries(); fixture.setUp(); self.addCleanup(fixture.doCleanups)
+        # Synthetic origin here cannot join a real prior attempt. The dedicated
+        # actual read-only closeout guard tests below cover that separate leaf.
+        prior_leaf=patch.object(recovery,'validate_prior_recoveries',return_value=[])
+        prior_leaf.start(); self.addCleanup(prior_leaf.stop)
         sealed,journal,_=self.sealed_fixture({name:sha for name,sha in fixture.plan['source_pins'].items() if name.endswith('.json')})
         plan=dict(fixture.plan,kind=recovery.KIND,original_plan=sealed['original_plan'],
             original_closeout=sealed['original_closeout'],assignments=sealed['assignments'],
@@ -333,6 +337,31 @@ class RecoveryControls(unittest.TestCase):
         wrong=copy.deepcopy(launched); del wrong['child']; wrong['child_exit_code']=0
         with self.assertRaises(ValueError): recovery.validate_failed_launcher(wrong,registration,plan['original_plan'])
         self.assertEqual(before,util.tree_hashes(self.root))
+
+    def test_actual_zero_send_prior_closeout_and_unknown_sent_tamper_reject(self):
+        evidence=Path(recovery.__file__).resolve().parents[2]/'evaluator-repair-evidence-20261006'
+        closeout_path=evidence/'failed-recovery-observer-startup-sealed-v1/closeout.json'
+        if not closeout_path.is_file(): self.skipTest('Local sealed acceptance evidence unavailable')
+        ref=live_pilot.reference(closeout_path)
+        close=util.read_json(live_pilot.checked(ref)); prior=util.read_json(live_pilot.checked(close['prior_plan']))
+        plan=dict(prior,phase_id='a'*32,prior_recovery_closeouts=[ref],protected_roots=[prior['batch']])
+        root=Path(prior['batch']); before=util.tree_hashes(root)
+        recovery.validate_prior_recoveries(plan)
+        for key,value in [('logical_new_sent_runs',1),('no_owned_runtime_resources',False),
+                ('observer_exit_code',1),('scoped_process_matches',[{'pid':1}])]:
+            wrong=copy.deepcopy(close); wrong[key]=value
+            path=self.root/(key+'.json'); util.write_new_json(path,wrong)
+            forged=dict(plan,prior_recovery_closeouts=[live_pilot.reference(path)])
+            with self.assertRaises(ValueError): recovery.validate_prior_recoveries(forged)
+        invalid=util.read_json(live_pilot.checked(close['inventory']))
+        invalid[next(iter(invalid))]['sha256']='f'*64
+        inv=self.root/'invalid-prior-map.json'; util.write_new_json(inv,invalid)
+        wrong=copy.deepcopy(close); wrong['inventory']=live_pilot.reference(inv)
+        path=self.root/'invalid-prior-closeout.json'; util.write_new_json(path,wrong)
+        with self.assertRaisesRegex(ValueError,'bytes changed'):
+            recovery.validate_prior_recoveries(dict(plan,prior_recovery_closeouts=[live_pilot.reference(path)]))
+        with self.assertRaises(ValueError): recovery.validate_prior_recoveries(dict(plan,prior_recovery_closeouts=[]))
+        self.assertEqual(before,util.tree_hashes(root))
 
 
 if __name__=='__main__': unittest.main()

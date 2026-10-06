@@ -530,7 +530,14 @@ class PilotWatch:
         return self.thread is None or not self.thread.is_alive()
 
 
-def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch):
+def serialized_postprocess(process,lock=None):
+    def wrapped(*args,**kwargs):
+        if lock is None: return process(*args,**kwargs)
+        with lock: return process(*args,**kwargs)
+    return wrapped
+
+
+def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,postprocess_lock=None):
     """One real production pair and observer session; no publication/resend."""
     from research.resource_supervisor import ProcessMonitor
     plan=owner_plan(owner_plan_path,repo); phase=util.read_json(checked(reference(phase_path)))
@@ -586,7 +593,10 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch):
             with budget_watch.lock:
                 budget_watch.run_durations[rid]=time.monotonic()-budget_watch.run_clocks[rid]
     browser=util.read_json(checked(plan['browser_pin']))
-    postprocess=next_phase_execution.browser_postprocess({'browser':{'record':browser}})
+    browser_process=next_phase_execution.browser_postprocess({'browser':{'record':browser}})
+    # Browser activation changes process environment. A parallel campaign
+    # shares this lock across pairs; historical one-pair owners need none.
+    postprocess=serialized_postprocess(browser_process,postprocess_lock)
     # Initial healthy samples precede registering this monitor with the watcher.
     ack=False
     try:

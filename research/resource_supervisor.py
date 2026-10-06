@@ -27,6 +27,8 @@ LIVE_PILOT_KIND = 'live_go_readiness_pilot_observer_v1'
 REPAIRED_MAIN_KIND = 'source_info_repaired_v6_main'
 RECOVERY_KIND = 'repaired_pilot_readiness_recovery_observer_v1'
 CADENCE_SECONDS, STALE_SECONDS = 10, 30
+STARTUP_SECONDS = 60
+STARTUP_KINDS = (REPAIRED_MAIN_KIND, RECOVERY_KIND)
 
 
 def now():
@@ -112,6 +114,22 @@ def safe_environment():
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
+def validate_startup_ready(config,phase,pid,receipt):
+    """A fresh startup receipt is process/config/source-bound, not health."""
+    directory=native_path(config['directory'])
+    if (type(receipt.get('schema_version')) is not int or receipt['schema_version']!=1
+            or receipt.get('kind')!='resource_observer_startup_ready_v1' or receipt.get('validated') is not True
+            or type(pid) is not int or pid<=0 or type(receipt.get('observer_pid')) is not int
+            or receipt['observer_pid']!=pid
+            or any(receipt.get(k)!=config[k] for k in ('session','phase','directory'))
+            or receipt.get('config_sha256')!=util.sha256_file(directory/'config.json')
+            or receipt.get('source_sha256')!=phase.get('source_pins',{}).get('research/resource_supervisor.py')
+            or receipt.get('source_sha256')!=util.sha256_file(__file__)
+            or util.sha256_file(checked(config['phase']))!=config['phase']['sha256']):
+        raise ValueError('Foreign or unverified observer startup receipt')
+    return True
+
+
 class ProcessMonitor:
     """Controller proxy; status is evidence, never an old-session health cache."""
     def __init__(self, phase_path, directory, scope_provider):
@@ -129,6 +147,7 @@ class ProcessMonitor:
     def start(self):
         if self.process is not None:
             raise RuntimeError('Supervisor starts once')
+        startup_required=util.read_json(self.phase_path).get('kind') in STARTUP_KINDS
         config = self.directory / 'config.json'
         util.write_new_json(config, {'phase': {'path': str(self.phase_path), 'sha256': self.digest},
             'session': self.session, 'directory': str(self.directory)})
@@ -138,8 +157,38 @@ class ProcessMonitor:
             stdin=subprocess.DEVNULL, stdout=self.log, stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             cwd=Path(__file__).resolve().parents[1])
-        self.enroll(self.scope_provider())
+        try:
+            phase=util.read_json(self.phase_path)
+            if phase.get('kind') in STARTUP_KINDS:
+                self.wait_startup(util.read_json(config),phase)
+            self.enroll(self.scope_provider())
+        except BaseException:
+            if not startup_required: raise  # Historical caller recovery remains unchanged.
+                # Nothing was enrolled or admitted. Bound only this Popen
+                # handle; do not discover/kill PIDs or touch worker resources.
+            try:
+                if self.process.poll() is None: self.process.terminate()
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill(); self.process.wait(timeout=5)
+            finally:
+                self.log.close()
+            raise
         return self
+
+    def wait_startup(self,config,phase):
+        deadline=time.monotonic()+STARTUP_SECONDS
+        receipt=self.directory/'startup-ready.json'
+        while time.monotonic()<deadline:
+            if self.process.poll() is not None: raise RuntimeError('Observer exited before startup ready')
+            if receipt.exists():
+                try: ready=util.read_json(receipt)
+                except json.JSONDecodeError: pass  # Writer has not completed its exclusive JSON yet.
+                else:
+                    validate_startup_ready(config,phase,self.process.pid,ready)
+                    return
+            time.sleep(.05)
+        raise RuntimeError('Observer validation startup deadline exceeded')
 
     def enroll(self, scope):
         value = {'pairs': scope['pairs'], 'bindings': scope['assignments']}
@@ -298,6 +347,13 @@ class Supervisor:
         self.status_done = threading.Event()
         self.shutdown_done = threading.Event()
         self.status_sequence = 0
+        if self.phase['kind'] in STARTUP_KINDS:
+            ready=dict(schema_version=1,kind='resource_observer_startup_ready_v1',validated=True,
+                session=self.session,phase=config['phase'],directory=config['directory'],
+                config_sha256=util.sha256_file(self.directory/'config.json'),observer_pid=os.getpid(),
+                source_sha256=util.sha256_file(__file__),ready_at=now())
+            validate_startup_ready(config,self.phase,os.getpid(),ready)
+            util.write_new_json(self.directory/'startup-ready.json',ready)
 
     def status_publisher(self):
         while not self.status_done.is_set():

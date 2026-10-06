@@ -158,6 +158,7 @@ def validate_plan(plan,repo):
     if not set(EXTRA_PINS)<=plan.get('source_pins',{}).keys():
         raise ValueError('Recovery and saved postprocessing source pins required')
     old,closure,_=sealed_original(plan)
+    validate_prior_recoveries(plan)
     # Reuse the exact reviewed pilot semantic/source/runtime/path validator on
     # a virtual full assignment list. No Music directory is allocated by this
     # amendment; its real assignment list is only the original second pair.
@@ -188,6 +189,81 @@ def validate_plan(plan,repo):
     if live_pilot.checked(plan['launch_supervisor'])!=live_pilot.safe_path(repo)/'research/live_pilot_launcher.py':
         raise ValueError('Reviewed external recovery launcher required')
     return plan
+
+
+def validate_prior_recoveries(plan):
+    """Only sealed, independently closed zero-send attempts permit a new root."""
+    refs=plan.get('prior_recovery_closeouts')
+    if not isinstance(refs,list) or not refs: raise ValueError('Explicit sealed prior recovery closeouts required')
+    seen=set()
+    for ref in refs:
+        close=_reference_json(ref); prior_ref=close['prior_plan']; prior=_reference_json(prior_ref)
+        root=live_pilot.safe_path(prior['batch'])
+        if (close.get('kind')!='failed_recovery_observer_startup_closeout_v1'
+                or type(close.get('schema_version')) is not int or close['schema_version']!=1
+                or close.get('original_plan')!=plan['original_plan']
+                or prior.get('kind')!=KIND or prior.get('original_plan')!=plan['original_plan']
+                or prior.get('assignments')!=plan['assignments'] or prior.get('carried')!=plan['carried']
+                or close.get('original_wall_start_utc')!=plan['original_wall_start_utc']
+                or prior.get('original_wall_start_utc')!=plan['original_wall_start_utc']
+                or close.get('original_seal')!=plan['original_closeout']
+                or close.get('original_unchanged') is not True or close.get('failure_preserved') is not True
+                or close.get('ready') is not False or close.get('new100_dispatched') is not False
+                or type(close.get('logical_new_sent_runs')) is not int or close['logical_new_sent_runs']!=0
+                or close.get('observer_ack_confirmed') is not True
+                or type(close.get('observer_exit_code')) is not int or close['observer_exit_code']!=0
+                or close.get('scoped_process_matches')!=[] or close.get('no_owned_runtime_resources') is not True
+                or root in seen or live_pilot.safe_path(close['failed_batch'])!=root
+                or prior['phase_id']==plan['phase_id']
+                or not any(live_pilot.safe_path(p)==root for p in plan['protected_roots'])):
+            raise ValueError('Prior recovery is unknown, active, sent, unprotected or foreign')
+        seen.add(root)
+        if util.tree_hashes(root)!=_reference_json(close['inventory']): raise ValueError('Prior failed recovery bytes changed')
+        result=_reference_json(close['result']); launched=_reference_json(close['launcher_result'])
+        terminal=_reference_json(close['observer_terminal'])
+        for field,relative in [('result','result.json'),('launcher_result','_launcher/result.json'),
+                               ('observer_terminal','pair-2/observer-terminal.json')]:
+            if live_pilot.checked(close[field])!=root/relative: raise ValueError('Foreign prior terminal reference')
+        child=launched.get('child',{}); registration=util.read_json(root/'_launcher/registration.json')
+        if (result.get('kind')!=KIND or result.get('plan_sha256')!=prior_ref['sha256']
+                or result.get('recovery_operational_complete') is not False or result.get('fault') is None
+                or result.get('watcher_shutdown_verified') is not True or result.get('original_unchanged') is not True
+                or type(result.get('new_model_runs')) is not int or result['new_model_runs']!=0
+                or launched.get('kind')!='live_pilot_launcher_result_v1'
+                or launched.get('plan')!=prior_ref or launched.get('operational_complete') is not False
+                or registration.get('plan')!=prior_ref or type(registration.get('child_pid')) is not int
+                or registration['child_pid']<=0 or type(child.get('pid')) is not int or child['pid']!=registration['child_pid']
+                or type(launched.get('child_pid')) is not int or launched['child_pid']!=registration['child_pid']
+                or type(child.get('initial_exit_code')) is not int or child['initial_exit_code']!=1
+                or type(child.get('exit_code')) is not int or child['exit_code']!=1
+                or child.get('unknown') is not False or child.get('terminated') is not False or child.get('killed') is not False
+                or util.read_json(root/'_control/dispatch-stop.json').get('plan_sha256')!=prior_ref['sha256']
+                or pair_execution.state(root/'pair-2/_control/pair-journal.jsonl')['dispatch']
+                or any((root/'pair-2'/c['run_id']).exists() for c in plan['assignments'][0]['cases'])):
+            raise ValueError('Prior attempt failed closure or zero-send proof invalid')
+        directory=live_pilot.safe_path(terminal['directory']); phase_ref=live_pilot.reference(root/'pair-2/phase.json')
+        if (terminal.get('plan')!=prior_ref or terminal.get('phase')!=phase_ref
+                or directory.parent!=live_pilot.safe_path(root/'_observers') or directory.name!=terminal.get('session')
+                or terminal.get('observer_ack_verified') is not True
+                or type(terminal.get('observer_exit_code')) is not int or terminal['observer_exit_code']!=0
+                or type(terminal.get('observer_pid')) is not int or terminal['observer_pid']<=0
+                or type(terminal.get('generation')) is not int or terminal['generation']<=0):
+            raise ValueError('Prior observer closed identity missing')
+        pins=terminal.get('evidence_files',{}); required={'config.json','shutdown.json','shutdown-ack.json','status.json'}
+        if not required<=pins.keys(): raise ValueError('Prior observer evidence missing')
+        for name,sha in pins.items():
+            if (Path(name).is_absolute() or '..' in Path(name).parts or ':' in name or '\\' in name
+                    or util.sha256_file(live_pilot.safe_path(directory/name))!=sha):
+                raise ValueError('Prior observer evidence changed')
+        config=util.read_json(directory/'config.json'); request=util.read_json(directory/'shutdown.json')
+        ack=util.read_json(directory/'shutdown-ack.json')
+        expected=dict(session=terminal['session'],generation=terminal['generation'],phase_sha256=phase_ref['sha256'])
+        if (config.get('session')!=terminal['session'] or config.get('phase')!=phase_ref
+                or live_pilot.safe_path(config['directory'])!=directory or request.get('dispatched')!=[]
+                or any(v.get(k)!=x for v in (request,ack) for k,x in expected.items())
+                or ack.get('owned_resources_resolved') is not True or ack.get('monitor_stop_confirmed') is not True):
+            raise ValueError('Prior independent shutdown ACK missing or foreign')
+    return refs
 
 
 class RecoveryWatch(live_pilot.PilotWatch):

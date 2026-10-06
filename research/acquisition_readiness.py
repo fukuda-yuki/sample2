@@ -296,6 +296,8 @@ def validate_observer_terminal(plan,plan_reference,pair,child,terminal):
         raise ValueError('Pilot observer terminal identity/exit mismatch')
     pins=terminal.get('evidence_files')
     required={'config.json','shutdown.json','shutdown-ack.json','status.json'}
+    from research.resource_supervisor import STARTUP_KINDS,validate_startup_ready
+    if phase.get('kind') in STARTUP_KINDS: required.add('startup-ready.json')
     if not isinstance(pins,dict) or not required<=pins.keys(): raise ValueError('Observer evidence hashes missing')
     for name,digest in pins.items():
         if (not isinstance(name,str) or Path(name).is_absolute() or '..' in Path(name).parts
@@ -303,6 +305,8 @@ def validate_observer_terminal(plan,plan_reference,pair,child,terminal):
                 or util.sha256_file(live_pilot.safe_path(directory/name))!=digest):
             raise ValueError('Observer evidence pin changed')
     config=util.read_json(directory/'config.json')
+    if phase.get('kind') in STARTUP_KINDS:
+        validate_startup_ready(config,phase,terminal.get('observer_pid'),util.read_json(directory/'startup-ready.json'))
     if (config.get('session')!=session or config.get('phase')!=dict(path=str(phase_path),sha256=phase_hash)
             or str(config.get('directory','')).removeprefix('\\\\?\\')!=str(directory)):
         raise ValueError('Observer config binding changed')

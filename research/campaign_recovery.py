@@ -17,6 +17,7 @@ from outer.harness.security import child_environment
 from research import campaign_reassessment as assessment
 from research import catalog_delivery as delivery, catalog_share as sharing
 from research import live_pilot, pair_execution, repaired_runtime
+from research.validation_scope import scoped_validation
 
 KIND = 'repaired_campaign_factual_recovery_v1'
 GATE_KIND = 'repaired_campaign_fault_publication_v1'
@@ -366,6 +367,7 @@ def _assess_arm(ctx, case, root, holder):
     return value
 
 
+@scoped_validation
 def recover_wave(repo, campaign_plan_path, wave_path, destination):
     """Preserve and assess once; publication/closure remains a separate operation."""
     ctx = _context(repo, campaign_plan_path, wave_path)
@@ -428,6 +430,7 @@ def recover_wave(repo, campaign_plan_path, wave_path, destination):
         return _write(target,value)
 
 
+@scoped_validation
 def validate_recovery(repo, recovery_ref, campaign_plan_path, wave_path):
     ctx = _context(repo,campaign_plan_path,wave_path)
     path = live_pilot.checked(recovery_ref); value = util.read_json(path)
@@ -553,6 +556,7 @@ def _public_data(value, slot):
                     'Missing total usage is unknown, not zero; observed tokens are lower bounds.'])
 
 
+@scoped_validation
 def stage_public(repo, recovery_ref, slot, destination):
     value = _read(recovery_ref)
     validate_recovery(repo,recovery_ref,value['campaign']['path'],value['wave']['path'])
@@ -616,6 +620,7 @@ def _roundtrip(asset,urls,workspace):
         model_called=False,evaluator_called=False,package_sha256=asset['sha256'])
 
 
+@scoped_validation
 def share_public(repo,recovery_ref,slot,workspace,review):
     """Explicit actual publication after review; ambiguous transfer is reconciled."""
     value=_read(recovery_ref); validate_recovery(repo,recovery_ref,value['campaign']['path'],value['wave']['path'])
@@ -717,6 +722,7 @@ def _verify_publication(ref,recovery_ref,slot):
     return gate
 
 
+@scoped_validation
 def close_recovery(repo,campaign_plan_path,wave_path,recovery_ref,publication_refs):
     value=validate_recovery(repo,recovery_ref,campaign_plan_path,wave_path)
     if set(publication_refs)!=set(value['decisions']): raise ValueError('Every wave pair needs factual publication')
@@ -730,6 +736,7 @@ def close_recovery(repo,campaign_plan_path,wave_path,recovery_ref,publication_re
     return ref
 
 
+@scoped_validation
 def validate_closure(repo,campaign_plan_path,wave_path,closure_ref):
     """Pure bounded local validation for campaign reservation/STOP clearances."""
     path=live_pilot.checked(closure_ref); value=util.read_json(path)

@@ -80,3 +80,12 @@ fences the old root with a new stop event. Immutable history binds the old ledge
 all old epoch UUID reservations and closures. The successor uses a separate clean
 committed checkout and storage root, and excludes all previously reserved UUIDs.
 Succession does not reset the denominator or resource and elapsed-time budgets.
+
+Within one controller operation, a scoped validation context reuses a successful
+deep check of the same predecessor closure. Its plan, wave and closure reference
+bytes are rechecked before reuse. History, ledger, retirement, STOP, ownership and
+current usage checks remain fresh. The context is discarded on operation exit;
+the next operation performs a new complete predecessor check. Failed and cyclic
+checks are never memoized as success. This avoids repeatedly replaying the same
+historical readiness chain during a single admission without weakening live
+fault detection or carrying proof trust across operations.

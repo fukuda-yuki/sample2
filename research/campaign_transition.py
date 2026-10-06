@@ -19,9 +19,11 @@ from outer.harness import run, runtime, util
 from outer.harness.security import child_environment
 from research import live_pilot, pair_execution, repaired_runtime
 from research import repaired_campaign as campaign
+from research.validation_scope import scoped_validation, validate_predecessor_once
 
 KIND = 'repaired_campaign_successor_v1'
 PIN = 'research/campaign_transition.py'
+SCOPE_PIN = 'research/validation_scope.py'
 PRESERVED = ('campaign_id', 'slots', 'settings', 'bounds', 'policy', 'base_plan',
              'storage_policy', 'readiness_source_repo')
 
@@ -106,7 +108,14 @@ def _wave_inventory(repo, path, plan):
     rows = []
     for wave_path in sorted((root/'waves').glob('*/spec.json')):
         closure_path = wave_path.parent/'closure.json'
-        campaign.verify_closure(repo, path, wave_path, closure_path)
+        # Only this old deep closure proof is shared by nested operations.
+        # These references are hashed afresh even on a hit; all structural,
+        # ledger, STOP, usage and owned-closure checks remain outside the memo.
+        plan_ref, wave_ref, closure_ref = map(_ref, (path, wave_path, closure_path))
+        key = ('predecessor-wave', str(live_pilot.safe_path(repo)),
+               *((ref['path'], ref['sha256']) for ref in (plan_ref, wave_ref, closure_ref)))
+        validate_predecessor_once(key,
+            lambda: campaign.verify_closure(repo, path, wave_path, closure_path))
         wave = campaign.wave_spec(repo, path, wave_path)
         from research import campaign_recovery
         ctx = campaign_recovery._context(repo, path, wave_path)
@@ -193,6 +202,7 @@ def _clock(path, plan_ref):
     return value
 
 
+@scoped_validation
 def create_successor(*, repo, path, batch, predecessor_plan, predecessor_repo, authorization):
     """Explicit administrative transition only; invoke after committing new code."""
     repo, path, batch, old_repo, old_path = map(live_pilot.safe_path,
@@ -214,7 +224,7 @@ def create_successor(*, repo, path, batch, predecessor_plan, predecessor_repo, a
     commit = next_phase.git(repo, 'rev-parse', 'HEAD')
     if not re.fullmatch('[a-f0-9]{40}', commit):
         raise ValueError('Full successor commit identity required')
-    names = set(old['source_pins']) | set(campaign.EXTRA_PINS) | {PIN}
+    names = set(old['source_pins']) | set(campaign.EXTRA_PINS) | {PIN, SCOPE_PIN}
     pins = {name: util.sha256_file(repo/name) for name in sorted(names)}
     repaired_runtime._committed_files(repo, commit, pins)
     with ExitStack() as stack:

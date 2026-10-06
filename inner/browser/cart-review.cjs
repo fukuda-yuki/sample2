@@ -58,11 +58,26 @@ async function observe(page) {
     const orphans = genericRows ? [...document.querySelectorAll('[id^="item-count-"]')]
       .filter(e => visible(e) && !rows.some(row => row.contains(e))) : [];
     if (orphans.length) reasons.push({ reason: 'quantity_marker_without_declared_row', count: orphans.length });
+    function projectedMarkup(e) {
+      // HTML parsers discard standalone table cells. Preserve the observed
+      // element bytes inside valid table ancestry, without changing live DOM.
+      switch (e.tagName) {
+        case 'TD': case 'TH': return '<table><tbody><tr>' + e.outerHTML + '</tr></tbody></table>';
+        case 'TR': return '<table><tbody>' + e.outerHTML + '</tbody></table>';
+        case 'THEAD': case 'TBODY': case 'TFOOT': case 'CAPTION': case 'COLGROUP':
+          return '<table>' + e.outerHTML + '</table>';
+        case 'COL': return '<table><colgroup>' + e.outerHTML + '</colgroup></table>';
+        default: return e.outerHTML;
+      }
+    }
+    const selected = genericRows ? [...new Set([...rows, ...totals, ...status, ...orphans])] : [];
+    // Deduplicate projected DOM identities/containment, never marker IDs.
+    // A marker already inside a row is retained once; genuine duplicates stay.
+    const roots = selected.filter(e => !selected.some(parent => parent !== e && parent.contains?.(e)));
     const state = {
       html: document.documentElement.outerHTML, url: location.href,
       visibleCartHtml: genericRows
-        ? '<section>' + rows.map(e => e.tagName === 'TR' ? '<table>' + e.outerHTML + '</table>' : e.outerHTML).join('')
-          + totals.map(e => e.outerHTML).join('') + status.map(e => e.outerHTML).join('') + orphans.map(e => e.outerHTML).join('') + '</section>'
+        ? '<section>' + roots.map(projectedMarkup).join('') + '</section>'
         : '<table>' + rows.map(e => e.outerHTML).join('') + '<tr>' + totals.map(e => e.outerHTML).join('') + '</tr></table>' + status.map(e => e.outerHTML).join(''),
       cartStatus: status.map(e => e.textContent.trim()),
       rows: projected,

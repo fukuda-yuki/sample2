@@ -248,6 +248,43 @@ for(const version of ['1.4.0','1.5.0']){const old=context(version),oldMatch=vm.r
         result=subprocess.run(['node','-e',script,str(collector),str(self.root)],capture_output=True,text=True)
         self.assertEqual(0,result.returncode,result.stderr)
 
+    def test_music_16_projection_preserves_table_markers_and_dom_identity(self):
+        collector=Path(__file__).resolve().parents[2]/'inner/browser/cart-review.cjs'
+        script='''const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+(async()=>{const file=process.argv[1],root=process.argv[2],source=fs.readFileSync(file,'utf8').split('(async () => {')[0];
+function node(tag,id,text,children=[]){return {tagName:tag,id,textContent:text,children,
+ outerHTML:'<'+tag.toLowerCase()+' id="'+id+'">'+text+children.map(e=>e.outerHTML).join('')+'</'+tag.toLowerCase()+'>',
+ getClientRects:()=>[{}],contains(e){return children.some(child=>child===e||child.contains(e));},
+ querySelectorAll(q){const all=children.flatMap(e=>[e,...e.querySelectorAll('*')]);return q==='*'?all:q==='a[href]'?all.filter(e=>e.href):all.filter(e=>e.id.startsWith('item-count-'));},querySelector(){return null;}};}
+function context(version){const request=path.join(root,'projection-'+version+'.json');fs.writeFileSync(request,JSON.stringify({evaluationVersion:version}));
+ const fixtureRequire=n=>n==='playwright'?{chromium:{}}:n==='playwright/package.json'?{version:'fixture'}:n==='./product-response.cjs'?require(path.join(path.dirname(file),'product-response.cjs')):require(n);
+ const c=vm.createContext({require:fixtureRequire,__filename:file,__dirname:path.dirname(file),process:{argv:['node',file,request,root],version:'fixture'},URL,Buffer,setTimeout,getComputedStyle:()=>({visibility:'visible'}),location:{href:'http://127.0.0.1:1234/ShoppingCart'}});vm.runInContext(source,c);return c;}
+async function observed(c,{rows=[],totals=[],status=[],orphans=[]}){c.document={documentElement:{outerHTML:'finite native DOM'},querySelectorAll:q=>q==='[id^="row-"]'?rows:q==='tr[id^="row-"]'?rows.filter(e=>e.tagName==='TR'):q==='[id="cart-total"]'?totals:q==='[id="cart-status"]'?status:q==='[id^="item-count-"]'?orphans:[]};return vm.runInContext('observe',c)({evaluate:async(fn,arg)=>fn(arg)});}
+const c=context('1.6.0');
+const save=(name,state)=>fs.writeFileSync(path.join(root,'finite-'+name+'.json'),JSON.stringify({page:state}));
+const wrappers={TD:['<table><tbody><tr>','</tr></tbody></table>'],TH:['<table><tbody><tr>','</tr></tbody></table>'],TR:['<table><tbody>','</tbody></table>'],TBODY:['<table>','</table>'],THEAD:['<table>','</table>'],TFOOT:['<table>','</table>'],CAPTION:['<table>','</table>'],COLGROUP:['<table>','</table>'],COL:['<table><colgroup>','</colgroup></table>'],DIV:['','']};
+for(const [tag,[prefix,suffix]] of Object.entries(wrappers)){
+ const total=node(tag,'cart-total','$14.50'),status=node(tag,'cart-status','Cart (2)'),orphan=node(tag,'item-count-999','1');
+ const state=await observed(c,{totals:[total],status:[status],orphans:[orphan]});
+ assert.equal(state.visibleCartHtml,'<section>'+[total,status,orphan].map(e=>prefix+e.outerHTML+suffix).join('')+'</section>',tag+' markers require valid table ancestry');
+ assert.equal(state.totals[0],'$14.50');assert.equal(state.cartStatus[0],'Cart (2)');assert.equal(state.rowMarkerObservation.kind,'unknown');
+}
+const total=node('TD','cart-total','14.50'),duplicate=node('TD','cart-total','7.25');
+let state=await observed(c,{totals:[total,duplicate]});assert.equal((state.visibleCartHtml.match(/id="cart-total"/g)||[]).length,2,'genuine duplicate IDs must remain');assert.equal(state.totals.length,2);save('duplicate-totals',state);
+state=await observed(c,{});assert.equal(state.visibleCartHtml,'<section></section>');assert.equal(state.totals.length,0,'no monetary marker can be synthesized');save('missing-total',state);
+state=await observed(c,{totals:[node('TD','cart-total','')]});assert.equal(state.totals[0],'');save('empty-total',state);
+const contained=node('TD','cart-total','14.50'),row=node('TR','row-bad','',[contained]);
+state=await observed(c,{rows:[row],totals:[contained]});assert.equal((state.visibleCartHtml.match(/id="cart-total"/g)||[]).length,1,'a native node inside a projected row must appear once');assert(state.visibleCartHtml.includes('id="row-bad"'));assert.equal(state.rowMarkerObservation.kind,'unknown');save('malformed-contained-row',state);
+const anchor=node('A','','Album');anchor.href='http://127.0.0.1:1234/Store/Details/1';anchor.outerHTML='<a href="/Store/Details/1">Album</a>';
+const validRow=node('DIV','row-1','',[node('SPAN','item-count-1','2'),anchor]);
+for(const tag of ['TD','DIV']){state=await observed(c,{rows:[validRow],totals:[node(tag,'cart-total','$14.50')],status:[node('DIV','cart-status','Cart (2)')]});assert.equal(state.rowMarkerObservation.kind,'known');assert.equal(state.rows[0].count,'2');save('currency-'+tag.toLowerCase(),state);}
+const nested=node('DIV','row-duplicate','',[node('DIV','row-duplicate','')]);
+state=await observed(c,{rows:[nested,nested.children[0]]});assert.equal((state.visibleCartHtml.match(/id="row-duplicate"/g)||[]).length,2,'containment removes repeated projection, never actual duplicate markers');
+for(const version of ['1.4.0','1.5.0']){const old=context(version);state=await observed(old,{totals:[total],status:[node('TD','cart-status','Cart (2)')]});assert.equal(state.visibleCartHtml,'<table><tr>'+total.outerHTML+'</tr></table><td id="cart-status">Cart (2)</td>','historical byte behavior');}
+})().catch(e=>{console.error(e);process.exitCode=1});'''
+        result=subprocess.run(['node','-e',script,str(collector),str(self.root)],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
+
     def test_music_16_click_locator_follows_generic_marker_and_unsupported_rows_remain_partial(self):
         collector=Path(__file__).resolve().parents[2]/'inner/browser/cart-review.cjs'
         script='''const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');

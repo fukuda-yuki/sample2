@@ -18,7 +18,7 @@ public sealed class RunState : IDisposable
 
     public string EvaluationVersion { get; set; } = Program.DefaultEvaluationVersion;
 
-    public bool ExplicitOrderContract => EvaluationVersion is "1.2.0" or "1.3.0" or "1.4.0";
+    public bool ExplicitOrderContract => EvaluationVersion is "1.2.0" or "1.3.0" or "1.4.0" or "1.5.0";
 
     public MigrationContinuity Migration { get; set; }
 
@@ -375,17 +375,23 @@ public static class Scenarios
             result.RecordId = result.LinesAfterTwoAdds[0].RecordId;
         }
 
-        result.RemoveFromTwo = session.PostForm("/ShoppingCart/RemoveFromCart", new[]
+        result.RemoveFromTwo = ObserveRemoval(state.EvaluationVersion, result.LinesAfterTwoAdds, 2, result.RecordId, id =>
         {
-            new KeyValuePair<string, string>("id", result.RecordId.ToString(CultureInfo.InvariantCulture)),
+            return session.PostForm("/ShoppingCart/RemoveFromCart", new[]
+            {
+                new KeyValuePair<string, string>("id", id.ToString(CultureInfo.InvariantCulture)),
+            });
         });
         result.CartAfterRemoveFromTwo = session.Get("/ShoppingCart");
         result.LinesAfterRemoveFromTwo = Html.CartLines(result.CartAfterRemoveFromTwo.Body);
         result.TotalAfterRemoveFromTwo = Html.Money(result.CartAfterRemoveFromTwo.Body);
 
-        result.RemoveFromOne = session.PostForm("/ShoppingCart/RemoveFromCart", new[]
+        result.RemoveFromOne = ObserveRemoval(state.EvaluationVersion, result.LinesAfterRemoveFromTwo, 1, result.RecordId, id =>
         {
-            new KeyValuePair<string, string>("id", result.RecordId.ToString(CultureInfo.InvariantCulture)),
+            return session.PostForm("/ShoppingCart/RemoveFromCart", new[]
+            {
+                new KeyValuePair<string, string>("id", id.ToString(CultureInfo.InvariantCulture)),
+            });
         });
         result.CartAfterRemoveFromOne = session.Get("/ShoppingCart");
         result.LinesAfterRemoveFromOne = Html.CartLines(result.CartAfterRemoveFromOne.Body);
@@ -400,6 +406,18 @@ public static class Scenarios
 
         return result;
     });
+
+    public static bool RemovalPrecondition(IReadOnlyList<Html.CartLine> lines, int quantity) =>
+        lines.Count == 1 && lines[0].AlbumId == 1 && lines[0].Count == quantity && lines[0].RecordId > 0;
+
+    public static WebResponse ObserveRemoval(string version, IReadOnlyList<Html.CartLine> lines, int quantity,
+        int historicalRecordId, Func<int, WebResponse> submit)
+    {
+        if (version == "1.5.0" && !RemovalPrecondition(lines, quantity)) return null;
+        // The current line is the prerequisite for this distinct check. A
+        // legitimate application may replace a row while decrementing it.
+        return submit(version == "1.5.0" ? lines[0].RecordId : historicalRecordId);
+    }
 
     public static OrderResult RunOrder(RunState state) => Guard(() =>
     {
@@ -435,7 +453,7 @@ public static class Scenarios
 
         session.Get("/ShoppingCart/AddToCart/2");
         result.SecondCheckoutPost = session.PostForm("/Checkout/AddressAndPayment",
-            OrderFields(state.EvaluationVersion is "1.3.0" or "1.4.0" ? "fReE" : "FREE"));
+            OrderFields(state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0" ? "fReE" : "FREE"));
         result.SecondOrderId = ParseOrderId(result.SecondCheckoutPost.Location);
 
         return result;
@@ -516,7 +534,7 @@ public static class Scenarios
         result.LinesAfterMissingField = Html.CartLines(result.CartAfterMissingField.Body);
         if (state.ExplicitOrderContract) result.OrdersAfterMissing = OrderStore.ReadIds(state.Host.DatabasePath);
 
-        if (state.EvaluationVersion is "1.3.0" or "1.4.0")
+        if (state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0")
         {
             var addressSession = state.Session("invalid-fields");
             addressSession.Get("/ShoppingCart/AddToCart/1");
@@ -555,7 +573,7 @@ public static class Scenarios
         result.LinesInSessionB = Html.CartLines(cartB.Body);
         result.TotalInSessionB = Html.Money(cartB.Body);
 
-        if (state.EvaluationVersion is "1.3.0" or "1.4.0" && result.LinesInSessionA.Count == 1)
+        if (state.EvaluationVersion is "1.3.0" or "1.4.0" or "1.5.0" && result.LinesInSessionA.Count == 1)
         {
             sessionB.PostForm("/ShoppingCart/RemoveFromCart", new Dictionary<string,string>
             { ["id"] = result.LinesInSessionA[0].RecordId.ToString(CultureInfo.InvariantCulture) });

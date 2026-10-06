@@ -113,6 +113,47 @@ assert.equal(productResponse('http://127.0.0.1:1234',null,actual),null);'''
         result = subprocess.run(['node', '-e', script, str(helper)], capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_music_15_binds_owned_product_response_and_rejects_relabelled_request(self):
+        event=util.read_json(self.root/'response.json')
+        event.update(caseId='C-015-add-1',checkId='C-012',operation='cart-add',
+                     url='http://127.0.0.1:1234/ShoppingCart/AddToCart/1')
+        util.write_json_atomic(self.root/'response.json',event)
+        self.receipt['evaluationVersion']='1.5.0'
+        self.receipt['productFailures']=[{key:event[key] for key in
+            ('caseId','checkId','operation','method','url','status','clickConfirmed')} | {
+                'evidence':{'path':'response.json','sha256':util.sha256_file(self.root/'response.json')}}]
+        request={key:self.receipt[key] for key in ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+        util.write_json_atomic(self.root/'request.json',request)
+        self.receipt['requestSha256']=util.sha256_file(self.root/'request.json')
+        self.assertEqual(['C-012'],browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
+        self.receipt['evaluationVersion']='1.4.0'
+        self.assertEqual([],browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
+        request['evaluationVersion']=self.receipt['evaluationVersion']='1.6.0'
+        util.write_json_atomic(self.root/'request.json',request)
+        self.receipt['requestSha256']=util.sha256_file(self.root/'request.json')
+        self.assertEqual([],browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
+
+    def test_cart_15_receipt_inherits_schema_three_without_starting_a_real_browser(self):
+        collector=Path(__file__).resolve().parents[2]/'inner/browser/cart-review.cjs'
+        script='''const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+(async()=>{const file=process.argv[1],root=process.argv[2],source=fs.readFileSync(file,'utf8');
+const executable=path.join(root,'fixture-browser-bytes');fs.writeFileSync(executable,'finite fixture; never execute');
+for(const version of ['1.3.0','1.4.0','1.5.0']){
+ const directory=path.join(root,'receipt-'+version);fs.mkdirSync(directory);
+ const input=path.join(directory,'request.json');fs.writeFileSync(input,JSON.stringify({evaluationVersion:version,runInstanceId:'fixture',artifactSha256:'artifact',specSha256:'spec',baseUrl:'http://127.0.0.1:1234'}));
+ const fixtureProcess={argv:['node',file,input,directory],version:'fixture-node',env:{},exitCode:0};
+ const fixtureRequire=name=>name==='playwright'?{chromium:{executablePath:()=>executable,launch:async()=>{throw Error('finite observer fixture: browser never started')}}}:name==='playwright/package.json'?{version:'fixture-playwright'}:name==='./product-response.cjs'?require(path.join(path.dirname(file),'product-response.cjs')):require(name);
+ await vm.runInNewContext(source,{require:fixtureRequire,__filename:file,__dirname:path.dirname(file),process:fixtureProcess,Buffer,URL,performance,setTimeout});
+ const receipt=JSON.parse(fs.readFileSync(path.join(directory,'receipt.json'),'utf8'));
+ assert.equal(receipt.schemaVersion,version==='1.3.0'?2:3);
+ assert.equal(receipt.conditions.collectorVersion,version==='1.3.0'?'1.2.1':version);
+ assert.equal(receipt.faults.length,1);assert.equal(fixtureProcess.exitCode,2);
+ if(version!=='1.3.0'){assert.equal(receipt.evaluationVersion,version);assert(receipt.requestSha256);assert.deepEqual(receipt.productFailures,[]);}
+}
+})().catch(error=>{console.error(error);process.exitCode=1});'''
+        result=subprocess.run(['node','-e',script,str(collector),str(self.root)],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
+
 
 class DateRepresentationTests(unittest.TestCase):
     def test_date_semantics_only_for_new_contract_and_date_columns(self):

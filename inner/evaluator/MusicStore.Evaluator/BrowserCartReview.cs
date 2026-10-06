@@ -69,7 +69,7 @@ public sealed class BrowserCartReview
 
     public static BrowserCartReview Load(string path, string artifactHash, string specHash,
         string runInstanceId, Catalog catalog, bool requireCartStatus = false,
-        bool structuralPrecondition = false, bool productHttpContract = false)
+        bool structuralPrecondition = false, bool productHttpContract = false, string expectedEvaluationVersion = "1.4.0")
     {
         var receipt = JsonSerializer.Deserialize<Receipt>(File.ReadAllText(path),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -94,7 +94,7 @@ public sealed class BrowserCartReview
         foreach (var id in new[] { "C-015", "C-016" })
             review.results[id] = new Result(false, "Browser case not performed.", false, "not_run");
         var root = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path));
-        if (receipt.SchemaVersion == 3) ReadProductFailures(review, receipt, root, artifactHash, specHash, runInstanceId);
+        if (receipt.SchemaVersion == 3) ReadProductFailures(review, receipt, root, artifactHash, specHash, runInstanceId, expectedEvaluationVersion);
         foreach (var removal in receipt.Removals)
         {
             try
@@ -193,7 +193,7 @@ public sealed class BrowserCartReview
     }
 
     private static void ReadProductFailures(BrowserCartReview review, Receipt receipt, string root,
-        string artifactHash, string specHash, string runInstanceId)
+        string artifactHash, string specHash, string runInstanceId, string expectedEvaluationVersion)
     {
         // A status seen at an allowlisted owned application endpoint is a finite
         // product fact. It does not imply that a later DOM observation completed.
@@ -207,7 +207,7 @@ public sealed class BrowserCartReview
             || rq.GetProperty("specSha256").GetString() != specHash
             || rq.GetProperty("runInstanceId").GetString() != runInstanceId
             || rq.GetProperty("baseUrl").GetString() != receipt.BaseUrl
-            || rq.GetProperty("evaluationVersion").GetString() != "1.4.0")
+            || expectedEvaluationVersion is not ("1.4.0" or "1.5.0") || rq.GetProperty("evaluationVersion").GetString() != expectedEvaluationVersion)
             throw new InvalidDataException("Browser observation request binding mismatch.");
         var identities = new HashSet<string>(StringComparer.Ordinal);
         foreach (var failure in receipt.ProductFailures ?? new())

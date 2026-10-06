@@ -7,14 +7,14 @@ const crypto = require('node:crypto');
 const { chromium } = require('playwright');
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const out = process.argv[3];
-const repaired = input.evaluationVersion === '1.4.0';
+const repaired = ['1.4.0', '1.5.0'].includes(input.evaluationVersion);
 const recorder = repaired ? require('./product-response.cjs').recorder : null;
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const write = (name, value) => fs.writeFileSync(path.join(out, name), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 const ref = name => ({ path: name, sha256: sha(fs.readFileSync(path.join(out, name))) });
 const conditions = {
-  collectorVersion: repaired ? '1.4.0' : '1.2.1', collectorSha256: sha(fs.readFileSync(__filename)),
+  collectorVersion: repaired ? input.evaluationVersion : '1.2.1', collectorSha256: sha(fs.readFileSync(__filename)),
   playwrightVersion: require('playwright/package.json').version, nodeVersion: process.version,
   browser: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
   locale: 'en-US', timezoneId: 'UTC', actionTimeoutMs: 5000, navigationTimeoutMs: 15000,

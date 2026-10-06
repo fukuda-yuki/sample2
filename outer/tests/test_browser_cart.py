@@ -16,6 +16,10 @@ class BrowserCoverageTests(unittest.TestCase):
         self.assertTrue(browser_cart.required('1.2.0'))
         self.assertFalse(browser_cart.required('1.1.0'))
 
+    def test_music_15_inherits_browser_requirement_without_accepting_future_versions(self):
+        self.assertTrue(browser_cart.required('1.5.0'))
+        self.assertFalse(browser_cart.required('1.6.0'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

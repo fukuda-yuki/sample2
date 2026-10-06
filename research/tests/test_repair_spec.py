@@ -44,7 +44,27 @@ class RepairSpecTests(unittest.TestCase):
             repair_spec.write(source, dest)
             with self.assertRaises(FileExistsError): repair_spec.write(source, dest)
             self.assertEqual(before, source.read_bytes())
-        with self.assertRaises(ValueError): repair_spec.revised({'specVersion': '1.4.0'})
+        with self.assertRaises(ValueError): repair_spec.revised({'specVersion': '9.0.0'})
+
+    def test_music_removal_revision_keeps_prior_contract_and_declares_missing_preconditions(self):
+        original = {'specVersion': '1.4.0', 'taskId': 'MS', 'requirements': [
+            {'id': 'R-014', 'severity': 'major', 'weight': 1,
+             'checks': [{'id': 'C-015', 'observation': 'Quantity 2 removal'}]},
+            {'id': 'R-015', 'severity': 'major', 'weight': 1,
+             'checks': [{'id': 'C-016', 'observation': 'Quantity 1 removal'}]}],
+            'migrationContract': {'oracleSha256': 'fixed'},
+            'measurementRevision': {'sourceSpecVersion': '1.3.0', 'changes': ['Earlier finite repairs']}}
+        before = copy.deepcopy(original)
+        result = repair_spec.revised(original)
+        self.assertEqual(original, before)
+        self.assertEqual(result['specVersion'], '1.5.0')
+        self.assertEqual(requirement_inventory(result), requirement_inventory(original))
+        self.assertEqual(result['migrationContract'], original['migrationContract'])
+        self.assertEqual(result['priorMeasurementRevision'], original['measurementRevision'])
+        text = ' '.join(result['measurementRevision']['changes'])
+        self.assertIn('positive record ID', text)
+        self.assertIn('blocked', text)
+        self.assertIn('C-016', text)
 
 
 if __name__ == '__main__': unittest.main()

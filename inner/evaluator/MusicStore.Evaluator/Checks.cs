@@ -593,6 +593,9 @@ public static class Checks
             return Fault(state, "R-014", "C-015", input, scenario, state.Transcript("cart"));
         }
 
+        if (state.EvaluationVersion == "1.5.0" && (!Scenarios.RemovalPrecondition(scenario.LinesAfterTwoAdds, 2)
+            || scenario.RemoveFromTwo == null))
+            return RemovalUnknown(state, "R-014", "C-015", input, "Quantity-two cart line with a positive current record ID was not established, or no removal request was observed.");
         var itemCount = ExtractItemCount(scenario.RemoveFromTwo.Body);
         var expected = state.Catalog.ById(1).Price;
         var browser = state.BrowserCartReview?.For("C-015");
@@ -630,6 +633,9 @@ public static class Checks
             return Fault(state, "R-015", "C-016", input, scenario, state.Transcript("cart"));
         }
 
+        if (state.EvaluationVersion == "1.5.0" && (!Scenarios.RemovalPrecondition(scenario.LinesAfterRemoveFromTwo, 1)
+            || scenario.RemoveFromOne == null))
+            return RemovalUnknown(state, "R-015", "C-016", input, "Quantity-one cart line with a positive current record ID was not established, or no removal request was observed.");
         var itemCount = ExtractItemCount(scenario.RemoveFromOne.Body);
         var browser = state.BrowserCartReview?.For("C-016");
         var ok = itemCount == 0
@@ -647,6 +653,18 @@ public static class Checks
                 + (browser?.Detail ?? "HTTP再読込のみ。ブラウザーの削除操作と表示更新は未観測。"),
             state.Transcript("cart"));
         if (result.Judgement == Judgement.Pass && browser?.Complete == false) result.Judgement = Judgement.Blocked;
+        return result;
+    }
+
+    private static CheckResult RemovalUnknown(RunState state, string requirementId, string checkId, string input, string reason)
+    {
+        var browser = state.BrowserCartReview?.For(checkId);
+        // A separately established browser failure is still a finite fact. A
+        // browser pass alone cannot establish the missing server JSON predicate.
+        var finiteBrowserFailure = browser?.Complete == true && !browser.Pass;
+        var result = Make(state, requirementId, checkId, input, finiteBrowserFailure ? Judgement.Fail : Judgement.Blocked,
+            "HTTP removal not assessed: " + reason + (browser == null ? "" : "\n" + browser.Detail), state.Transcript("cart"));
+        result.UnknownObservations.Add("HTTP removal JSON/state predicate not observed because its prerequisite or request is absent.");
         return result;
     }
 
@@ -1059,7 +1077,7 @@ public static class Checks
 
         if (scenario.LegacyUnresolved.Count > 0)
         {
-            if (state.EvaluationVersion == "1.4.0" && scenario.LegacyReferences.Count > 0)
+            if (state.EvaluationVersion is "1.4.0" or "1.5.0" && scenario.LegacyReferences.Count > 0)
             {
                 var confirmed = Make(state, "R-029", "C-030", input, Judgement.Fail,
                     "Confirmed legacy dependency: " + string.Join(", ", scenario.LegacyReferences)

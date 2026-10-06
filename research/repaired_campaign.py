@@ -18,6 +18,7 @@ import uuid
 
 from outer.harness import live_usage, run, util
 from research import acquisition_readiness as readiness, live_pilot, pair_execution
+from research.validation_scope import scoped_validation
 
 KIND = 'repaired_parallel_logical100_campaign_v1'
 BASE_SHA = '3e0c459138ff9bc1b9d3fd676347239ba343f65876cbeb44835097bedae1ccfe'
@@ -43,6 +44,7 @@ def logical(pair):
     return value
 
 
+@scoped_validation
 def validate(repo, path):
     repo, path = live_pilot.safe_path(repo), live_pilot.safe_path(path)
     p = util.read_json(path)
@@ -87,6 +89,7 @@ def policy():
         balance=False, paid_fallback=False, purchases=False)
 
 
+@scoped_validation
 def validate_readiness(repo,path):
     p=validate(repo,path)
     base=document(p['base_plan'])
@@ -96,6 +99,7 @@ def validate_readiness(repo,path):
     return readiness.readiness_for_main(source,base)
 
 
+@scoped_validation
 def create(repo, path, base_path, batch, authorization):
     repo, path, batch = map(live_pilot.safe_path,(repo,path,batch))
     base_ref = live_pilot.reference(base_path)
@@ -103,7 +107,7 @@ def create(repo, path, base_path, batch, authorization):
     base = document(base_ref)
     from research import next_phase, repaired_runtime
     if next_phase.git(repo,'status','--porcelain'): raise ValueError('Clean committed checkout required')
-    names = set(base['source_pins']) | set(EXTRA_PINS)
+    names = set(base['source_pins']) | set(EXTRA_PINS) | {'research/validation_scope.py'}
     pins = {name:util.sha256_file(repo/name) for name in sorted(names)}
     commit = next_phase.git(repo,'rev-parse','HEAD')
     repaired_runtime._committed_files(repo,commit,pins)
@@ -173,6 +177,7 @@ def campaign_stop_pending(p):
     return any(acknowledged.get(str(path))!=util.sha256_file(path) for path in paths)
 
 
+@scoped_validation
 def epoch(repo,path):
     """Freeze fresh UUIDs; only later explicit wave reservation permits execution."""
     p=validate(repo,path); base=copy.deepcopy(document(p['base_plan']))
@@ -207,6 +212,7 @@ def epoch(repo,path):
     return live_pilot.reference(target)
 
 
+@scoped_validation
 def wave_spec(repo,path,wave_path):
     p=validate(repo,path); wpath=live_pilot.safe_path(wave_path); w=util.read_json(wpath)
     if (w.get('campaign')!=live_pilot.reference(path) or wpath.name!='spec.json'
@@ -226,6 +232,7 @@ def wave_spec(repo,path,wave_path):
     return w
 
 
+@scoped_validation
 def reserve_wave(repo,path,epoch_ref,pairs):
     p=validate(repo,path)
     with pair_execution.exclusive(Path(p['batch'])/'_allocation'):
@@ -279,6 +286,7 @@ def _reserve_wave(repo,path,epoch_ref,pairs):
     return target
 
 
+@scoped_validation
 def validate_admission(repo,path,wave_path):
     p=validate(repo,path);w=wave_spec(repo,path,wave_path);ref=live_pilot.reference(wave_path)
     reservations=[e for e in ledger(p) if e['kind']=='pair_attempt_reserved']
@@ -296,6 +304,7 @@ def validate_admission(repo,path,wave_path):
     return True
 
 
+@scoped_validation
 def reconcile_reservation(repo,path,wave_path):
     """Complete a torn local reservation only after proving no launch/dispatch."""
     p=validate(repo,path);w=wave_spec(repo,path,wave_path);ref=live_pilot.reference(wave_path)
@@ -456,6 +465,7 @@ class CampaignWatch(live_pilot.PilotWatch):
         return joined
 
 
+@scoped_validation
 def execute_wave(repo,path,wave_path,owner_pid):
     p=validate(repo,path)
     with pair_execution.exclusive(Path(p['batch'])/'_control'):
@@ -511,6 +521,7 @@ def _execute_wave(repo,path,wave_path,owner_pid):
     return outcome
 
 
+@scoped_validation
 def verify_closure(repo,path,wave_path,closure_path):
     w=wave_spec(repo,path,wave_path);c=util.read_json(closure_path)
     if c.get('wave')!=live_pilot.reference(wave_path) or c.get('closed') is not True:
@@ -530,6 +541,7 @@ def verify_closure(repo,path,wave_path,closure_path):
     return True
 
 
+@scoped_validation
 def close_wave(repo,path,wave_path):
     p=validate(repo,path)
     with pair_execution.exclusive(Path(p['batch'])/'_allocation'):
@@ -585,6 +597,7 @@ def _record_closed_wave(p,w,closure):
     return closure
 
 
+@scoped_validation
 def reconcile_recovery(repo,path,wave_path,recovery_closure_ref):
     """Adopt exact same-attempt observations, or authorize a fresh paired retry."""
     from research import campaign_recovery

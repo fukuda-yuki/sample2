@@ -9,6 +9,7 @@ from unittest.mock import patch
 from outer.harness import util
 from research import campaign_transition as transition
 from research import campaign_recovery
+from research.validation_scope import validation_scope
 
 
 class CampaignTransitionTests(unittest.TestCase):
@@ -21,6 +22,8 @@ class CampaignTransitionTests(unittest.TestCase):
             (repo/'research').mkdir(parents=True)
             (repo/'controller.py').write_bytes(b'old controller' if repo == self.old_repo else b'new controller')
         (self.repo/transition.PIN).write_bytes(Path(transition.__file__).read_bytes())
+        from research import validation_scope
+        (self.repo/transition.SCOPE_PIN).write_bytes(Path(validation_scope.__file__).read_bytes())
         self.old_root, self.new_root = self.base/'p26', self.base/'p27'
         self.old_root.mkdir()
         self.old_path, self.path = self.base/'old-plan.json', self.base/'new-plan.json'
@@ -69,7 +72,7 @@ class CampaignTransitionTests(unittest.TestCase):
         self.stack.enter_context(patch.object(transition.campaign,'wave_spec',side_effect=lambda repo,path,wave:util.read_json(wave)))
         self.stack.enter_context(patch.object(transition.campaign,'observed_usage',return_value=self.usage))
         self.stack.enter_context(patch.object(campaign_recovery,'_context',return_value={'synthetic':True}))
-        self.stack.enter_context(patch.object(campaign_recovery,'_owned_closure',
+        self.owned_closure=self.stack.enter_context(patch.object(campaign_recovery,'_owned_closure',
             return_value=transition._ref(self.wave_path.parent/'_launcher/result.json')))
         self.owned=self.stack.enter_context(patch.object(transition,'_owned_idle',return_value=[{'confirmed':True}]))
         self.compressed=self.stack.enter_context(patch.object(transition,'_compress'))
@@ -104,6 +107,7 @@ class CampaignTransitionTests(unittest.TestCase):
         self.assertEqual(clock['plan_sha256'],transition._ref(self.path)['sha256'])
         self.assertEqual(clock['inherited_from'],transition._ref(self.old_root/'execution-start.json'))
         self.assertEqual(util.read_json(self.new_root/'allocation.json')['inherited_pair_attempts'],2)
+        self.assertIn(transition.SCOPE_PIN,p['source_pins'])
         self.compressed.assert_called_once_with(self.new_root)
         self.assertTrue(transition.validate_predecessor(self.repo,p))
         self.docker.assert_not_called()
@@ -234,6 +238,63 @@ class CampaignTransitionTests(unittest.TestCase):
         self.assertEqual(events[:len(self.events)],self.events)
         self.assertEqual(sum(e['kind']=='pair_attempt_reserved' for e in events),3)
         self.assertEqual([e['slot'] for e in events if e['kind']=='pair_accepted'],[1,2])
+
+    def test_nested_operation_reuses_deep_closure_but_checks_ownership_each_time(self):
+        with validation_scope():
+            p=self.create()
+            self.assertTrue(transition.validate_predecessor(self.repo,p))
+            self.assertEqual(self.wave_check.call_count,1)
+            checked=self.owned_closure.call_count
+            self.assertTrue(transition.validate_predecessor(self.repo,p))
+            self.assertGreater(self.owned_closure.call_count,checked)
+            self.owned_closure.side_effect=ValueError('Owned closure changed')
+            with self.assertRaisesRegex(ValueError,'Owned closure changed'):
+                transition.validate_predecessor(self.repo,p)
+            self.assertEqual(self.wave_check.call_count,1)
+
+    def test_current_usage_and_permanent_stop_are_checked_on_memo_hit(self):
+        p=self.create();self.wave_check.reset_mock()
+        with validation_scope():
+            self.assertTrue(transition.validate_predecessor(self.repo,p))
+            self.usage['requests']+=1
+            with self.assertRaisesRegex(ValueError,'Retained predecessor evidence changed'):
+                transition.validate_predecessor(self.repo,p)
+            self.usage['requests']-=1
+            with patch.object(transition.campaign,'campaign_stop_pending',return_value=False):
+                with self.assertRaisesRegex(ValueError,'not permanently fenced'):
+                    transition.validate_predecessor(self.repo,p)
+            self.stop.write_bytes(b'changed original STOP')
+            with self.assertRaisesRegex(ValueError,'Original STOP bytes changed'):
+                transition.validate_predecessor(self.repo,p)
+            self.assertEqual(self.wave_check.call_count,1)
+
+    def test_next_operation_rechecks_deep_file_even_when_closure_ref_is_unchanged(self):
+        p=self.create();self.wave_check.reset_mock()
+        dependency=self.old_root/'immutable-payload.bin';dependency.write_bytes(b'original')
+        def verify(*args):
+            self.verify_closure(*args)
+            if dependency.read_bytes()!=b'original':raise ValueError('Deep historical bytes changed')
+            return True
+        self.wave_check.side_effect=verify
+        with validation_scope():
+            transition.validate_predecessor(self.repo,p)
+            transition.validate_predecessor(self.repo,p)
+        self.assertEqual(self.wave_check.call_count,1)
+        dependency.write_bytes(b'tampered')
+        with validation_scope():
+            with self.assertRaisesRegex(ValueError,'Deep historical bytes changed'):
+                transition.validate_predecessor(self.repo,p)
+        self.assertEqual(self.wave_check.call_count,2)
+
+    def test_changed_closure_reference_is_revalidated_inside_scope(self):
+        p=self.create();self.wave_check.reset_mock()
+        with validation_scope():
+            transition.validate_predecessor(self.repo,p)
+            closure=self.wave_path.parent/'closure.json'
+            util.write_json_atomic(closure,dict(closed=False,wave=self.wave_ref))
+            with self.assertRaisesRegex(ValueError,'Unclosed wave'):
+                transition.validate_predecessor(self.repo,p)
+        self.assertEqual(self.wave_check.call_count,2)
 
 
 if __name__=='__main__':unittest.main()

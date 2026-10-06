@@ -15,6 +15,7 @@ import uuid
 from outer.harness import run, runtime, util
 from outer.harness.security import child_environment
 from research import live_pilot, live_pilot_launcher, pair_execution
+from research.validation_scope import scoped_validation
 
 KIND = 'repaired_campaign_wave_launcher_v1'
 STOP_GRACE = 120
@@ -72,6 +73,7 @@ def _paths(campaign, wave_path):
     return base, wave_path, wave_path.parent / '_launcher'
 
 
+@scoped_validation
 def preflight(repo, plan_path, wave_path):
     """No writes or process starts until the campaign's own validation passes."""
     from research import repaired_campaign
@@ -303,6 +305,7 @@ def supervise(context, child, started):
         **close_owned(context, child, reason))
 
 
+@scoped_validation
 def launch(repo, plan_path, wave_path):
     """One campaign-level supervisor owns preflight through final closure."""
     from research import repaired_campaign

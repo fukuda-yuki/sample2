@@ -1059,6 +1059,15 @@ public static class Checks
 
         if (scenario.LegacyUnresolved.Count > 0)
         {
+            if (state.EvaluationVersion == "1.4.0" && scenario.LegacyReferences.Count > 0)
+            {
+                var confirmed = Make(state, "R-029", "C-030", input, Judgement.Fail,
+                    "Confirmed legacy dependency: " + string.Join(", ", scenario.LegacyReferences)
+                    + "; additional unresolved inputs: " + string.Join(", ", scenario.LegacyUnresolved),
+                    string.Join(Environment.NewLine, scenario.LegacyReferences.Concat(scenario.LegacyUnresolved)));
+                confirmed.ObservationFaults.AddRange(scenario.LegacyUnresolved);
+                return confirmed;
+            }
             return Make(state, "R-029", "C-030", input, Judgement.Error,
                 "旧実装依存を判定できません: " + string.Join(", ", scenario.LegacyUnresolved),
                 string.Join(Environment.NewLine, scenario.LegacyUnresolved));

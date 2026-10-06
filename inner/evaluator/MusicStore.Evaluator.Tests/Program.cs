@@ -9,6 +9,16 @@ if (args.Contains("--environment-child"))
     return;
 }
 
+if (args.Length == 2 && args[0] == "--review-receipt")
+{
+    using var request = JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[1]))!, "request.json")));
+    var rq = request.RootElement;
+    var review = BrowserCartReview.Load(args[1], rq.GetProperty("artifactSha256").GetString(), rq.GetProperty("specSha256").GetString(),
+        rq.GetProperty("runInstanceId").GetString(), new Catalog(), true, true, true);
+    Console.WriteLine(JsonSerializer.Serialize(new { review.ProductFailures, review.Faults, review.Coverage, review.Complete }));
+    return;
+}
+
 var cases = new List<object>();
 void Check(string name, bool pass)
 {
@@ -70,6 +80,15 @@ finally { Directory.Delete(root, true); }
 
 // Only synthetic markers: no discovery or reading of the user's credential.
 BrowserCartReviewTests.Run(Check);
+using (var scanState = new RunState { EvaluationVersion = "1.4.0", Static = new StaticResult
+    { LegacyReferences = new() { "synthetic confirmed System.Web reference" }, LegacyUnresolved = new() { "synthetic unreadable source" } },
+    Ledger = new Ledger { Requirements = new() { new() { Id = "R-029", Checks = new() { new() { Id = "C-030" } } } } } })
+{
+    var mixed = Checks.Registry["C-030"](scanState);
+    Check("known legacy dependency remains failed alongside independent unreadable input", mixed.Judgement == Judgement.Fail && mixed.ObservationFaults.Count == 1);
+    scanState.Static.LegacyReferences.Clear();
+    Check("unreadable source alone never establishes legacy product failure", Checks.Registry["C-030"](scanState).Judgement == Judgement.Error);
+}
 Environment.SetEnvironmentVariable("OPENCODE_GO_API_KEY", "synthetic-canary");
 Environment.SetEnvironmentVariable("UNRELATED_SECRET", "synthetic-canary");
 var result = AppHost.RunProcess("dotnet", $"\"{typeof(Program).Assembly.Location}\" --environment-child", Environment.CurrentDirectory, 10);

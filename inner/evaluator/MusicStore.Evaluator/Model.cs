@@ -90,6 +90,8 @@ public sealed class PreconditionException : Exception
 
 public sealed class CheckResult
 {
+    // Independent observation gaps can coexist with a finite product failure.
+    public List<string> ObservationFaults { get; set; } = new();
     public string RequirementId { get; set; }
 
     public string CheckId { get; set; }

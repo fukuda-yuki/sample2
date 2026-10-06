@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 try:
     from . import support
 except ImportError:
@@ -95,6 +96,60 @@ class SchoolEvidenceTests(unittest.TestCase):
         connection = sqlite3.connect(path); connection.execute("UPDATE Students SET LastName='Lost' WHERE ID=1")
         connection.commit(); connection.close()
         self.assertFalse(school._database_observation(path, 2, oracle)['original_rows_preserved'])
+
+    def test_wal_committed_rows_are_read_in_one_snapshot_without_rewriting_database(self):
+        path = self.root/'wal.sqlite'; writer = sqlite3.connect(path)
+        self.addCleanup(writer.close)
+        writer.execute('PRAGMA journal_mode=WAL'); writer.execute('PRAGMA wal_autocheckpoint=0')
+        writer.execute('CREATE TABLE Students(ID INTEGER,LastName TEXT,FirstMidName TEXT,EnrollmentDate TEXT)')
+        writer.execute("INSERT INTO Students VALUES(1,'Old','Ada','2020-01-02 00:00:00.000')")
+        writer.execute("INSERT INTO Students VALUES(2,'Review','Morgan','2026-02-03')")
+        writer.commit()
+        oracle = {'tables': {'Students': {'key':'ID','rows':[{'ID':1,'LastName':'Old','FirstMidName':'Ada','EnrollmentDate':'2020-01-02'}]}}}
+        for table in ('Departments','Courses','Enrollments'): oracle['tables'][table]={'key':'ID','rows':[]}
+        before = {p.name:util.sha256_file(p) for p in (path,Path(str(path)+'-wal'))}
+        observed = school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertTrue(observed['original_rows_preserved']); self.assertEqual('Morgan',observed['student']['FirstMidName'])
+        self.assertEqual(before,{p.name:util.sha256_file(p) for p in (path,Path(str(path)+'-wal'))})
+        real_connect = sqlite3.connect
+        class InterleavedReader:
+            def __init__(self,*args,**kwargs): self.connection=real_connect(*args,**kwargs)
+            def __enter__(self): self.connection.__enter__(); return self
+            def __exit__(self,*args): return self.connection.__exit__(*args)
+            @property
+            def row_factory(self): return self.connection.row_factory
+            @row_factory.setter
+            def row_factory(self,value): self.connection.row_factory=value
+            def execute(self,sql,*args):
+                if sql.startswith('SELECT *'):
+                    writer.execute("UPDATE Students SET LastName='Changed between reads' WHERE ID=1"); writer.commit()
+                return self.connection.execute(sql,*args)
+            def close(self): self.connection.close()
+        with patch.object(school.sqlite3,'connect',InterleavedReader):
+            snapshot = school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertTrue(snapshot['original_rows_preserved'])
+        self.assertEqual('Changed between reads',writer.execute('SELECT LastName FROM Students WHERE ID=1').fetchone()[0])
+
+    def test_duplicate_id_cannot_hide_changed_original_row(self):
+        path=self.root/'duplicates.sqlite'; connection=sqlite3.connect(path)
+        connection.execute('CREATE TABLE Students(ID INTEGER,LastName TEXT,FirstMidName TEXT,EnrollmentDate TEXT)')
+        connection.executemany('INSERT INTO Students VALUES(?,?,?,?)',[
+            (1,'Old','Ada','2020-01-02'),(1,'Lost','Ada','2020-01-02'),(2,'Review','Morgan','2026-02-03')])
+        connection.commit(); connection.close()
+        oracle={'tables':{'Students':{'key':'ID','rows':[{'ID':1,'LastName':'Old'}]}}}
+        for table in ('Departments','Courses','Enrollments'): oracle['tables'][table]={'key':'ID','rows':[]}
+        observed=school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertFalse(observed['original_rows_preserved'])
+        self.assertEqual(2,observed['differences'][0]['matchedRows'])
+
+    def test_sqlite_identifier_case_does_not_change_student_evidence_field_names(self):
+        path=self.root/'lowercase.sqlite'; connection=sqlite3.connect(path)
+        connection.execute('CREATE TABLE students(id INTEGER,lastname TEXT,firstmidname TEXT,enrollmentdate TEXT)')
+        connection.execute("INSERT INTO students VALUES(2,'Review','Morgan','2026-02-03')")
+        connection.commit(); connection.close()
+        oracle={'tables':{t:{'key':'ID','rows':[]} for t in ('Students','Departments','Courses','Enrollments')}}
+        observed=school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertEqual({'ID':2,'LastName':'Review','FirstMidName':'Morgan','EnrollmentDate':'2026-02-03'},observed['student'])
 
 
 if __name__ == '__main__': unittest.main()

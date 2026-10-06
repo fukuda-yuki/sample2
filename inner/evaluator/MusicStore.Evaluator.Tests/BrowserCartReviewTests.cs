@@ -117,6 +117,75 @@ static class BrowserCartReviewTests
         check("browser CLI requires instance pairing", CliOptions.Parse(new[] { "--artifact", ".", "--out", ".", "--browser-cart-evidence", "receipt.json" }) == null);
         CheckComposition(check);
         CheckUnperformed(check);
+        CheckProductHttp(check);
+        CheckProductComposition(check);
+    }
+
+    static void CheckProductHttp(Action<string, bool> check)
+    {
+        // Synthetic collector receipts exercise binding and oracle routing only.
+        using var f = new Fixture();
+        var request = f.File("request.json", JsonSerializer.Serialize(new { baseUrl = "http://127.0.0.1:43001",
+            runInstanceId = Instance, artifactSha256 = Artifact, specSha256 = Spec, evaluationVersion = "1.4.0" }));
+        object Failure(string url = "http://127.0.0.1:43001/ShoppingCart/AddToCart/1", int status = 500,
+            string checkId = "C-012", string operation = "cart-add", string method = "GET", bool clicked = false,
+            string payload = null, bool mismatch = false, string bodyError = null)
+        {
+            var evidence = f.File("response-" + checkId + "-" + status + ".json", JsonSerializer.Serialize(new { caseId = "setup-" + checkId, checkId,
+                operation, method, url, status = mismatch ? 200 : status, clickConfirmed = clicked,
+                resourceType = "document", requestPayload = payload, responseBody = bodyError == null ? "synthetic generated app error" : null,
+                bodyReadError = bodyError }));
+            return new { caseId = "setup-" + checkId, checkId, operation, method, url, status, clickConfirmed = clicked, evidence };
+        }
+        BrowserCartReview Load(object failure, bool faults = false, string origin = "http://127.0.0.1:43001", string requestHash = null, bool invalidDom = false)
+        {
+            var receipt = f.File("receipt.json", JsonSerializer.Serialize(new { schemaVersion = 3, actor = "agent",
+                runInstanceId = Instance, artifactSha256 = Artifact, specSha256 = Spec, baseUrl = origin,
+                requestSha256 = requestHash ?? request.Sha256, removals = invalidDom ? f.Receipt.Removals.ToArray() : Array.Empty<BrowserCartReview.Removal>(),
+                faults = faults ? new[] { "synthetic screenshot observer fault" } : Array.Empty<string>(),
+                productFailures = failure == null ? Array.Empty<object>() : failure is object[] entries ? entries : new[] { failure } }));
+            return BrowserCartReview.Load(Path.Combine(f.Root, receipt.Path), Artifact, Spec, Instance, Catalog, true, true, true);
+        }
+        var failed = Load(Failure(), true);
+        check("owned add HTTP500 establishes C012 despite later observer fault", failed.ProductFailures.ContainsKey("C-012")
+            && failed.Faults.Count == 1 && !failed.Complete && failed.For("C-015").Complete == false);
+        var wrongVersionRejected = false;
+        try { BrowserCartReview.Load(Path.Combine(f.Root, "receipt.json"), Artifact, Spec, Instance, Catalog); }
+        catch (InvalidDataException) { wrongVersionRejected = true; }
+        check("old contract cannot reinterpret schema3 response evidence", wrongVersionRejected);
+        check("observer-only fault never establishes product failure", Load(null, true).ProductFailures.Count == 0);
+        check("observed HTTP status survives response-body read failure", Load(Failure(bodyError: "synthetic bodyread fault")).ProductFailures.ContainsKey("C-012")
+            && Load(Failure(bodyError: "synthetic bodyread fault")).Faults.Count > 0);
+        var first = Failure();
+        var badSecond = Failure(checkId: "C-015", operation: "cart-remove", method: "POST");
+        var mixed = Load(new[] { first, badSecond });
+        check("later invalid response cannot erase earlier bound product failure", mixed.ProductFailures.ContainsKey("C-012")
+            && !mixed.ProductFailures.ContainsKey("C-015") && mixed.Faults.Count > 0 && !mixed.Complete);
+        var invalidRef = f.Receipt.Removals[0].After;
+        f.Receipt.Removals[0].After = new() { Path = "absent.json", Sha256 = "absent" };
+        var badDom = Load(Failure(), invalidDom: true);
+        check("later invalid DOM cannot erase earlier bound product failure", badDom.ProductFailures.ContainsKey("C-012") && badDom.Faults.Count > 0
+            && badDom.For("C-015").Status == "observer_fault" && !badDom.Complete);
+        f.Receipt.Removals[0].After = invalidRef;
+        void Reject(string name, Func<BrowserCartReview> action)
+        {
+            var rejected = false; try { var r = action(); rejected = r.ProductFailures.Count == 0 && r.Faults.Count > 0 && !r.Complete; } catch (InvalidDataException) { rejected = true; }
+            check(name, rejected);
+        }
+        Reject("foreign origin HTTP500 cannot establish product failure", () => Load(Failure("http://127.0.0.1:43002/ShoppingCart/AddToCart/1")));
+        Reject("status label must match response evidence", () => Load(Failure(mismatch: true)));
+        Reject("HTTP200 cannot establish server-error product failure", () => Load(Failure(status: 200)));
+        Reject("unperformed operation cannot establish unrelated requirement", () => Load(Failure(checkId: "C-013")));
+        Reject("off-route response cannot establish product failure", () => Load(Failure("http://127.0.0.1:43001/unrelated")));
+        Reject("query-bearing response cannot establish product failure", () => Load(Failure("http://127.0.0.1:43001/ShoppingCart/AddToCart/1?other=1")));
+        Reject("missing click cannot establish cart removal failure", () => Load(Failure("http://127.0.0.1:43001/ShoppingCart/RemoveFromCart", checkId: "C-015", operation: "cart-remove", method: "POST", payload: "id=7")));
+        Reject("missing request payload cannot establish cart removal failure", () => Load(Failure("http://127.0.0.1:43001/ShoppingCart/RemoveFromCart", checkId: "C-015", operation: "cart-remove", method: "POST", clicked: true)));
+        check("confirmed same-origin POST removal HTTP500 establishes finite failure", Load(Failure("http://127.0.0.1:43001/ShoppingCart/RemoveFromCart", status: 599, checkId: "C-015", operation: "cart-remove", method: "POST", clicked: true, payload: "id=7")).ProductFailures.ContainsKey("C-015"));
+        Reject("receipt request hash must bind the observation request", () => Load(Failure(), requestHash: "other"));
+        Reject("non-loopback owned origin is rejected", () => Load(Failure(), origin: "https://example.com"));
+        var restore = Load(Failure());
+        System.IO.File.AppendAllText(Path.Combine(f.Root, "response-C-012-500.json"), " ");
+        Reject("changed response bytes cannot preserve a product failure", () => BrowserCartReview.Load(Path.Combine(f.Root, "receipt.json"), Artifact, Spec, Instance, Catalog, true, true, true));
     }
 
     static void CheckUnperformed(Action<string, bool> check)
@@ -225,5 +294,52 @@ static class BrowserCartReviewTests
         System.IO.File.WriteAllLines(resultsPath, resultLines);
         f.Receipt.RunInstanceId = "other"; System.IO.File.WriteAllText(receipt, JsonSerializer.Serialize(f.Receipt));
         check("composition rejects evidence from another Run", Run("other-receipt").Code == 2);
+    }
+
+    static void CheckProductComposition(Action<string, bool> check)
+    {
+        using var f = new Fixture();
+        var artifact = Path.Combine(f.Root, "artifact"); Directory.CreateDirectory(artifact);
+        var baseline = Path.Combine(f.Root, "baseline"); Directory.CreateDirectory(baseline);
+        var ledger = new Ledger { TaskId = "MS1-synthetic", SpecVersion = "1.4.0", MigrationContract = new(), Requirements = new()
+        {
+            new() { Id = "R-add", Severity = "critical", Checks = new() { new() { Id = "C-012" } } },
+            new() { Id = "R-remove", Severity = "major", Checks = new() { new() { Id = "C-015" }, new() { Id = "C-016" } } },
+        } };
+        var spec = f.File("spec.json", JsonSerializer.Serialize(ledger));
+        var catalog = f.File("catalog.json", JsonSerializer.Serialize(Catalog));
+        var ah = MusicStore.Evaluator.Program.Sha256Directory(artifact);
+        var request = f.File("request.json", JsonSerializer.Serialize(new { baseUrl = "http://127.0.0.1:43001",
+            runInstanceId = Instance, artifactSha256 = ah, specSha256 = spec.Sha256, evaluationVersion = "1.4.0" }));
+        var evidence = f.File("response.json", JsonSerializer.Serialize(new { caseId = "setup-add", checkId = "C-012", operation = "cart-add",
+            method = "GET", url = "http://127.0.0.1:43001/ShoppingCart/AddToCart/1", status = 500, clickConfirmed = false,
+            resourceType = "document", requestPayload = (string)null, bodyReadError = "synthetic body read fault" }));
+        var receipt = f.File("receipt.json", JsonSerializer.Serialize(new { schemaVersion = 3, actor = "agent", runInstanceId = Instance,
+            artifactSha256 = ah, specSha256 = spec.Sha256, baseUrl = "http://127.0.0.1:43001", requestSha256 = request.Sha256,
+            removals = new object[0], faults = new[] { "synthetic trace cleanup fault" }, productFailures = new[] { new
+            { caseId = "setup-add", checkId = "C-012", operation = "cart-add", method = "GET", url = "http://127.0.0.1:43001/ShoppingCart/AddToCart/1",
+                status = 500, clickConfirmed = false, evidence } } }));
+        var baselineFile = Path.Combine(baseline, "evaluation.json");
+        var before = new EvaluationOutput { TaskId = ledger.TaskId, SpecVersion = "1.4.0", EvaluationVersion = "1.4.0",
+            ArtifactSha256 = ah, SpecSha256 = spec.Sha256, Verdict = "blocked", Quality = null, ResearchStatus = "incomplete",
+            Requirements = ledger.Requirements.Select(r => new RequirementOutcome { Id = r.Id, Judgement = "pass" }).ToList() };
+        System.IO.File.WriteAllText(baselineFile, JsonSerializer.Serialize(before));
+        var resultFile = Path.Combine(baseline, "results.jsonl");
+        System.IO.File.WriteAllLines(resultFile, ledger.Requirements.SelectMany(r => r.Checks.Select(c =>
+            JsonSerializer.Serialize(new CheckResult { RequirementId = r.Id, CheckId = c.Id, Judgement = "pass" }))));
+        var beforeEval = MusicStore.Evaluator.Program.Sha256File(baselineFile);
+        var beforeResults = MusicStore.Evaluator.Program.Sha256File(resultFile);
+        var output = Path.Combine(f.Root, "reassessment");
+        var code = MusicStore.Evaluator.Program.Main(new[] { "--artifact", artifact, "--out", output,
+            "--spec", Path.Combine(f.Root, spec.Path), "--catalog", Path.Combine(f.Root, catalog.Path), "--evaluation-version", "1.4.0",
+            "--browser-cart-baseline", baseline, "--browser-cart-evidence", Path.Combine(f.Root, receipt.Path), "--review-run-instance-id", Instance });
+        var value = JsonSerializer.Deserialize<EvaluationOutput>(System.IO.File.ReadAllText(Path.Combine(output, "evaluation.json")), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        check("new composition preserves bound HTTP500 plus observer faults with incomplete null quality", code == 2 && value.Verdict == "fail_critical"
+            && value.Quality == null && value.ResearchStatus == "incomplete" && value.EvaluatorFaults.Count >= 2
+            && value.Requirements.Single(r => r.Id == "R-add").Judgement == "fail"
+            && value.Requirements.Single(r => r.Id == "R-remove").Judgement == "blocked");
+        check("partial composition leaves first baseline bytes unchanged", beforeEval == MusicStore.Evaluator.Program.Sha256File(baselineFile)
+            && beforeResults == MusicStore.Evaluator.Program.Sha256File(resultFile));
+        check("new contract inherits explicit order rules", new RunState { EvaluationVersion = "1.4.0" }.ExplicitOrderContract);
     }
 }

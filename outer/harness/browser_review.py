@@ -4,7 +4,7 @@ from . import browser_cart, education_browser, util
 
 
 def _for(version):
-    return education_browser if version == education_browser.VERSION else browser_cart
+    return education_browser if education_browser.required(version) else browser_cart
 
 
 def required(version):

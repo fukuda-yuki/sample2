@@ -7,12 +7,14 @@ const crypto = require('node:crypto');
 const { chromium } = require('playwright');
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const out = process.argv[3];
+const repaired = input.evaluationVersion === '1.4.0';
+const recorder = repaired ? require('./product-response.cjs').recorder : null;
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const write = (name, value) => fs.writeFileSync(path.join(out, name), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 const ref = name => ({ path: name, sha256: sha(fs.readFileSync(path.join(out, name))) });
 const conditions = {
-  collectorVersion: '1.2.1', collectorSha256: sha(fs.readFileSync(__filename)),
+  collectorVersion: repaired ? '1.4.0' : '1.2.1', collectorSha256: sha(fs.readFileSync(__filename)),
   playwrightVersion: require('playwright/package.json').version, nodeVersion: process.version,
   browser: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
   locale: 'en-US', timezoneId: 'UTC', actionTimeoutMs: 5000, navigationTimeoutMs: 15000,
@@ -22,6 +24,7 @@ const conditions = {
   observation: 'visible cart DOM and PNG in the clicked page; no post-click navigation or reload',
   preconditionPolicy: input.structuralPrecondition ? 'known album/quantity and readable total; prices judged after action' : 'expected cart total',
 };
+if (repaired) conditions.productResponseHelperSha256 = sha(fs.readFileSync(path.join(__dirname, 'product-response.cjs')));
 
 // Read-only projection excludes rows hidden by the application's own UI updates.
 async function observe(page) {
@@ -68,8 +71,10 @@ async function capture(page, tabId, name) {
 
 (async () => {
   let browser;
-  const receipt = { schemaVersion: 2, actor: 'agent', runInstanceId: input.runInstanceId,
+  const receipt = { schemaVersion: repaired ? 3 : 2, actor: 'agent', runInstanceId: input.runInstanceId,
     artifactSha256: input.artifactSha256, specSha256: input.specSha256, conditions, removals: [], faults: [] };
+  if (repaired) Object.assign(receipt, { baseUrl: input.baseUrl, evaluationVersion: input.evaluationVersion,
+    requestSha256: sha(fs.readFileSync(process.argv[2])), productFailures: [] });
   try {
     const executablePath = process.env.SAMPLE2_BROWSER_EXECUTABLE || chromium.executablePath();
     conditions.executablePath = executablePath;
@@ -80,11 +85,14 @@ async function capture(page, tabId, name) {
       const context = await browser.newContext({ viewport: conditions.viewport, locale: conditions.locale,
         timezoneId: conditions.timezoneId, serviceWorkers: 'block', acceptDownloads: false });
       const tabId = crypto.randomUUID(), events = [], pending = new Set(), resourceReads = [], externalScriptFaults = [];
+      let activeCase = checkId + '-empty'; const requestCases = new WeakMap();
       const record = (kind, data) => events.push({ at: new Date().toISOString(), kind, ...data });
       const page = await context.newPage();
+      const responses = repaired ? recorder(page, input, receipt, write, ref, sha) : null;
       page.setDefaultTimeout(conditions.actionTimeoutMs);
       page.setDefaultNavigationTimeout(conditions.navigationTimeoutMs);
-      page.on('request', r => { pending.add(r); record('request', { method: r.method(), url: r.url() }); });
+      page.on('request', r => { pending.add(r); requestCases.set(r, activeCase);
+        record('request', { caseId: activeCase, method: r.method(), url: r.url(), requestPayload: r.postData() }); });
       page.on('requestfinished', r => pending.delete(r));
       page.on('requestfailed', r => {
         pending.delete(r); record('requestfailed', { url: r.url(), error: r.failure() });
@@ -92,7 +100,7 @@ async function capture(page, tabId, name) {
           externalScriptFaults.push({ url: r.url(), error: r.failure() });
       });
       page.on('response', r => {
-        record('response', { status: r.status(), url: r.url() });
+        record('response', { caseId: requestCases.get(r.request()), method: r.request().method(), status: r.status(), url: r.url() });
         if (r.request().resourceType() === 'script' && new URL(r.url()).origin !== new URL(input.baseUrl).origin) {
           resourceReads.push((async () => {
             try {
@@ -123,8 +131,20 @@ async function capture(page, tabId, name) {
           continue;
         }
         // Public AddToCart route is used only for preparation, before observation/click.
-        for (let n = 0; n < count; n++)
-          await page.goto(input.baseUrl + '/ShoppingCart/AddToCart/' + input.albumId, { waitUntil: 'load' });
+        let setupFailed = false;
+        for (let n = 0; n < count; n++) {
+          const caseId = checkId + '-add-' + (n + 1), route = '/ShoppingCart/AddToCart/' + input.albumId;
+          activeCase = caseId;
+          responses?.set({ caseId, checkId: 'C-012', operation: 'cart-add', method: 'GET', path: route, clickConfirmed: false });
+          try { await page.goto(input.baseUrl + route, { waitUntil: 'load' }); }
+          catch (error) {
+            if (responses) await responses.flush();
+            if (!(responses?.failed(caseId) && String(error).includes('net::ERR_HTTP_RESPONSE_CODE_FAILURE'))) throw error;
+          }
+          if (responses) await responses.flush();
+          if (responses?.failed(caseId)) { setupFailed = true; break; }
+        }
+        if (setupFailed) continue; // Add failed; removal has not been measured.
         const before = await capture(page, tabId, checkId + '-before');
         await Promise.all(resourceReads);
         if (externalScriptFaults.length) throw new Error(checkId + ': external script observation incomplete: ' + JSON.stringify(externalScriptFaults));
@@ -158,8 +178,12 @@ async function capture(page, tabId, name) {
           continue;
         }
         const clickedAt = new Date().toISOString(), start = performance.now();
+        activeCase = checkId + '-remove';
+        responses?.set({ caseId: checkId + '-remove', checkId, operation: 'cart-remove', method: 'POST',
+          path: '/ShoppingCart/RemoveFromCart', clickConfirmed: false });
         try {
           await control.click({ timeout: conditions.actionTimeoutMs, noWaitAfter: true });
+          responses?.confirm(checkId + '-remove');
         } catch (e) {
           // A timeout is not proof of a product defect. Save the observation;
           // never attribute an unsuccessful attempt as a completed click.
@@ -189,6 +213,7 @@ async function capture(page, tabId, name) {
           beforeScreenshot: before.screenshot, afterScreenshot: after.screenshot,
           clickedAt, elapsedMs: Math.round(performance.now() - start), completion, pendingRequests: pending.size });
       } finally {
+        if (responses) await responses.flush();
         write(checkId + '-events.json', events);
         await context.tracing.stop({ path: path.join(out, checkId + '-trace.zip') });
         await context.close();
@@ -202,7 +227,7 @@ async function capture(page, tabId, name) {
     catch (e) { receipt.faults.push(String(e)); process.exitCode = 2; }
     write('receipt.json', receipt);
     write('collector-result.json', { status: receipt.faults.length ? 'evaluator_fault'
-      : receipt.removals.some(r => r.action.startsWith('not-run-')) ? 'partial' : 'observed',
+      : receipt.removals.length !== 2 || receipt.productFailures?.length || receipt.removals.some(r => r.action.startsWith('not-run-')) ? 'partial' : 'observed',
       conditions, faults: receipt.faults, checks: receipt.removals.map(r => ({ checkId: r.checkId, action: r.action, reason: r.reason })) });
   }
 })();

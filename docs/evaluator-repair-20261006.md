@@ -65,7 +65,18 @@
 
 既に実行した1.4.0のDLL・台帳・assessment出力を保持し、修正は別評価版1.5.0へ分ける。C-015のHTTP削除前にはalbum 1の単一行・数量2・正の実record ID、C-016の前にはC-015後の単一行・数量1・現在の正の実IDを要求する。前提不成立なら削除POSTを送らずblockedとする。HTTP JSONが未観測のままブラウザー成功だけでcompleteにはしない。独立したブラウザー失敗はHTTP観測故障と併記できる。既存1.4.0の結果のラベルを書き換えない。
 
-1.5の有限受入は削除前提とその合成境界を対象とする。新配布DLLで115 tests、Python側の関連101 testsが通過した。SDK8.0.425の同一compile pathで2回のforced buildはDLL/PDB一致を確認した。実結合の確認には、先の5件とは別の固定計画で保存5067/5096の2件を使用する（モデル呼出し0、新取得Run増分0）。quantity/record IDが不成立ならPOSTを送らないこと、C-015後に変わった実IDをC-016で使うこと、旧1.4の分岐を保つことをHTTP dispatch spyで検証する。HTTP未観測から独立ブラウザー失敗を保持しても、未観測scopeを別に残しpartial/nullを維持する。これらはC-014やcheckout全体の因果的な失敗帰属を一律に保証するものではない。
+1.5の有限受入は削除前提とその合成境界を対象とする。新配布DLLで115 tests、Python側の関連101 testsが通過した。SDK8.0.425の同一compile pathで2回のforced buildはDLL/PDB一致を確認した。実結合の確認は、先の5件とは別の固定計画で保存5067/5096の2件を使用して実施した（モデル呼出し0、新取得Run増分0）。quantity/record IDが不成立ならPOSTを送らないこと、C-015後に変わった実IDをC-016で使うこと、旧1.4の分岐を保つことをHTTP dispatch spyで検証する。HTTP未観測から独立ブラウザー失敗を保持しても、未観測scopeを別に残しpartial/nullを維持する。これらはC-014やcheckout全体の因果的な失敗帰属を一律に保証するものではない。
+
+実1.5の正例・負例2件も別保存で終了した。source commitは `a622bbdee298924a7c3d3589b5a21a262a9df8ee`、commit後の同SDK/同compile pathでの2 build・DLL/PDB一致・配布DLL115 tests成功を確認してから実行した。
+
+| 保存Run | 新1.5 assessment ID | 最終validation ID | 実結果 |
+| --- | --- | --- | --- |
+| MS1-CONT-B-preload-5067 | `c4024fc275194787a52ccd80e1fe11f3` | `96dae0f6f6af46a9919939a8f15acabc` | C-012のAdd500はfail、C-015/C-016はblocked・HTTP scope未観測。fail_critical/incomplete/quality null |
+| MS1-CONT-A-preload-5096 | `47b25ef3e3a24dbdb98ece825aad05f8` | `5ea02fa6b569410bb8847839e4dc7c5d` | complete/pass/quality 100 |
+
+2件の原本・assessment bytes不変、所有container/network cleanup完了、reported DLL一致、observer fault 0件を確認した。5067のHTTP evidenceには削除POSTが存在しない。C-015のブラウザー成功で欠けたHTTP JSONを埋めず、C-016の未実施も保持する。先の1.4/Educationの5 assessment bytesと初回結果も不変である。合計7回の保存生成物評価は元の独立Run数へ加算しない。
+
+最初の1.5準備は長いdestinationでWinError206となった。assessment.json/execution-config/outputの作成前に停止し、scorer/browser起動0を確認した。失敗したコピーとv1計画を保全し、短い新rootのv2計画で同じ2保存例を準備した。原本全inventoryを再確認して実行したため、曖昧な再送ではない。準備失敗1件を評価成功数に含めない。
 
 ## 次取得を判断する境界
 
@@ -87,6 +98,11 @@ private証跡はGit外の`evaluator-repair-evidence-20261006`、`education-check
 | Music配備DLL | `76874e46940f7816a56e93c36391d3213f790335a1bd6e0409ae5515c36c478e` |
 | Music1.4 postcommit receipt | `3070ae7de5669d6b2a400ff89b20c04e87bf15e0fb2d182b186be2ecf8d6cf87` |
 | Music1.5配布DLL | `8fed5989f4e000beafb24bdf8b9c5713ede90ce730775ce9eda8e7bbcb7f4852` |
+| Music1.5 commit後build receipt | `7d652ea952c630b1795772da407672b7a05d4b15b8370235dc80da3fc38d66e5` |
+| 固定1.5保存2件計画v2 | `70d62657d1088da7d726909bbd8835e58a4f8a9e555d21f77bd4096c47fe1e95` |
+| 1.5実2件結果 | `c362f2e726beaf775f6e4e08b8c3f36b868a5fff36de092ab2510f4aa438ffbb` |
+| 1.5最終読み取り専用検証 | `ed3d3c8402d1efbe5d7fc299bfa6da91f0e12142073f100d81b9ca22e6441ffc` |
+| 実行前パス長準備失敗の保全receipt | `a55cd41c3a1cc4fa29d614ef9b43d1297e2d2246c5da8b574d08fdea5cd78536` |
 | 実装/原本安全性レビューreceipt | `b26f142e67ecebf633b8be286e3dcb2d880eaa807d3aca62c52f61c98587c967` |
 | 固定した保存例5件計画 | `a7553dd4f7332fba3820e7a346acf62430a32b671ec73fb86e48019f5f084c3d` |
 | 承認再試行前の5絶対パス・原本inventory確認 | `38bc3b9c5c406b9ed159e73d5e8a0686a06c653d7991f1a70443691256e601f6` |

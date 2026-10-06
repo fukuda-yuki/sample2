@@ -89,3 +89,40 @@ the next operation performs a new complete predecessor check. Failed and cyclic
 checks are never memoized as success. This avoids repeatedly replaying the same
 historical readiness chain during a single admission without weakening live
 fault detection or carrying proof trust across operations.
+
+An optional `research.proof_session` service now shares closed evidence proofs
+across controller operations and their subprocesses. It is Windows-only, owned
+by a distinct live process handle, finite (four hours by default, eight hours
+maximum), and limited to 512 in-memory entries. There is no disk success cache:
+each fresh service validates the actual evidence again. The private reference
+contains a local pipe authentication key and must never enter Git or a Release.
+
+Every file read by a shared proof is held with Windows sharing that denies writes
+and deletion. Directory identity handles and name-change notifications reject
+replacements, additions, and junction changes. Negative cleanup paths are
+explicit dependencies. One persistent validation thread owns those notifications
+across connections; separate status connections stay responsive. Source inventory
+and module bytes bind clients to the service. Read-only Git/Docker probes replay
+on reuse. Git committed-file checks use one binary `cat-file --batch` process
+with strict framing and unchanged SHA256 comparisons instead of one per file.
+
+Only readiness, immutable phase definitions, normal publication gates and fully
+closed recovery evidence can be shared. Recovery evidence remains uncached until
+its administrative wave closure exists. Current history/ledger, STOP, admission,
+UUID reservations, dispatch, usage, ownership and leases are outside these
+proofs. Current epoch tree checks remain fresh. Closed gate validation checks its
+exact original Run roots without repeatedly walking unrelated historical pairs.
+The old unrestricted clearance success set has been removed.
+
+Start the service as a hidden child of a finite supervisory process, after the
+clean successor source has been pinned. Use `python -B -X utf8 -m
+research.proof_session serve <new-private-reference.json> --owner-pid <live-owner>
+--seconds 14400`. Pass `--proof-session <reference>` to `research.repaired_campaign`
+and `research.campaign_launcher`; the latter propagates it to its owned worker.
+Python administrative operations can use `proof_session.connected_session(ref)`.
+The launcher rejects an unpinned proof module. `proof_session check <reference>`
+checks current service/guard liveness; `proof_session stop <reference>` releases
+the owned service. Owner exit, expiry, source/evidence changes or proof failures
+invalidate reuse. Never renew a reference or replace an invalid proof with a
+persisted success flag. Finish owned stop/closure, then create a new finite
+service and fully validate again. Stop helpers do not depend on this service.

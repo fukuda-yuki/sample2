@@ -80,6 +80,9 @@ def preflight(repo, plan_path, wave_path):
     repo = live_pilot.safe_path(repo)
     plan_ref = live_pilot.reference(plan_path)
     campaign = repaired_campaign.validate(repo, live_pilot.checked(plan_ref))
+    from research import proof_session
+    if proof_session.current_reference() and campaign['source_pins'].get('research/proof_session.py') != util.sha256_file(repo/'research/proof_session.py'):
+        raise ValueError('Shared proof implementation must be pinned by the execution plan')
     base, wave_path, directory = _paths(campaign, wave_path)
     wave_ref = live_pilot.reference(wave_path)
     spec = repaired_campaign.wave_spec(repo, plan_ref['path'], wave_path)
@@ -322,6 +325,9 @@ def _launch_owned(repo, plan_path, wave_path):
     command = [sys.executable, '-B', '-X', 'utf8', '-m', 'research.repaired_campaign',
         '_wave', context['plan']['path'], '--repo', str(context['repo']),
         '--wave', context['wave']['path'], '--owner-pid', str(os.getpid())]
+    from research import proof_session
+    if proof_session.current_reference():
+        command += ['--proof-session',proof_session.current_reference()]
     intent = dict(kind=KIND, launch_id=uuid.uuid4().hex, launcher_pid=os.getpid(),
         parent_pid=os.getppid(), plan=context['plan'], wave=context['wave'],
         epoch_plan=context['epoch_plan'], pairs=context['pairs'], source_repo=str(context['repo']),
@@ -521,7 +527,7 @@ def internal(action, repo, plan_path, wave_path, instance=None):
     return value
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('launch', '_stop', '_verify', '_observers'))
     parser.add_argument('plan', type=Path)
@@ -536,6 +542,12 @@ def main():
     if args.action in ('_verify', '_observers'):
         return 0 if result.get('confirmed') is True else 2
     return 0 if result.get('stop_confirmed') is True else 2
+
+
+def main():
+    from research.proof_session import cli_session
+    with cli_session():
+        return _main()
 
 
 if __name__ == '__main__':

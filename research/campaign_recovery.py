@@ -434,6 +434,25 @@ def recover_wave(repo, campaign_plan_path, wave_path, destination):
 def validate_recovery(repo, recovery_ref, campaign_plan_path, wave_path):
     ctx = _context(repo,campaign_plan_path,wave_path)
     path = live_pilot.checked(recovery_ref); value = util.read_json(path)
+    from research import proof_session
+    # Reservation/ledger/current campaign checks above remain fresh. Only the
+    # retained evidence body may be shared across operations.
+    # Before the administrative wrapper exists, publication/closure can still
+    # append evidence. Do not pin that unfinished tree across operations.
+    closure = path.parent/'closure.json'
+    wrappers = [ctx['wave_path'].parent/name for name in ('closure.json','recovery-closure.json')]
+    sealed = closure.exists() and any(wrapper.exists() and util.read_json(wrapper) ==
+        dict(wave=ctx['wave_ref'],closed=True,recovery=live_pilot.reference(closure)) for wrapper in wrappers)
+    if not sealed:
+        return _validate_recovery_evidence(ctx,path,value)
+    arguments = dict(context={k:str(v) if isinstance(v,Path) else v for k,v in ctx.items()},
+        path=str(path),value=value)
+    return proof_session.use('recovery-evidence',arguments,
+        lambda: _validate_recovery_evidence(ctx,path,value))
+
+
+def _validate_recovery_evidence(ctx,path,value):
+    repo = ctx['repo']
     if (path.name!='decision.json' or value.get('kind')!=KIND or value.get('campaign')!=ctx['campaign']
             or value.get('wave')!=ctx['wave_ref'] or value.get('initial_logical_denominator')!=100
             or value.get('model_calls')!=0 or value.get('acquisition_count_increment')!=0

@@ -224,7 +224,7 @@ def create_successor(*, repo, path, batch, predecessor_plan, predecessor_repo, a
     commit = next_phase.git(repo, 'rev-parse', 'HEAD')
     if not re.fullmatch('[a-f0-9]{40}', commit):
         raise ValueError('Full successor commit identity required')
-    names = set(old['source_pins']) | set(campaign.EXTRA_PINS) | {PIN, SCOPE_PIN}
+    names = set(old['source_pins']) | set(campaign.EXTRA_PINS) | {PIN, SCOPE_PIN, 'research/proof_session.py'}
     pins = {name: util.sha256_file(repo/name) for name in sorted(names)}
     repaired_runtime._committed_files(repo, commit, pins)
     with ExitStack() as stack:

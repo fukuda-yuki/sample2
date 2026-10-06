@@ -259,6 +259,11 @@ class Supervisor:
         if self.phase['kind'] not in (KIND, V9_KIND, V10_KIND, FIXTURE_KIND):
             raise ValueError('Independent observer requires its explicit frozen phase')
         source_root = Path(__file__).resolve().parents[1]
+        # A separately frozen nonmodel plan may opt into the same independent
+        # executing-source guard. Historical phase contracts below are intact.
+        if self.phase['kind'] == FIXTURE_KIND and 'source_pins' in self.phase:
+            from research.campaign_operational import verify_pins
+            verify_pins(source_root, self.phase['source_pins'])
         if self.phase['kind'] in (KIND, V9_KIND, V10_KIND):
             for name in ('research/resource_supervisor.py', 'outer/harness/runtime.py',
                          'outer/harness/util.py', 'outer/harness/run.py', 'outer/harness/ownership.py'):

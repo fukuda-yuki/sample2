@@ -8,6 +8,7 @@ import argparse
 from contextlib import contextmanager
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -24,6 +25,169 @@ PIN_FILES = ('research/campaign_operational.py', 'research/experiment_identity.p
     'outer/harness/gateway.py', 'outer/harness/ownership.py', 'outer/harness/util.py',
     'outer/harness/run.py', 'outer/harness/security.py')
 KIND = 'providerless_operational_acceptance_v1'
+
+
+def _scope_path(value):
+    """Inspect raw components before resolution can erase link evidence."""
+    path = Path(value)
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError('Absolute, traversal-free operational path required')
+    for part in (path, *path.parents):
+        if part.is_symlink() or part.is_junction():
+            raise ValueError('Operational path contains a link or junction')
+    return path.resolve()
+
+
+def _within(path, root):
+    # Windows ownership remains case-insensitive even in portable tests.
+    p, r = str(path).casefold(), str(root).casefold()
+    return p == r or p.startswith(r.rstrip('/\\') + ('\\' if '\\' in r else '/'))
+
+
+def _protected_scope(base, protected):
+    base = _scope_path(base)
+    if not isinstance(protected, list) or len(protected) != 8:
+        raise ValueError('Exactly eight protected trees required')
+    roots = [_scope_path(p) for p in protected]
+    if roots[0].name != 'source-info-v5-100p2' or roots[0].parent.name != 'runs':
+        raise ValueError('Protected original cohort scope mismatch')
+    for index, root in enumerate(roots):
+        if _within(root, base) or _within(base, root):
+            raise ValueError('Operational root overlaps protected tree')
+        if any(_within(root, other) or _within(other, root) for other in roots[:index]):
+            raise ValueError('Protected scopes collide or overlap')
+    return base, roots
+
+
+def _hex_uuid(value):
+    if not isinstance(value, str) or not re.fullmatch('[a-f0-9]{32}', value):
+        raise ValueError('Lowercase 32-hex Run UUID required')
+    return value
+
+
+def validate_plan_scope(plan, base):
+    """No writes and no input/original reads; also usable during integrity faults."""
+    if not isinstance(plan, dict): raise ValueError('Operational plan object required')
+    expected = {'schema_version': 1, 'max_model_calls': 0, 'max_runs': 4,
+                'max_sessions': 4, 'pair_concurrency': 1}
+    if (any(type(plan.get(k)) is not int or plan[k] != v for k, v in expected.items())
+            or plan.get('kind') != KIND or plan.get('backend') != 'providerless-opencode-session'
+            or plan.get('require_fixed_instances') is not True):
+        raise ValueError('Exact fixed four-Run nonmodel plan required')
+    base, roots = _protected_scope(base, plan.get('protected_roots'))
+    historical = plan.get('historical_run_instance_ids')
+    if not isinstance(historical, list) or len(historical) != 200:
+        raise ValueError('Bound historical 200-Run UUID registry required')
+    historical = [_hex_uuid(v) for v in historical]
+    if len(set(historical)) != 200 or _hex_uuid(plan.get('source', {}).get('run_instance_id')) not in historical:
+        raise ValueError('Historical source UUID registry mismatch')
+    assignments = plan.get('assignments')
+    if not isinstance(assignments, list) or len(assignments) != 2:
+        raise ValueError('Exactly two campaigns required')
+    campaigns, names, ids, modes = set(), set(), set(), []
+    for assignment in assignments:
+        label = identity._name(assignment['campaign_id'])
+        if label.casefold() in campaigns: raise ValueError('Campaign name collision')
+        campaigns.add(label.casefold())
+        campaign = _scope_path(base / 'campaigns' / label)
+        if not _within(campaign, base): raise ValueError('Campaign path escapes base')
+        for relative in ('campaign.json', 'phase.json', '_control', '_control/operator-stop.json',
+                         '_control/publication-gate.json', 'runs/_control',
+                         'runs/_control/providerless-acceptance/dispatch-stop.json'):
+            _scope_path(campaign / relative)
+        cases = assignment.get('cases')
+        if not isinstance(cases, list) or len(cases) != 2: raise ValueError('Exactly two fixed cases required')
+        for slot, case in enumerate(cases, 1):
+            name, instance = identity._name(case['run_id']), _hex_uuid(case['run_instance_id'])
+            if name.casefold() in names or instance in ids or instance in historical:
+                raise ValueError('Run name/UUID collides with another or historical Run')
+            if any(type(case.get(k)) is not int or case[k] != v
+                   for k, v in {'pair': 1, 'slot': slot, 'attempt': slot}.items()):
+                raise ValueError('Fixed pair/slot/attempt mismatch')
+            root = _scope_path(run.run_dir_for(campaign / 'runs', name))
+            if not _within(root, campaign): raise ValueError('Run path escapes campaign')
+            for relative in ('runtime.json', 'manifest.json', 'evidence',
+                             'evidence/container-cleanup.json', 'evidence/admission-stop',
+                             'evidence/network-cleanup'):
+                _scope_path(root / relative)
+            names.add(name.casefold()); ids.add(instance); modes.append(case.get('mode'))
+    if modes != ['normal', 'normal', 'normal', 'middle_stop']:
+        raise ValueError('Fixed completion/STOP allocation mismatch')
+    # Known mutable entry paths must also retain their raw link evidence.
+    for name in ('plan.json', 'campaigns', 'assessments', 'assessments/operational-reassessment'):
+        _scope_path(base / name)
+    return base
+
+
+def _inventory_shape(value):
+    if not isinstance(value, dict): raise ValueError('Byte inventory object required')
+    seen = set()
+    for name, digest in value.items():
+        canonical = identity._relative(name).as_posix()
+        if canonical != name or canonical.casefold() in seen: raise ValueError('Inventory path alias')
+        seen.add(canonical.casefold()); identity._sha(digest)
+
+
+def checked_before_inventory(base, plan):
+    """Reuse pinned stored proof, without claiming a fresh original-before scan."""
+    base = validate_plan_scope(plan, base)
+    path = _scope_path(base / 'original-before.json')
+    _scope_path(base / 'saved-input')
+    if util.sha256_file(path) != identity._sha(plan.get('original_before_sha256')):
+        raise ValueError('Stored original-before proof changed')
+    before = util.read_json(path)
+    if not isinstance(before, dict) or set(before) != set(plan['protected_roots']):
+        raise ValueError('Stored proof protected scope mismatch')
+    for files in before.values(): _inventory_shape(files)
+    original = before[plan['protected_roots'][0]]
+    manifests = [name for name in original if len(name.split('/')) == 2 and name.endswith('/manifest.json')]
+    if len(manifests) != 200: raise ValueError('Stored proof does not cover 200 original manifests')
+    _inventory_shape(plan['input_inventory'])
+    if set(plan['input_inventory']) != {'manifest.json', 'snapshot.json', 'condition.json', 'source-bytes.json'}:
+        raise ValueError('Exact copied metadata input set required')
+    if inventory(base / 'saved-input') != plan['input_inventory']: raise ValueError('Copied inputs changed')
+    source = plan['source']; prefix = identity._name(source['run_id']) + '/'
+    for name in ('manifest.json', 'snapshot.json', 'condition.json'):
+        if plan['input_inventory'][name] != original.get(prefix + name):
+            raise ValueError('Copied input not bound to original-before proof')
+    manifest = util.read_json(base / 'saved-input/manifest.json')
+    snapshot = util.read_json(base / 'saved-input/snapshot.json')
+    if (any(manifest.get(k) != source[k] for k in ('run_id', 'run_instance_id'))
+            or snapshot.get('run_id') != source['run_id']
+            or snapshot.get('artifact_sha256') != source['artifact_sha256']
+            or plan['input_inventory']['snapshot.json'] != source['snapshot_sha256']
+            or manifest.get('condition_sha256') != plan['input_inventory']['condition.json']
+            or manifest.get('stop_confirmed') is not True or manifest.get('submission_fixed') is not True):
+        raise ValueError('Copied source identity/snapshot/condition mismatch')
+    expected = {name[len(prefix):]: digest for name, digest in original.items() if name.startswith(prefix)}
+    if util.read_json(base / 'saved-input/source-bytes.json') != expected:
+        raise ValueError('Saved byte inventory not bound to stored before proof')
+    # The registry is itself immutable fixed-plan data, obtained from these
+    # original manifest hashes at preparation; no current-source equality claim.
+    return before
+
+
+def checked_after_inventory(base, before):
+    """Adoption requires the separately completed FULL after inventory."""
+    after = util.read_json(_scope_path(Path(base) / 'original-after.json'))
+    if after != before: raise ValueError('Mandatory full original-after proof differs or is incomplete')
+    return after
+
+
+def historical_registry(original_runs, before):
+    """Read only 200 small manifests, each joined to the stored byte proof."""
+    original_runs = _scope_path(original_runs)
+    entries = [name for name in before if len(name.split('/')) == 2 and name.endswith('/manifest.json')]
+    if len(entries) != 200: raise ValueError('Exactly 200 before-bound Run manifests required')
+    ids = []
+    for name in sorted(entries):
+        path = _scope_path(original_runs / str(identity._relative(name)))
+        if util.sha256_file(path) != before[name]: raise ValueError('Original manifest differs from stored before proof')
+        value = util.read_json(path)
+        if value['run_id'] != name.split('/')[0]: raise ValueError('Historical Run manifest path/identity mismatch')
+        ids.append(_hex_uuid(value['run_instance_id']))
+    if len(set(ids)) != 200: raise ValueError('Historical Run UUID collision')
+    return ids
 
 
 def inventory(root):
@@ -154,11 +318,13 @@ except (BlockingIOError,OSError): raise SystemExit(0)
 
 def prepare_plan(repo, destination, *, original, protected):
     """Exclusive allocation only; no containers/process/model before fixed plan."""
-    repo, destination, original = map(lambda p: Path(p).resolve(), (repo, destination, original))
+    repo, destination, original = map(_scope_path, (repo, destination, original))
     if destination.exists(): raise FileExistsError(destination)
     if destination.is_relative_to(original) or original.is_relative_to(destination):
         raise ValueError('Original and acceptance roots must be separate')
-    source = original / 'runs/source-info-v5-100p2/CU1-ENR-D-explore-5073'
+    source = _scope_path(original / 'runs/source-info-v5-100p2/CU1-ENR-D-explore-5073')
+    for name in ('manifest.json', 'snapshot.json', 'condition.json'):
+        _scope_path(source / name)
     source_manifest = util.read_json(source / 'manifest.json')
     source_snapshot = util.read_json(source / 'snapshot.json')
     source_condition = util.read_json(source / 'condition.json')
@@ -170,14 +336,13 @@ def prepare_plan(repo, destination, *, original, protected):
         raise ValueError('Known saved source is not immutable')
     if util.artifact_hash(source / 'frozen') != source_snapshot['artifact_sha256']:
         raise ValueError('Known saved source artifact mismatch')
-    monitor = original / 'artifacts/main-central-wave-v8-fixed-20261005/wave_resource_monitor.py'
-    probe = monitor.with_name('wave_resource_probe.py')
+    monitor = _scope_path(original / 'artifacts/main-central-wave-v8-fixed-20261005/wave_resource_monitor.py')
+    probe = _scope_path(monitor.with_name('wave_resource_probe.py'))
     original_runs = original / 'runs/source-info-v5-100p2'
-    protected = [original_runs, *[Path(p).resolve() for p in protected]]
-    if any(destination.is_relative_to(p) or p.is_relative_to(destination) for p in protected):
-        raise ValueError('Acceptance root overlaps protected data')
-    destination.mkdir(parents=True, exist_ok=False)
+    destination, protected = _protected_scope(destination, [str(original_runs), *[str(p) for p in protected]])
     immutable = {str(p): inventory(p) for p in protected}
+    registry = historical_registry(original_runs, immutable[str(original_runs)])
+    destination.mkdir(parents=True, exist_ok=False)
     util.write_new_json(destination / 'original-before.json', immutable)
     inputs = destination / 'saved-input'; inputs.mkdir()
     for name in ('snapshot.json', 'manifest.json', 'condition.json'):
@@ -206,11 +371,14 @@ def prepare_plan(repo, destination, *, original, protected):
         'resource_monitor': {'path': str(monitor), 'sha256': util.sha256_file(monitor)},
         'resource_probe': {'path': str(probe), 'sha256': util.sha256_file(probe)},
         'assignments': assignments, 'protected_roots': list(immutable),
+        'historical_run_instance_ids': registry,
+        'original_before_sha256': util.sha256_file(destination / 'original-before.json'),
         'input_inventory': inventory(inputs), 'worker_seconds_estimate': 120,
         'operation_timeout_max_seconds': 120, 'root_supervision_deadline_seconds': 900,
         'limits': ['Nonmodel operational acceptance, not research acquisition or quality measurement.',
                    'Session HTTP lifecycle verified; prompt/SDK generation path untested.',
                    'Publication gate remains pending until separately verified real release.']}
+    checked_before_inventory(destination, plan)
     util.write_new_json(destination / 'plan.json', plan)
     return destination / 'plan.json'
 
@@ -227,9 +395,14 @@ class Backend:
         return {'pairs': [1] if self.bindings else [], 'assignments': self.bindings, 'dispatched': self.dispatched}
 
     def prepare(self, binding):
+        validate_plan_scope(self.plan, self.base)
+        assigned = [c for a in self.plan['assignments']
+                    if a['campaign_id'] == self.campaign.metadata['campaign_id'] for c in a['cases']]
+        if not any(all(binding.get(k) == c[k] for k in ('run_id', 'run_instance_id', 'pair', 'slot')) for c in assigned):
+            raise ValueError('Prepare identity does not belong to this fixed campaign')
         verify_pins(self.repo, self.plan['source_pins'])
         binding['phase_sha256'] = util.sha256_file(self.phase)
-        root = self.batch / binding['run_id']; root.mkdir(exist_ok=False)
+        root = _scope_path(run.run_dir_for(self.batch, binding['run_id'])); root.mkdir(exist_ok=False)
         for name in ('inputs', 'workspace', 'state', 'usage/raw', 'evidence', 'output'):
             (root / name).mkdir(parents=True)
         for name in self.plan['input_inventory']:
@@ -470,20 +643,28 @@ def _cleanup_backend(root, binding):
 
 def emergency_stop(base, *, repo, expected_plan_sha256):
     """Parent's finite external-deadline recovery; no dispatcher/model/replay."""
-    base, repo = Path(base).resolve(), Path(repo).resolve()
+    base, repo = _scope_path(base), _scope_path(repo)
+    _scope_path(base / 'plan.json')
+    identity._sha(expected_plan_sha256)
     if util.sha256_file(base / 'plan.json') != expected_plan_sha256:
         raise ValueError('Emergency stop plan changed')
-    plan = util.read_json(base / 'plan.json'); verify_pins(repo, plan['source_pins'])
+    plan = util.read_json(base / 'plan.json')
+    # Stopping owned resources must remain possible after source/input damage.
+    # Trust is the caller's fixed plan SHA plus path/UUID/owned-label guards.
+    validate_plan_scope(plan, base)
     results = []
     for assignment in plan['assignments']:
         campaign_root = base / 'campaigns' / assignment['campaign_id']
         if (campaign_root / 'campaign.json').exists():
             meta = util.read_json(campaign_root / 'campaign.json')
-            if meta['plan_sha256'] != expected_plan_sha256: raise ValueError('Emergency campaign plan mismatch')
+            if (meta['plan_sha256'] != expected_plan_sha256 or meta['campaign_id'] != assignment['campaign_id']):
+                raise ValueError('Emergency campaign plan mismatch')
+            identity._uuid(meta['campaign_uuid'])
+            phase = util.read_json(campaign_root / 'phase.json')
+            if phase.get('phase_id') != 'providerless-acceptance': raise ValueError('Emergency observer phase mismatch')
             marker = campaign_root / '_control/operator-stop.json'
             if not marker.exists(): util.write_new_json(marker, {'plan_sha256': expected_plan_sha256,
                 'campaign_uuid': meta['campaign_uuid'], 'reason': 'parent finite deadline'})
-            phase = util.read_json(campaign_root / 'phase.json')
             marker = campaign_root / 'runs/_control' / phase['phase_id'] / 'dispatch-stop.json'
             if not marker.exists(): util.write_new_json(marker, {'plan_sha256': expected_plan_sha256,
                 'campaign_uuid': meta['campaign_uuid'], 'reason': 'parent finite deadline'})
@@ -503,20 +684,12 @@ def emergency_stop(base, *, repo, expected_plan_sha256):
 
 
 def execute(plan_path, *, repo):
-    plan_path, repo = Path(plan_path).resolve(), Path(repo).resolve()
+    plan_path, repo = _scope_path(plan_path), _scope_path(repo)
+    if plan_path.name != 'plan.json': raise ValueError('Canonical fixed plan filename required')
     base, plan = plan_path.parent, util.read_json(plan_path)
-    if plan.get('kind') != KIND or plan.get('max_runs') != 4 or plan.get('max_model_calls') != 0:
-        raise ValueError('Explicit fixed nonmodel plan required')
-    cases = [c for a in plan['assignments'] for c in a['cases']]
-    if (len(plan['assignments']) != 2 or len(cases) != 4
-            or len({a['campaign_id'] for a in plan['assignments']}) != 2
-            or len({c['run_id'] for c in cases}) != 4 or len({c['run_instance_id'] for c in cases}) != 4
-            or plan.get('max_sessions') != 4 or plan.get('pair_concurrency') != 1):
-        raise ValueError('Fixed four distinct nonmodel Run/session identities required')
+    validate_plan_scope(plan, base)
     verify_pins(repo, plan['source_pins'])
-    if inventory(base / 'saved-input') != plan['input_inventory']: raise ValueError('Saved inputs changed')
-    before = util.read_json(base / 'original-before.json')
-    for root, hashes in before.items(): verify_unchanged(root, hashes)
+    before = checked_before_inventory(base, plan)
     digest = util.sha256_file(plan_path)
     campaigns = []
     for assignment in plan['assignments']:
@@ -597,7 +770,10 @@ def execute(plan_path, *, repo):
 
 
 def normalize(base, *, phase_a_proof=None, phase_a_package=None):
-    base = Path(base).resolve(); plan = util.read_json(base / 'plan.json')
+    base = _scope_path(base); _scope_path(base / 'plan.json')
+    plan = util.read_json(base / 'plan.json')
+    before = checked_before_inventory(base, plan)
+    checked_after_inventory(base, before)
     final = phase_a_proof is not None
     campaigns = []
     for assignment in plan['assignments']:
@@ -662,10 +838,13 @@ def normalize(base, *, phase_a_proof=None, phase_a_package=None):
 
 def finish_publication(base, receipt, *, expected_receipt_sha256, expected_package_sha256):
     """Consume real external proof, close existing gates, never dispatch/re-score."""
-    base, receipt = Path(base).resolve(), Path(receipt).resolve()
+    base, receipt = _scope_path(base), _scope_path(receipt)
     identity._sha(expected_package_sha256); identity._sha(expected_receipt_sha256)
     if util.sha256_file(receipt) != expected_receipt_sha256: raise ValueError('External publication proof changed')
+    _scope_path(base / 'plan.json')
     proof = util.read_json(receipt); plan = util.read_json(base / 'plan.json')
+    before = checked_before_inventory(base, plan)
+    checked_after_inventory(base, before)
     if proof.get('package_sha256') != expected_package_sha256: raise ValueError('External package hash mismatch')
     expected = {c['run_id']: c['run_instance_id'] for a in plan['assignments'] for c in a['cases']}
     assessment = util.read_json(base / 'assessments/operational-reassessment/assessment.json')

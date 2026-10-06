@@ -6,7 +6,7 @@ termination of this launcher's own children. These are not hard provider quotas.
 Launcher/host loss remains an external supervision limitation.
 """
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import re
@@ -37,6 +37,7 @@ def preflight(repo, plan_path, approval_path, pair=None):
     approval = util.read_json(live_pilot.checked(approval_ref))
     if (approval.get('plan_sha256') != ref['sha256'] or approval.get('authorized') is not True
             or approval.get('approved_by') != 'user' or not approval.get('authorization_reference')
+            or (plan['kind'] == live_pilot.TRIAL_KIND and approval.get('scope') != 'education_two_run_technical_trial')
             or (plan['kind'] == live_pilot.MAIN_KIND and approval.get('scope') != 'new_100_pairs_200_runs')):
         raise ValueError('Exact pilot user authorization required before child spawn')
     if (next_phase.git(repo, 'rev-parse', 'HEAD') != plan['source_commit']
@@ -72,6 +73,11 @@ def preflight(repo, plan_path, approval_path, pair=None):
 
 
 def selected_pairs(plan, pair=None):
+    if plan.get('kind') == live_pilot.TRIAL_KIND:
+        assignments=plan.get('assignments',[])
+        if pair is not None or len(assignments)!=1 or assignments[0].get('pair')!=1:
+            raise ValueError('Only independent Education trial pair1 permitted')
+        return assignments
     if plan.get('kind') == live_pilot.RECOVERY_KIND:
         assignments=plan.get('assignments',[])
         if pair is not None or len(assignments)!=1 or assignments[0].get('pair')!=2:
@@ -96,6 +102,9 @@ def scope_root(plan, pair=None):
 
 
 def invocation_wall(plan, ref, pair=None):
+    if plan.get('kind')==live_pilot.TRIAL_KIND:
+        from research import education_readiness_trial
+        return education_readiness_trial.remaining_wall(plan,ref)
     if plan.get('kind')==live_pilot.RECOVERY_KIND:
         from research import readiness_recovery
         return readiness_recovery.remaining_wall(plan)
@@ -179,7 +188,7 @@ def latch_stop(plan, ref, directory, reason, pair=None):
     return dict(**marker, durable_stop_paths=durable, stop_marker_errors=errors)
 
 
-def _terminate(process):
+def _terminate(process, whole_deadline=None):
     """Only a Popen handle created here; no process-name/PID lookup."""
     outcome = dict(pid=process.pid, initial_exit_code=process.poll(), terminated=False,
                    killed=False, exit_code=process.poll(), unknown=False)
@@ -188,10 +197,12 @@ def _terminate(process):
     try:
         process.terminate(); outcome['terminated'] = True
         try:
-            process.wait(timeout=TERMINATE_GRACE_SECONDS)
+            process.wait(timeout=TERMINATE_GRACE_SECONDS if whole_deadline is None else
+                         max(0,min(TERMINATE_GRACE_SECONDS,whole_deadline-time.monotonic())))
         except subprocess.TimeoutExpired:
             process.kill(); outcome['killed'] = True
-            process.wait(timeout=KILL_GRACE_SECONDS)
+            process.wait(timeout=KILL_GRACE_SECONDS if whole_deadline is None else
+                         max(0,min(KILL_GRACE_SECONDS,whole_deadline-time.monotonic())))
         outcome['exit_code'] = process.poll()
     except Exception as exc:
         outcome.update(unknown=True, error_type=type(exc).__name__, exit_code=process.poll())
@@ -273,9 +284,10 @@ def observer_disposition(plan, ref, pair=None):
                 limitation='Bound saved ACKs are reported; controller exit does not prove all descendant processes resolved.')
 
 
-def stop_owned(plan, ref, repo, directory, child, reason, pair=None):
+def stop_owned(plan, ref, repo, directory, child, reason, pair=None, *, whole_deadline=None):
     """STOP first, then parallel isolated request_stop; each UUID requested once."""
     deadline = time.monotonic() + STOP_GRACE_SECONDS
+    if whole_deadline is not None: deadline=min(deadline,whole_deadline)
     helpers, logs, observed, scanned, errors = {}, [], {}, [], []
     try:
         stop_marker = latch_stop(plan, ref, directory, reason, pair)
@@ -287,6 +299,9 @@ def stop_owned(plan, ref, repo, directory, child, reason, pair=None):
             instance = row['run_instance_id']
             observed[instance] = row
             if row['status'] != 'owned_allocated' or instance in helpers:
+                continue
+            if whole_deadline is not None and time.monotonic()>=whole_deadline:
+                errors.append(dict(run_instance_id=instance,error_type='inclusive_trial_deadline_exhausted'))
                 continue
             # Mark the attempt before any I/O; an ambiguous launch is never retried.
             helpers[instance] = None
@@ -308,8 +323,8 @@ def stop_owned(plan, ref, repo, directory, child, reason, pair=None):
             # allocated matching runtimes may appear during its STOP unwind.
             if (child.poll() is not None and not pending) or time.monotonic() >= deadline:
                 break
-            time.sleep(POLL_SECONDS)
-        child_outcome = _terminate(child)
+            time.sleep(POLL_SECONDS if whole_deadline is None else max(0,min(POLL_SECONDS,deadline-time.monotonic())))
+        child_outcome = _terminate(child) if whole_deadline is None else _terminate(child,whole_deadline)
         # Once the controller is stopped, one final scan accounts for allocations
         # that raced the STOP. Never resend a previously attempted UUID.
         final = owned_runs(plan, ref, pair)
@@ -317,18 +332,19 @@ def stop_owned(plan, ref, repo, directory, child, reason, pair=None):
         admit(final)
         if new:
             final_deadline = time.monotonic() + FINAL_STOP_GRACE_SECONDS
+            if whole_deadline is not None: final_deadline=min(final_deadline,whole_deadline)
             while any(process is not None and process.poll() is None for process in helpers.values()) and time.monotonic() < final_deadline:
-                time.sleep(POLL_SECONDS)
+                time.sleep(POLL_SECONDS if whole_deadline is None else max(0,min(POLL_SECONDS,final_deadline-time.monotonic())))
     except BaseException as exc:
         errors.append(dict(stage='stop_or_final_scan', error_type=type(exc).__name__))
     finally:
         # Applies even to marker/registration/read failures. Handles are retained
         # immediately after spawn; foreign PIDs are never discovered or killed.
         if child_outcome is None:
-            child_outcome = _terminate(child)
+            child_outcome = _terminate(child) if whole_deadline is None else _terminate(child,whole_deadline)
         for instance, process in helpers.items():
             if process is not None:
-                helper_outcomes[instance] = _terminate(process)
+                helper_outcomes[instance] = _terminate(process) if whole_deadline is None else _terminate(process,whole_deadline)
         for log in logs:
             try:
                 log.close()
@@ -359,7 +375,8 @@ def stop_owned(plan, ref, repo, directory, child, reason, pair=None):
 def _check_result(plan, ref, pair=None):
     path = live_pilot.safe_path(scope_root(plan, pair) / ('result.json' if pair is None else 'pair-result.json'))
     result = util.read_json(path)
-    completion=('recovery_operational_complete' if plan['kind']==live_pilot.RECOVERY_KIND
+    completion=('trial_operational_complete' if plan['kind']==live_pilot.TRIAL_KIND
+                else 'recovery_operational_complete' if plan['kind']==live_pilot.RECOVERY_KIND
                 else 'pilot_operational_complete' if pair is None else 'pair_operational_complete')
     if (result.get('kind') != plan['kind'] or result.get('plan_sha256') != ref['sha256']
             or result.get(completion) is not True
@@ -421,7 +438,9 @@ def verify_pair_terminal(repo,plan,ref,pair,result_ref):
 
 def validate_launcher_terminal(repo,plan,ref,pipeline,*,controller_module):
     """Typed recovery's actual independent child/verification closure, readonly."""
-    if plan.get('kind')!=live_pilot.RECOVERY_KIND or controller_module!='research.readiness_recovery':
+    trial=plan.get('kind')==live_pilot.TRIAL_KIND
+    expected_module='research.education_readiness_trial' if trial else 'research.readiness_recovery'
+    if plan.get('kind') not in (live_pilot.RECOVERY_KIND,live_pilot.TRIAL_KIND) or controller_module!=expected_module:
         raise ValueError('Explicit recovery launcher proof required')
     directory=live_pilot.safe_path(Path(plan['batch'])/'_launcher')
     intent=util.read_json(directory/'intent.json'); registration=util.read_json(directory/'registration.json')
@@ -440,7 +459,8 @@ def validate_launcher_terminal(repo,plan,ref,pipeline,*,controller_module):
     if intent.get('command')!=expected: raise ValueError('Recovery launcher actual command differs')
     approval=util.read_json(live_pilot.checked(intent['approval']))
     if (approval.get('plan_sha256')!=ref['sha256'] or approval.get('authorized') is not True
-            or approval.get('approved_by')!='user' or not approval.get('authorization_reference')):
+            or approval.get('approved_by')!='user' or not approval.get('authorization_reference')
+            or (trial and approval.get('scope')!='education_two_run_technical_trial')):
         raise ValueError('Recovery launcher approval changed')
     if (result.get('kind')!='live_pilot_launcher_result_v1' or result.get('plan')!=ref
             or any(result.get(k)!=intent[k] for k in ('approval','controller_source_commit','launch_id','launcher_pid'))
@@ -455,11 +475,19 @@ def validate_launcher_terminal(repo,plan,ref,pipeline,*,controller_module):
     verify_registration=util.read_json(directory/'verification-registration.json')
     if verify_registration.get('pid')!=result['verification_child_pid']:
         raise ValueError('Recovery verification child differs')
-    started=datetime.fromisoformat(intent['started_at']); original=datetime.fromisoformat(plan['original_wall_start_utc'])
+    started=datetime.fromisoformat(intent['started_at'])
     elapsed=result.get('elapsed_seconds')
-    if (started.tzinfo is None or started<original or type(elapsed) not in (int,float) or not 0<=elapsed<9000
-            or (started-original).total_seconds()+elapsed>=9000):
-        raise ValueError('Recovery original durable wall exceeded')
+    if trial:
+        from research import education_readiness_trial
+        education_readiness_trial.launch_origin(plan,ref)
+        education_readiness_trial.validate_elapsed(intent['started_at'],result['finished_at'])
+        if type(elapsed) not in (int,float) or not 0<=elapsed<=5400:
+            raise ValueError('Trial actual inclusive launcher wall exceeded')
+    else:
+        original=datetime.fromisoformat(plan['original_wall_start_utc'])
+        if (started.tzinfo is None or started<original or type(elapsed) not in (int,float) or not 0<=elapsed<9000
+                or (started-original).total_seconds()+elapsed>=9000):
+            raise ValueError('Recovery original durable wall exceeded')
     if (live_pilot.checked(result['terminal_proof'])!=directory/'terminal-proof.json'
             or util.read_json(directory/'terminal-proof.json')!=pipeline):
         raise ValueError('Recovery terminal verification proof differs')
@@ -474,6 +502,7 @@ def supervise(repo, plan, ref, directory, child, started, pair=None):
     """External wall includes main child and isolated terminal verification."""
     wall = invocation_wall(plan, ref, pair)
     deadline = min(started + 9000, time.monotonic() + wall)
+    whole_deadline=started+5400 if plan['kind']==live_pilot.TRIAL_KIND else None
     verifier = None
     log = None
     reason = None
@@ -509,7 +538,7 @@ def supervise(repo, plan, ref, directory, child, started, pair=None):
                                 terminal_proof=live_pilot.reference(proof_path), elapsed_seconds=time.monotonic()-started,
                                 verification_child_pid=verifier.pid, verification_child_exit_code=0,
                                 watcher_shutdown_verified=True,
-                                stop_requested=False, model_runs=2 if plan['kind']==live_pilot.RECOVERY_KIND or pair is not None else 4, selected_pair=pair,
+                                stop_requested=False, model_runs=2 if plan['kind'] in (live_pilot.RECOVERY_KIND,live_pilot.TRIAL_KIND) or pair is not None else 4, selected_pair=pair,
                                 new_main_authorized=False)
                     reason = 'terminal_proof_unconfirmed'; break
             time.sleep(POLL_SECONDS)
@@ -519,13 +548,14 @@ def supervise(repo, plan, ref, directory, child, started, pair=None):
         # Preserve the handle even if log-close/receipt I/O fails. A successful
         # return has an already exited verifier; failure always bounds it here.
         if verifier is not None:
-            verification_exit = _terminate(verifier)
+            verification_exit = _terminate(verifier) if whole_deadline is None else _terminate(verifier,whole_deadline)
         if log is not None:
             try:
                 log.close()
             except Exception as exc:
                 evidence_errors.append(dict(stage='verification_log_close', error_type=type(exc).__name__))
-    stopped = stop_owned(plan, ref, repo, directory, child, reason, pair)
+    stopped = (stop_owned(plan,ref,repo,directory,child,reason,pair) if whole_deadline is None else
+               stop_owned(plan,ref,repo,directory,child,reason,pair,whole_deadline=whole_deadline))
     return dict(operational_complete=False, reason=reason, stop_requested=True, **stopped,
                 verification_child=verification_exit, elapsed_seconds=time.monotonic()-started,
                 evidence_errors=evidence_errors,
@@ -538,14 +568,20 @@ def launch(repo, plan_path, approval_path, pair=None):
     started = time.monotonic()
     started_utc = run.now()
     repo, plan, ref, approval_ref = preflight(repo, plan_path, approval_path, pair)
-    if time.monotonic() - started >= invocation_wall(plan, ref, pair):
+    if plan['kind']==live_pilot.TRIAL_KIND:
+        # All read-only validation/preparation precedes this fresh period.
+        started=time.monotonic();started_utc=run.now()
+    elif time.monotonic() - started >= invocation_wall(plan, ref, pair):
         raise TimeoutError('Whole pilot wall exhausted before spawn')
     directory = live_pilot.safe_path(scope_root(plan, pair) / '_launcher')
+    whole_deadline=started+5400 if plan['kind']==live_pilot.TRIAL_KIND else None
     directory.mkdir(exist_ok=False)
     command = [sys.executable, '-B', '-X', 'utf8', '-m', 'research.live_pilot', 'execute',
                ref['path'], '--repo', str(repo), '--approval', approval_ref['path']]
     if plan['kind']==live_pilot.RECOVERY_KIND:
         command[5]='research.readiness_recovery'
+    elif plan['kind']==live_pilot.TRIAL_KIND:
+        command[5]='research.education_readiness_trial'
     if pair is not None:
         command = [sys.executable, '-B', '-X', 'utf8', '-m', 'research.acquisition_readiness', 'execute-pair',
                    ref['path'], '--pair', str(pair), '--repo', str(repo), '--approval', approval_ref['path']]
@@ -557,6 +593,9 @@ def launch(repo, plan_path, approval_path, pair=None):
         controller_source_commit=plan['source_commit'], parent_pid=os.getppid(), launcher_pid=os.getpid(),
         plan=ref, approval=approval_ref, phase_id=plan['phase_id'], started_at=started_utc, command=command,
         selected_pair=pair)
+    if plan['kind']==live_pilot.TRIAL_KIND:
+        identity.update(whole_deadline_utc=(datetime.fromisoformat(started_utc)+timedelta(seconds=5400)).isoformat(),
+            wall_threshold_seconds=5160,cleanup_reserve_seconds=240)
     util.write_new_json(directory / 'intent.json', identity)
     with (directory / 'child.log').open('xb') as log:
         try:
@@ -571,18 +610,22 @@ def launch(repo, plan_path, approval_path, pair=None):
             except BaseException as exc:
                 result = dict(operational_complete=False, first_fault=type(exc).__name__,
                               **stop_owned(plan, ref, repo, directory, child,
-                                           'registration_or_supervision_' + type(exc).__name__, pair))
+                                           'registration_or_supervision_' + type(exc).__name__, pair,
+                                           **({'whole_deadline':whole_deadline} if whole_deadline is not None else {})))
         result.update(kind='live_pilot_launcher_result_v1', plan=ref, approval=approval_ref,
                       source_sha256=identity['source_sha256'], controller_source_commit=plan['source_commit'],
                       launch_id=identity['launch_id'], launcher_pid=os.getpid(),
                       child_pid=child.pid if 'child' in locals() else None, selected_pair=pair)
+        if plan['kind']==live_pilot.TRIAL_KIND:
+            result['finished_at']=run.now()
         try:
             util.write_new_json(directory / 'result.json', result)
         except BaseException as exc:
             # Missing durable launcher result is a hold even if the pipeline
             # appeared healthy. Preserve STOP; never return apparent success.
             if 'child' in locals():
-                failure = stop_owned(plan, ref, repo, directory, child, 'launcher_result_write_failure', pair)
+                failure = stop_owned(plan, ref, repo, directory, child, 'launcher_result_write_failure', pair,
+                                     **({'whole_deadline':whole_deadline} if whole_deadline is not None else {}))
             else:
                 failure = dict(stop=latch_stop(plan, ref, directory, 'launcher_result_write_failure', pair))
             try:
@@ -609,7 +652,10 @@ def internal(action, repo, plan_path, directory, digest, instance=None):
         raise ValueError('Foreign launcher helper binding')
     if action == '_verify':
         from research import acquisition_readiness
-        if plan['kind']==live_pilot.RECOVERY_KIND:
+        if plan['kind']==live_pilot.TRIAL_KIND:
+            from research import education_readiness_trial
+            proof=education_readiness_trial.pipeline_evidence(repo,ref,_check_result(plan,ref))
+        elif plan['kind']==live_pilot.RECOVERY_KIND:
             from research import readiness_recovery
             proof=readiness_recovery.pipeline_evidence(repo,ref,_check_result(plan,ref))
         else:

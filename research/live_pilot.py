@@ -23,6 +23,8 @@ MAIN_KIND = 'source_info_repaired_v6_main'
 OBSERVER_KIND = 'live_go_readiness_pilot_observer_v1'
 RECOVERY_KIND = 'repaired_pilot_readiness_recovery_v1'
 RECOVERY_OBSERVER_KIND = 'repaired_pilot_readiness_recovery_observer_v1'
+TRIAL_KIND = 'education_go_readiness_trial_v1'
+TRIAL_OBSERVER_KIND = 'education_go_readiness_trial_observer_v1'
 BOUNDS = dict(max_pairs=2, max_runs=4, run_seconds=1800, provider_seconds=600,
     accumulated_run_seconds=7200, request_count=600, observed_tokens=30000000,
     wall_seconds=9000, disk_free_min_bytes=8 * 1024**3)
@@ -195,14 +197,17 @@ def owner_plan(path, repo):
     if kind==RECOVERY_KIND:
         from research import readiness_recovery
         return readiness_recovery.validate_plan(plan,repo)
+    if kind==TRIAL_KIND:
+        from research import education_readiness_trial
+        return education_readiness_trial.validate_plan(plan,repo)
     raise ValueError('Unsupported live owner kind')
 
 
 def observer_phase(plan, plan_reference, pair_number, *, batch=None, cohort=None):
-    if plan.get('kind') not in (KIND,MAIN_KIND,RECOVERY_KIND): raise ValueError('Unsupported live owner kind')
+    if plan.get('kind') not in (KIND,MAIN_KIND,RECOVERY_KIND,TRIAL_KIND): raise ValueError('Unsupported live owner kind')
     selected=next(p for p in plan['assignments'] if p['pair']==pair_number)
     task=selected['cases'][0]['task']
-    observer_kind={KIND:OBSERVER_KIND,MAIN_KIND:MAIN_KIND,RECOVERY_KIND:RECOVERY_OBSERVER_KIND}[plan['kind']]
+    observer_kind={KIND:OBSERVER_KIND,MAIN_KIND:MAIN_KIND,RECOVERY_KIND:RECOVERY_OBSERVER_KIND,TRIAL_KIND:TRIAL_OBSERVER_KIND}[plan['kind']]
     return dict(schema_version=1,kind=observer_kind,owner_kind=plan['kind'],
         original_bundle=plan_reference,phase_id=plan['phase_id']+'-p'+str(pair_number),
         batch=str(batch or Path(plan['batch'])/('pair-'+str(pair_number))),
@@ -213,7 +218,7 @@ def observer_phase(plan, plan_reference, pair_number, *, batch=None, cohort=None
 
 
 def validate_observer_phase(phase,repo):
-    kinds={KIND:OBSERVER_KIND,MAIN_KIND:MAIN_KIND,RECOVERY_KIND:RECOVERY_OBSERVER_KIND}
+    kinds={KIND:OBSERVER_KIND,MAIN_KIND:MAIN_KIND,RECOVERY_KIND:RECOVERY_OBSERVER_KIND,TRIAL_KIND:TRIAL_OBSERVER_KIND}
     if phase.get('owner_kind') not in kinds or phase.get('kind')!=kinds[phase['owner_kind']]:
         raise ValueError('Explicit new live observer required')
     path=checked(phase['original_bundle']); plan=owner_plan(path,repo)
@@ -558,6 +563,9 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch):
             if any(expected.get(k)!=v for k,v in binding.items()): raise ValueError('Foreign admission binding')
             root=batch/binding['run_id']; condition=profiles.validate_run(root)
             manifest=util.read_json(root/'manifest.json')
+            if plan['kind']==TRIAL_KIND:
+                from research.education_readiness_trial import validate_input
+                validate_input(plan,binding,manifest)
             if (manifest.get('run_instance_id')!=binding['run_instance_id']
                     or manifest['prompt_sha256']!=binding['input_sha256']
                     or manifest['condition_sha256']!=binding['condition_sha256']

@@ -33,6 +33,9 @@ def pair_context(repo, bundle_path, number):
 
 def release_prefix(bundle_path, bundle, phase=None):
     """Keep distinct frozen bundles and technical fixtures off each other's tags."""
+    if bundle.get('kind') == 'source_info_repaired_v6_main':
+        from research import acquisition_sharing
+        return acquisition_sharing.release_prefix(bundle_path, bundle, phase)
     technical = bundle.get('kind') == 'continuity_sharing_technical_fixture'
     if technical and not bundle['cohort'].startswith('runs/_technical-sharing-'):
         raise ValueError('Technical sharing fixture must remain outside research cohorts')
@@ -120,15 +123,35 @@ def stage(repo, bundle_path, number, destination, *, context=None, phase=None):
                 manifest['excluded'].append({'path': name, **originals[rid][relative], 'reason': reason})
             else:
                 copy(source, name, originals[rid][relative]['sha256'])
-    task_profile = profiles.read(repo, 'tasks', pair['task'])
+    repaired_main = bundle.get('kind') == 'source_info_repaired_v6_main'
+    task_profile = (profiles.task_profile(repo, pair['task'], bundle['task_revision'])
+                    if repaired_main else profiles.read(repo, 'tasks', pair['task']))
     family = bundle['plan'].get('task_hierarchy', {}).get(pair['task'], {}).get('family', 'music-store-continuity')
     public_request = 'research/tasks/' + family + '/public-request.txt'
     for name in ('research/__init__.py', 'research/catalog_allocation_review.py', 'research/catalog_share.py',
             'research/sql/catalog_otel_requests.sql', next_phase.protocol_path(bundle['plan']),
-            'research/tasks/candidate-register.json', public_request, task_profile['evaluation']['spec_path']):
+            'research/tasks/candidate-register.json', task_profile['evaluation']['spec_path']):
         copy(repo / name, name)
+    if repaired_main:
+        value = task_profile['migration_request'].encode('utf-8')
+        target = public / public_request
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(value)
+        ledger = repo / 'outer/profiles/task-revisions' / bundle['task_revision'] / (pair['task'] + '.json')
+        manifest['files'].append({'path': public_request, 'source_sha256': util.sha256_file(ledger),
+            'sha256': util.sha256_file(target), 'bytes': len(value),
+            'transformation': 'exact_public_request_from_revised_task_profile'})
+    else:
+        copy(repo / public_request, public_request)
     copy(repo / 'research/sharing/CONTINUITY-README.md', 'README.md')
-    if phase:
+    if repaired_main:
+        from research import acquisition_sharing
+        readme = public / 'README.md'
+        readme.write_text(acquisition_sharing.public_readme(bundle, phase), encoding='utf-8')
+        entry = next(e for e in manifest['files'] if e['path'] == 'README.md')
+        entry.update(sha256=util.sha256_file(readme), bytes=readme.stat().st_size,
+                     transformation='explicit_repaired_main_cohort_readme')
+    elif phase:
         # This is a new reviewed public copy; the historical private plan and
         # original five pairs are not edited or reinterpreted.
         readme = public / 'README.md'
@@ -158,6 +181,9 @@ def stage(repo, bundle_path, number, destination, *, context=None, phase=None):
     portable = public / 'STUDY.json'
     util.write_new_json(portable, {'plan': bundle['plan'], 'assignments': bundle['assignments'],
         'source_commit': bundle['source_commit'], 'original_bundle_sha256': util.sha256_file(bundle_path),
+        **({'kind': bundle['kind'], 'task_revision': bundle['task_revision'],
+            'settings': bundle['settings'], 'bounds': bundle['bounds'],
+            'plan_role': 'administrative_baseline_design_not_execution_authority'} if repaired_main else {}),
         **({'execution_phase': phase} if phase else {}),
         'public_subset_limitations': 'Private oracle, runtime, native state and evaluation databases remain local; this public slice supports saved evidence extraction, not a full evaluator replay.'})
     manifest['files'].append({'path': 'STUDY.json', 'sha256': util.sha256_file(portable),
@@ -228,7 +254,7 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     publication = {'remote_assets_verified': True, 'urls': urls, 'package_sha256': asset['sha256'],
         'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number,
         **({'phase_sha256': phase['phase_sha256']} if phase else {})}
-    if bundle['plan']['plan_id'] == next_phase.V5_ID:
+    if bundle['plan']['plan_id'] == next_phase.V5_ID or bundle.get('kind') == 'source_info_repaired_v6_main':
         # v5 live acceptance cannot use the injectable local rehearsal path.
         publication['transport_mode'] = ('github-release-anonymous-download-v1'
             if actual_transport else 'injected-transport')
@@ -237,7 +263,7 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
             if not remote_path.exists():
                 remote = catalog_delivery.release(prefix + f'{number:03d}')
                 if not remote or remote.get('draft'):
-                    raise ValueError('Actual v5 release readback missing')
+                    raise ValueError('Actual research release readback missing')
                 identity = phase_remote_identity(remote, prefix + f'{number:03d}', phase) if phase else {}
                 util.write_new_json(remote_path, {'tag_name': remote['tag_name'],
                     'release_id': remote['id'], 'html_url': remote['html_url'],

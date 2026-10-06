@@ -16,7 +16,17 @@ def identifier(value):
     return value
 
 
-def read(repo, kind, name):
+def read(repo, kind, name, *, task_revision=None):
+    if task_revision is not None:
+        if kind != 'tasks':
+            raise ValueError('Revision lookup is only for task profiles')
+        path = (Path(repo) / 'outer' / 'profiles' / 'task-revisions'
+                / identifier(task_revision) / (identifier(name) + '.json'))
+        value = util.read_json(path)
+        if (value.get('revision_id') != task_revision or value.get('task_id') != name
+                or value.get('canonical_task_id', name) != name):
+            raise ValueError('Task revision identity mismatch')
+        return value
     path = Path(repo) / 'outer' / 'profiles' / kind / (identifier(name) + '.json')
     return util.read_json(path)
 
@@ -27,8 +37,14 @@ def inventory(repo):
         for kind in ('tasks', 'interventions', 'runtimes')}
 
 
-def resolve(repo, task_id, intervention_id, runtime_id='deepseek'):
-    task = read(repo, 'tasks', task_id)
+def task_profile(repo, name, task_revision=None):
+    if task_revision is None:
+        return read(repo, 'tasks', name)
+    return read(repo, 'tasks', name, task_revision=task_revision)
+
+
+def resolve(repo, task_id, intervention_id, runtime_id='deepseek', *, task_revision=None):
+    task = task_profile(repo, task_id, task_revision)
     intervention = read(repo, 'interventions', intervention_id)
     runtime = read(repo, 'runtimes', runtime_id)
     if task['task_id'] != task_id or intervention['id'] != intervention_id or runtime['id'] != runtime_id:
@@ -56,6 +72,8 @@ def resolve(repo, task_id, intervention_id, runtime_id='deepseek'):
                             'tool_versions': {}, 'subagent_policy': 'none'},
                      budget={'kind': 'wall_clock_seconds', 'scope': 'run',
                              'value': runtime['timeout_seconds']})
+    if task_revision is not None:
+        condition['task_profile_revision'] = task_revision
     return condition
 
 
@@ -119,15 +137,24 @@ def prepare_prompt(condition, source, catalog=None):
 
 
 def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek', *,
-           run_instance_id=None, assignment=None):
+           run_instance_id=None, assignment=None, task_revision=None):
     repo = Path(repo).resolve()
-    condition = resolve(repo, task_id, intervention, runtime_id)
+    condition = (resolve(repo, task_id, intervention, runtime_id) if task_revision is None
+                 else resolve(repo, task_id, intervention, runtime_id, task_revision=task_revision))
     prepared_root = runtime_root(repo, task_id, condition['runtime'])
     lock = util.read_json(prepared_root / 'lock.json')
-    if not lock.get('evaluator_build', {}).get('clean_worktree'):
+    if 'repaired_runtime_binding' in lock:
+        from research.repaired_runtime import validate_repaired_runtime_binding
+        validate_repaired_runtime_binding(repo, lock)
+    elif not lock.get('evaluator_build', {}).get('clean_worktree'):
         raise ValueError('Prepare an evaluator from a clean committed checkout before spending model usage')
     if lock['opencode_version'] != condition['runtime']['opencode_version']:
         raise ValueError('Prepared runtime does not match profile')
+    if task_revision is not None or 'task_profile_revision' in lock:
+        if (lock.get('task_profile_revision') != task_revision
+                or lock.get('evaluator_version') != condition['evaluation']['evaluation_version']
+                or lock.get('evaluator_project') != condition['evaluation']['project']):
+            raise ValueError('Prepared evaluator revision does not match task profile')
     if condition.get('task_input_adapter') == 'migration-v1':
         from . import migration_input
         inputs = migration_input.prepare(repo, condition)
@@ -146,7 +173,7 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
         receipt = inputs['catalog-derived'].parent / 'preparation.json'
         context['preparation'] = {'path': str(receipt), 'sha256': util.sha256_file(receipt),
                                   **util.read_json(receipt)}
-    frozen_profiles = {'task': read(repo, 'tasks', task_id),
+    frozen_profiles = {'task': task_profile(repo, task_id, task_revision),
                        'intervention': read(repo, 'interventions', intervention),
                        'runtime': read(repo, 'runtimes', runtime_id)}
     condition['runtime_lock'] = lock
@@ -166,7 +193,7 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
         util.write_new_json(root / 'profiles' / (name + '.json'), value)
     assets = root / 'evaluation-assets'
     shutil.copytree(bundle, assets / 'evaluator')
-    task = read(repo, 'tasks', task_id)
+    task = task_profile(repo, task_id, task_revision)
     for key, dest in [('spec_path', 'requirements.json'), ('catalog_path', 'catalog.json')]:
         shutil.copy2(repo / task['evaluation'][key], assets / dest)
     for source_path, dest in task['evaluation'].get('extra_assets', {}).items():

@@ -26,6 +26,25 @@ void Check(string name, bool pass)
     if (!pass) throw new Exception("Regression failed: " + name);
 }
 
+if(args.Length==2 && args[0]=="--money-fixture")
+{
+    using var fixture=JsonDocument.Parse(File.ReadAllText(args[1]));
+    foreach(var item in fixture.RootElement.GetProperty("cases").EnumerateArray())
+    {
+        var text=item.GetProperty("text").GetString();var actual=Attribution16.Money("<b id='cart-total'>"+System.Net.WebUtility.HtmlEncode(text)+"</b>");
+        var kind=actual.Value.HasValue?"known":actual.ContractFailure?"invalid":"unknown";
+        Check("Shared money kind: "+text,kind==item.GetProperty("kind").GetString());
+        if(kind=="known")Check("Shared signed money: "+text,(actual.Value*100).Value.ToString("0",System.Globalization.CultureInfo.InvariantCulture)==item.GetProperty("minor").GetString());
+    }
+    foreach(var item in fixture.RootElement.GetProperty("saved5061PureResults").EnumerateArray())
+    {
+        var text=item.GetProperty("text").GetString();var html="<b id='cart-total'>"+System.Net.WebUtility.HtmlEncode(text)+"</b>";
+        var version=item.GetProperty("version").GetString();var amount=version=="1.6.0"?Attribution16.Money(html).Value:Html.Money(html);
+        Check("Saved5061 same frozen price/quantity amount: "+version+" "+text,(amount==item.GetProperty("quantity").GetInt32()*7.25m)==item.GetProperty("matched").GetBoolean());
+    }
+    Console.WriteLine(JsonSerializer.Serialize(new {passed=cases.Count,cases})); return;
+}
+
 Check("comment cannot supply money", Html.Money("<!-- <td id='cart-total'>17.98</td> -->") == null);
 Check("script cannot supply album", Html.AlbumIds("<script>\"<a href='/Store/Details/1'>X</a>\"</script>").Count == 0);
 Check("template cannot supply count", Html.CartCount("<template><b id='cart-status'>Cart (2)</b></template>") == null);
@@ -80,6 +99,8 @@ finally { Directory.Delete(root, true); }
 
 // Only synthetic markers: no discovery or reading of the user's credential.
 BrowserCartReviewTests.Run(Check);
+try { AttributionTests.Run(Check); MigrationAttributionTests.Run(Check); }
+catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode=1; return; }
 using (var scanState = new RunState { EvaluationVersion = "1.4.0", Static = new StaticResult
     { LegacyReferences = new() { "synthetic confirmed System.Web reference" }, LegacyUnresolved = new() { "synthetic unreadable source" } },
     Ledger = new Ledger { Requirements = new() { new() { Id = "R-029", Checks = new() { new() { Id = "C-030" } } } } } })

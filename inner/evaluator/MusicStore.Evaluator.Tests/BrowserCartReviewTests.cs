@@ -121,6 +121,64 @@ static class BrowserCartReviewTests
         CheckProductComposition(check);
         CheckRemovalPrerequisites(check);
         CheckUnknownRemovalComposition(check);
+        CheckMoney16(check);
+        CheckMarkers16(check);
+    }
+
+    static void CheckMarkers16(Action<string,bool> check)
+    {
+        BrowserCartReview Load(string version,string after=null,int record=7)
+        {
+            using var f=new Fixture();
+            string Div(int count)=>Cart(count,Html.Money2(count*8.99m),record).Replace("<table>","<section>").Replace("</table>","</section>").Replace("<tr","<div").Replace("</tr>","</div>").Replace("<td","<span").Replace("</td>","</span>");
+            var request=f.File("request.json",JsonSerializer.Serialize(new {baseUrl="http://127.0.0.1:43001",runInstanceId=Instance,artifactSha256=Artifact,specSha256=Spec,evaluationVersion=version}));
+            f.Receipt.SchemaVersion=3;f.Receipt.BaseUrl="http://127.0.0.1:43001";f.Receipt.RequestSha256=request.Sha256;
+            for(var i=0;i<2;i++)
+            {
+                var id=i==0?"C-015":"C-016";var b=i==0?2:1;var a=b-1;
+                f.Receipt.Removals[i].Before=f.Capture(id+"-before.json",Div(b)+$"<b id='cart-status'>Cart ({b})</b>",false,url:"http://127.0.0.1:43001/ShoppingCart");
+                f.Receipt.Removals[i].After=f.Capture(id+"-after.json",(i==1 && after!=null?after:Div(a))+$"<b id='cart-status'>Cart ({a})</b>",true,url:"http://127.0.0.1:43001/ShoppingCart");
+            }
+            var receipt=f.File("receipt.json",JsonSerializer.Serialize(f.Receipt));
+            return BrowserCartReview.Load(Path.Combine(f.Root,receipt.Path),Artifact,Spec,Instance,Catalog,true,true,true,version);
+        }
+        var positive=Load("1.6.0");
+        check("1.6 hash-bound DIV cart receipt independently passes both removals",positive.Complete && positive.For("C-015").Pass && positive.For("C-016").Pass);
+        foreach(var version in new[]{"1.4.0","1.5.0"})check(version+" DIV receipt retains historical precondition rejection",!Load(version).Complete);
+        var unsupported=Load("1.6.0","<div id='row-invalid'></div><b id='cart-total'>0.00</b>");
+        check("1.6 malformed residual browser row cannot establish empty removal",!unsupported.Complete && !unsupported.ProductFailures.ContainsKey("C-016") && unsupported.Faults.Count==0);
+        var missing=Load("1.6.0","<div id='row-7'><a href='/Store/Details/1'>Title</a></div><b id='cart-total'>0.00</b>");
+        check("1.6 missing required browser quantity retains finite failure plus coverage gap",!missing.Complete && missing.ProductFailures.ContainsKey("C-016") && missing.Faults.Count==0);
+        var orphan=Load("1.6.0","<b id='item-count-7'>1</b><b id='cart-total'>0.00</b>");
+        check("1.6 orphan browser quantity cannot establish empty removal",!orphan.Complete && orphan.ProductFailures.ContainsKey("C-016") && orphan.Faults.Count==0);
+        var zero=Load("1.6.0",record:0);
+        check("1.6 zero browser row identity is an unestablished operation prerequisite",!zero.Complete && zero.ProductFailures.Count==0 && zero.Faults.Count==0);
+    }
+
+    static void CheckMoney16(Action<string,bool> check)
+    {
+        BrowserCartReview Load(string version,string finalAmount,string afterOne=null,string afterTwo=null)
+        {
+            using var f=new Fixture();
+            var request=f.File("request.json",JsonSerializer.Serialize(new {baseUrl="http://127.0.0.1:43001",runInstanceId=Instance,artifactSha256=Artifact,specSha256=Spec,evaluationVersion=version}));
+            f.Receipt.SchemaVersion=3;f.Receipt.BaseUrl="http://127.0.0.1:43001";f.Receipt.RequestSha256=request.Sha256;
+            for(var i=0;i<2;i++)
+            {
+                var id=i==0?"C-015":"C-016";var b=i==0?2:1;var a=b-1;
+                f.Receipt.Removals[i].Before=f.Capture(id+"-before.json",Cart(b,"$"+Html.Money2(b*8.99m))+$"<b id='cart-status'>Cart ({b})</b>",false,url:"http://127.0.0.1:43001/ShoppingCart");
+                f.Receipt.Removals[i].After=f.Capture(id+"-after.json",(i==0 && afterTwo!=null?afterTwo:i==1 && afterOne!=null?afterOne:Cart(a,i==0?"$8.99":finalAmount))+$"<b id='cart-status'>Cart ({a})</b>",true,url:"http://127.0.0.1:43001/ShoppingCart");
+            }
+            var receipt=f.File("receipt.json",JsonSerializer.Serialize(f.Receipt));
+            return BrowserCartReview.Load(Path.Combine(f.Root,receipt.Path),Artifact,Spec,Instance,Catalog,true,true,true,version);
+        }
+        var pass=Load("1.6.0","$0.00");
+        check("1.6 bound browser currency receipt passes both observed removals",pass.Complete && pass.For("C-015").Pass && pass.For("C-016").Pass);
+        foreach(var old in new[]{"1.4.0","1.5.0"})check(old+" currency receipt retains historical precondition rejection",!Load(old,"$0.00").Complete);
+        var precision=Load("1.6.0","$0");check("1.6 observed post-click wrong fraction is finite failure",precision.Complete && !precision.For("C-016").Pass);
+        var ambiguous=Load("1.6.0","0.00 or 1.00");check("1.6 ambiguous browser money cannot become numeric quality",!ambiguous.Complete && !ambiguous.ProductFailures.ContainsKey("C-016"));
+        var finite=Load("1.6.0","0.00 or 1.00",Cart(1,"0.00 or 1.00"));check("1.6 verified browser wrong quantity survives ambiguous money",!finite.Complete && finite.ProductFailures.ContainsKey("C-016"));
+        var absent=Load("1.6.0","$0.00",afterTwo:"<b id='cart-total'>USD8.99</b>");check("1.6 decoded missing quantity-one row survives ambiguous browser money",!absent.Complete && absent.ProductFailures.ContainsKey("C-015") && absent.Faults.Count==0);
+        var unsupported=Load("1.6.0","$0.00",afterTwo:"<div id='row-invalid'></div><b id='cart-total'>USD8.99</b>");check("1.6 unsupported residual row is not invented absent quantity-one row",!unsupported.Complete && !unsupported.ProductFailures.ContainsKey("C-015") && unsupported.Faults.Count==0);
     }
 
     static void CheckProductHttp(Action<string, bool> check)

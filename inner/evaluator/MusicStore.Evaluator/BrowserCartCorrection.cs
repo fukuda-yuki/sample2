@@ -25,8 +25,8 @@ public static class BrowserCartCorrection
             throw new InvalidDataException("Baseline identity, HTTP-only scope or complete check set mismatch.");
 
         var reconstructed = Program.BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
-        if (options.EvaluationVersion is "1.4.0" or "1.5.0") reconstructed.EvaluatorFaults.AddRange(baseline.EvaluatorFaults ?? new());
-        if (options.EvaluationVersion is "1.4.0" or "1.5.0" && baseline.ResearchStatus == "incomplete")
+        if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0") reconstructed.EvaluatorFaults.AddRange(baseline.EvaluatorFaults ?? new());
+        if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0" && baseline.ResearchStatus == "incomplete")
         {
             reconstructed.Quality = null;
             reconstructed.Verdict = reconstructed.CriticalFailed.Count > 0 ? "fail_critical" : reconstructed.FailedCount > 0 ? "fail"
@@ -39,21 +39,21 @@ public static class BrowserCartCorrection
 
         BrowserCartReview browser = null;
         var faults = new List<string>(baseline.EvaluatorFaults ?? new());
-        if (options.EvaluationVersion == "1.5.0") faults.AddRange(reconstructed.EvaluatorFaults.Except(faults));
+        if (options.EvaluationVersion is "1.5.0" or "1.6.0") faults.AddRange(reconstructed.EvaluatorFaults.Except(faults));
         try { browser = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash, specHash,
-            options.ReviewRunInstanceId, catalog, ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0",
-            ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0", ledger.SpecVersion is "1.4.0" or "1.5.0", options.EvaluationVersion); }
+            options.ReviewRunInstanceId, catalog, ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0",
+            ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0", ledger.SpecVersion is "1.4.0" or "1.5.0" or "1.6.0", options.EvaluationVersion); }
         catch (Exception ex) { faults.Add("Browser evidence: " + ex.Message); }
         if (browser != null) faults.AddRange(browser.Faults);
         foreach (var result in results.Where(r => r.CheckId is "C-015" or "C-016"))
         {
             var observed = browser?.For(result.CheckId);
-            if (options.EvaluationVersion == "1.5.0" && result.Judgement is Judgement.Blocked or Judgement.Error)
+            if (options.EvaluationVersion is "1.5.0" or "1.6.0" && result.Judgement is Judgement.Blocked or Judgement.Error)
                 result.UnknownObservations.Add("Original HTTP removal JSON/state predicate was not observed; independent browser evidence cannot fill this gap.");
             // The browser can veto an HTTP pass, but cannot erase a prior HTTP failure.
             if (result.Judgement == Judgement.Pass)
                 result.Judgement = observed?.Complete != true ? Judgement.Blocked : observed.Pass ? Judgement.Pass : Judgement.Fail;
-            else if (options.EvaluationVersion == "1.5.0" && observed?.Complete == true && !observed.Pass)
+            else if (options.EvaluationVersion is "1.5.0" or "1.6.0" && observed?.Complete == true && !observed.Pass)
                 // This independent browser observation has its own populated
                 // precondition. Preserve an HTTP fault in the separate fault list.
                 result.Judgement = Judgement.Fail;
@@ -64,8 +64,8 @@ public static class BrowserCartCorrection
         foreach (var failure in browser?.ProductFailures ?? new())
         {
             var result = results.Single(r => r.CheckId == failure.Key);
-            result.Judgement = Judgement.Fail;
-            result.Observation += "\n" + failure.Value;
+            if(options.EvaluationVersion=="1.6.0")Attribution16.ProductFailure(result,failure.Value);
+            else {result.Judgement = Judgement.Fail;result.Observation += "\n" + failure.Value;}
             result.Evidence += "\nbrowser-cart/receipt.json";
         }
         var output = Program.BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
@@ -75,8 +75,8 @@ public static class BrowserCartCorrection
         output.ReviewRunInstanceId = options.ReviewRunInstanceId;
         output.EvaluatorFaults.AddRange(faults);
         output.ResearchStatus = browser?.Complete == true && output.ErrorCount == 0 && output.BlockedCount == 0
-            && (!(options.EvaluationVersion is "1.4.0" or "1.5.0") || output.EvaluatorFaults.Count == 0)
-            && (options.EvaluationVersion != "1.5.0" || output.UncheckedScope.Count == 0) ? "complete" : "incomplete";
+            && (!(options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0") || output.EvaluatorFaults.Count == 0)
+            && (options.EvaluationVersion is not ("1.5.0" or "1.6.0") || output.UncheckedScope.Count == 0) ? "complete" : "incomplete";
         if (output.ResearchStatus != "complete")
         {
             output.Quality = null;

@@ -71,6 +71,7 @@ public sealed class BrowserCartReview
         string runInstanceId, Catalog catalog, bool requireCartStatus = false,
         bool structuralPrecondition = false, bool productHttpContract = false, string expectedEvaluationVersion = "1.4.0")
     {
+        decimal? Money(string html) => expectedEvaluationVersion=="1.6.0" ? Attribution16.Money(html).Value : Html.Money(html);
         var receipt = JsonSerializer.Deserialize<Receipt>(File.ReadAllText(path),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         if (receipt == null || receipt.SchemaVersion is not (1 or 2 or 3) || receipt.Actor != "agent"
@@ -120,9 +121,15 @@ public sealed class BrowserCartReview
                     throw new InvalidDataException("Browser before/after session, route or time mismatch.");
                 var beforeHtml = ObservedHtml(b);
                 var afterHtml = ObservedHtml(a);
-                var lines = Html.CartLines(beforeHtml);
+                var lines = Html.CartLines(beforeHtml,expectedEvaluationVersion);
                 var countBefore = removal.CheckId == "C-015" ? 2 : 1;
                 var album = lines.Count == 1 ? catalog.ById(lines[0].AlbumId) : null;
+                if(expectedEvaluationVersion=="1.6.0" && Html.ObserveCart16(beforeHtml).Violations.Count>0)
+                {
+                    review.results[removal.CheckId]=new Result(false,"Browser row-marker quantity predicate unsupported; actual capture retained.",false,"not_run_unsupported");continue;
+                }
+                if(expectedEvaluationVersion=="1.6.0" && lines.Any(l=>l.RecordId<=0))
+                {review.results[removal.CheckId]=new Result(false,"Positive owned row identity was not established.",false,"not_run_precondition");continue;}
                 if (removal.Action == "not-run-precondition")
                 {
                     using var setup = JsonDocument.Parse(ReadVerified(root, removal.SetupBefore));
@@ -135,9 +142,9 @@ public sealed class BrowserCartReview
                     var empty = ObservedHtml(s);
                     if (removal.Reason == "quantity_after_two_adds")
                     {
-                        if (removal.CheckId != "C-015" || removal.AddCount != 2 || !WellFormedCart(empty)
-                            || Html.CartLines(empty).Count != 0 || Html.Money(empty) != 0
-                            || !WellFormedCart(beforeHtml) || album?.AlbumId != 1 || lines[0].Count == 2)
+                        if (removal.CheckId != "C-015" || removal.AddCount != 2 || !WellFormedCart(empty,expectedEvaluationVersion)
+                            || Html.CartLines(empty,expectedEvaluationVersion).Count != 0 || Money(empty) != 0
+                            || !WellFormedCart(beforeHtml,expectedEvaluationVersion) || album?.AlbumId != 1 || lines[0].Count == 2)
                             throw new InvalidDataException("Quantity violation is not established by setup evidence.");
                         review.ProductFailures["C-013"] = "Browser: two public additions from an empty cart yielded "
                             + Scenarios.DescribeCart(lines) + "; removal itself was not performed.";
@@ -147,8 +154,8 @@ public sealed class BrowserCartReview
                     continue;
                 }
                 if (album == null || lines[0].Count != countBefore
-                    || !WellFormedCart(beforeHtml) || !Html.Money(beforeHtml).HasValue
-                    || !structuralPrecondition && Html.Money(beforeHtml) != countBefore * album.Price)
+                    || !WellFormedCart(beforeHtml,expectedEvaluationVersion) || !Money(beforeHtml).HasValue
+                    || !structuralPrecondition && Money(beforeHtml) != countBefore * album.Price)
                     throw new InvalidDataException("Browser removal lacks its populated precondition.");
 
                 if (removal.Action == "not-run-unsupported")
@@ -167,15 +174,31 @@ public sealed class BrowserCartReview
                     continue;
                 }
 
-                var remaining = Html.CartLines(afterHtml);
+                var remaining = Html.CartLines(afterHtml,expectedEvaluationVersion);
                 var countAfter = countBefore - 1;
                 var linesOk = countAfter == 0 ? remaining.Count == 0
                     : remaining.Count == 1 && remaining[0].AlbumId == album.AlbumId && remaining[0].Count == 1;
-                var total = Html.Money(afterHtml);
+                var total = Money(afterHtml);
                 var status = new HtmlParser().ParseDocument(afterHtml).QuerySelectorAll("[id='cart-status']");
                 var statusOk = !requireCartStatus || status.Length == 1
                     && status[0].TextContent.Trim() == $"Cart ({countAfter})";
-                var pass = WellFormedCart(afterHtml) && linesOk && total == countAfter * album.Price && statusOk;
+                if(expectedEvaluationVersion=="1.6.0")
+                {
+                    var money=Attribution16.Money(afterHtml);
+                    var rows=Html.ObserveCart16(afterHtml);
+                    if(rows.UnknownObservations.Count>0 || !money.Value.HasValue && !money.ContractFailure)
+                    {
+                        var knownWrongLines=countAfter==0?remaining.Count>0:
+                            (rows.UnknownObservations.Count==0?remaining.Count!=1:remaining.Count>1)
+                            || remaining.Any(l=>l.AlbumId!=album.AlbumId || l.Count!=1);
+                        if(knownWrongLines || !statusOk || rows.ContractFailures.Count>0 || money.ContractFailure
+                            || money.Value.HasValue && money.Value!=countAfter*album.Price)
+                            review.ProductFailures[removal.CheckId]="Verified post-click cart quantity/summary/structure violation; monetary display remains ambiguous.";
+                        review.results[removal.CheckId]=new Result(false,"Browser cart predicate not observed: "+money.Detail+" "+string.Join(";",rows.UnknownObservations),false,"partial_cart");
+                        continue;
+                    }
+                }
+                var pass = WellFormedCart(afterHtml,expectedEvaluationVersion) && linesOk && total == countAfter * album.Price && statusOk;
                 review.results[removal.CheckId] = new Result(pass,
                     $"Agent browser click: {Scenarios.DescribeCart(remaining)}, displayed total {Scenarios.DescribeMoney(total)}; "
                     + $"expected quantity {countAfter}, total {Html.Money2(countAfter * album.Price)}, cart summary match {statusOk}. "
@@ -207,7 +230,7 @@ public sealed class BrowserCartReview
             || rq.GetProperty("specSha256").GetString() != specHash
             || rq.GetProperty("runInstanceId").GetString() != runInstanceId
             || rq.GetProperty("baseUrl").GetString() != receipt.BaseUrl
-            || expectedEvaluationVersion is not ("1.4.0" or "1.5.0") || rq.GetProperty("evaluationVersion").GetString() != expectedEvaluationVersion)
+            || expectedEvaluationVersion is not ("1.4.0" or "1.5.0" or "1.6.0") || rq.GetProperty("evaluationVersion").GetString() != expectedEvaluationVersion)
             throw new InvalidDataException("Browser observation request binding mismatch.");
         var identities = new HashSet<string>(StringComparer.Ordinal);
         foreach (var failure in receipt.ProductFailures ?? new())
@@ -256,12 +279,14 @@ public sealed class BrowserCartReview
         return (page.TryGetProperty("visibleCartHtml", out var visible) ? visible : page.GetProperty("html")).GetString();
     }
 
-    private static bool WellFormedCart(string html)
+    private static bool WellFormedCart(string html,string version="1.4.0")
     {
+        if(version=="1.6.0") return Html.ObserveCart16(html).Violations.Count==0
+            && new HtmlParser().ParseDocument(html).QuerySelectorAll("[id='cart-total']").Length==1;
         var document = new HtmlParser().ParseDocument(html ?? "");
         var rows = document.QuerySelectorAll("tr[id^='row-']");
         return document.QuerySelectorAll("[id='cart-total']").Length == 1
-            && rows.Length == Html.CartLines(html).Count
+            && rows.Length == Html.CartLines(html,version).Count
             && rows.Select(r => r.Id).Distinct().Count() == rows.Length;
     }
 

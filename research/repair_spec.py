@@ -68,8 +68,32 @@ def revised(original):
             'Requirement/check IDs, severities, weights and frozen source/oracle assets are unchanged; '
             'prior 1.4 evaluation outputs and evaluation semantics remain separate.'
         ]
+    elif old == '1.5.0':
+        result['specVersion'] = '1.6.0'
+        history = copy.deepcopy(original.get('measurementRevisionHistory', []))
+        if not history and original.get('priorMeasurementRevision'):
+            history.append(copy.deepcopy(original['priorMeasurementRevision']))
+        if original.get('measurementRevision'):
+            history.append(copy.deepcopy(original['measurementRevision']))
+        result['measurementRevisionHistory'] = history
+        changes = [
+            'C-014 observes the three-copy total independently of a failed prior removal; '
+            'cart/session contamination is not an arithmetic counterexample.',
+            'The public decimal-point/two-fraction-digits contract permits an unambiguous '
+            'currency-symbol prefix or suffix around that numeric amount. A missing marker or '
+            'wrong numeric amount remains a product failure; unsupported ambiguous parsing '
+            'must not invent a value or pass.',
+            'Checkout, restart, ownership and migration predicates distinguish independently '
+            'observed finite failures from missing cart/order prerequisites. Existing-data '
+            'preservation and actual stored arithmetic are independent of a missing purchase workflow.',
+            'Unknown HTTP/order predicates remain explicit unknown scope even alongside a known '
+            'failure, and incomplete observations keep quality null. Observed valid-checkout '
+            'HTTP failure and invalid-input contract violations remain failures.',
+            'Requirement/check IDs, severities, weights, migration contract and frozen oracle '
+            'assets are unchanged; old versions and saved evaluation outputs are preserved separately.'
+        ]
     else:
-        raise ValueError('Supported ledger sources are Education1.0, Music1.3 and Music1.4')
+        raise ValueError('Supported ledger sources are Education1.0 and Music1.3/1.4/1.5')
     result['measurementRevision'] = {'sourceSpecVersion': old,
         'scope': 'new evaluation of same saved artifact, not historical labels or new acquisition',
         'changes': changes, 'humanReview': 'not_run'}

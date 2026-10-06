@@ -66,5 +66,27 @@ class RepairSpecTests(unittest.TestCase):
         self.assertIn('blocked', text)
         self.assertIn('C-016', text)
 
+    def test_music_attribution_revision_preserves_oracle_and_discloses_observation_gaps(self):
+        original = {'specVersion': '1.5.0', 'taskId': 'MS', 'requirements': [
+            {'id': 'R-013', 'severity': 'critical', 'checks': [{'id': 'C-014'}]},
+            {'id': 'R-031', 'severity': 'critical', 'checks': [{'id': 'C-031'}]}],
+            'migrationContract': {'oracleSha256': 'fixed'},
+            'measurementRevision': {'sourceSpecVersion': '1.4.0', 'changes': ['Removal preconditions']},
+            'priorMeasurementRevision': {'sourceSpecVersion': '1.3.0', 'changes': ['Earlier repairs']}}
+        before = copy.deepcopy(original)
+        result = repair_spec.revised(original)
+        self.assertEqual(original, before)
+        self.assertEqual(result['specVersion'], '1.6.0')
+        self.assertEqual(requirement_inventory(result), requirement_inventory(original))
+        self.assertEqual(result['migrationContract'], original['migrationContract'])
+        self.assertEqual(result['measurementRevisionHistory'], [
+            original['priorMeasurementRevision'], original['measurementRevision']])
+        text = ' '.join(result['measurementRevision']['changes'])
+        self.assertIn('C-014', text)
+        self.assertIn('currency', text)
+        self.assertIn('independent', text)
+        self.assertIn('unknown', text)
+        self.assertIn('quality', text)
+
 
 if __name__ == '__main__': unittest.main()

@@ -128,9 +128,28 @@ assert.equal(productResponse('http://127.0.0.1:1234',null,actual),null);'''
         self.assertEqual(['C-012'],browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
         self.receipt['evaluationVersion']='1.4.0'
         self.assertEqual([],browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
-        request['evaluationVersion']=self.receipt['evaluationVersion']='1.6.0'
+        request['evaluationVersion']=self.receipt['evaluationVersion']='1.7.0'
         util.write_json_atomic(self.root/'request.json',request)
         self.receipt['requestSha256']=util.sha256_file(self.root/'request.json')
+        self.assertEqual([],browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
+
+    def test_music_16_request_binding_retains_prior_versions_and_rejects_future_or_cross_version(self):
+        event=util.read_json(self.root/'response.json')
+        event.update(caseId='C-015-add-1',checkId='C-012',operation='cart-add',
+                     url='http://127.0.0.1:1234/ShoppingCart/AddToCart/1')
+        util.write_json_atomic(self.root/'response.json',event)
+        self.receipt['productFailures']=[{key:event[key] for key in
+            ('caseId','checkId','operation','method','url','status','clickConfirmed')} | {
+                'evidence':{'path':'response.json','sha256':util.sha256_file(self.root/'response.json')}}]
+        for version in ('1.4.0','1.5.0','1.6.0','1.7.0'):
+            with self.subTest(version=version):
+                self.receipt['evaluationVersion']=version
+                request={key:self.receipt[key] for key in ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+                util.write_json_atomic(self.root/'request.json',request)
+                self.receipt['requestSha256']=util.sha256_file(self.root/'request.json')
+                expected=[] if version=='1.7.0' else ['C-012']
+                self.assertEqual(expected,browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
+        self.receipt['evaluationVersion']='1.6.0' # Request remains 1.7; changing a receipt cannot relabel it.
         self.assertEqual([],browser_product.validated_checks(self.root,self.receipt,'run','artifact','spec'))
 
     def test_cart_15_receipt_inherits_schema_three_without_starting_a_real_browser(self):
@@ -138,7 +157,7 @@ assert.equal(productResponse('http://127.0.0.1:1234',null,actual),null);'''
         script='''const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 (async()=>{const file=process.argv[1],root=process.argv[2],source=fs.readFileSync(file,'utf8');
 const executable=path.join(root,'fixture-browser-bytes');fs.writeFileSync(executable,'finite fixture; never execute');
-for(const version of ['1.3.0','1.4.0','1.5.0']){
+for(const version of ['1.3.0','1.4.0','1.5.0','1.6.0']){
  const directory=path.join(root,'receipt-'+version);fs.mkdirSync(directory);
  const input=path.join(directory,'request.json');fs.writeFileSync(input,JSON.stringify({evaluationVersion:version,runInstanceId:'fixture',artifactSha256:'artifact',specSha256:'spec',baseUrl:'http://127.0.0.1:1234'}));
  const fixtureProcess={argv:['node',file,input,directory],version:'fixture-node',env:{},exitCode:0};
@@ -151,6 +170,115 @@ for(const version of ['1.3.0','1.4.0','1.5.0']){
  if(version!=='1.3.0'){assert.equal(receipt.evaluationVersion,version);assert(receipt.requestSha256);assert.deepEqual(receipt.productFailures,[]);}
 }
 })().catch(error=>{console.error(error);process.exitCode=1});'''
+        result=subprocess.run(['node','-e',script,str(collector),str(self.root)],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
+
+    def test_music_16_currency_money_is_exact_bounded_and_preserves_legacy_interpretations(self):
+        collector=Path(__file__).resolve().parents[2]/'inner/browser/cart-review.cjs'
+        cases=[
+            {'text':text,'kind':'known','minor':minor} for text,minor in [
+                ('21.75','2175'),('$21.75','2175'),('$ 21.75','2175'),('21.75 $','2175'),
+                ('-$21.75','-2175'),('$-21.75','-2175'),('-21.75$','-2175'),('+€21.75','2175'),
+                ('  £00021.75  ','2175'),('¥0.00','0'),('-$0.00','0'),('- $ 21.75','-2175'),
+                ('$ - 21.75','-2175'),('- 21.75','-2175'),
+                ('792281625142643375935439503.35','79228162514264337593543950335')]]
+        cases += [{'text':text,'kind':'unknown'} for text in
+            ('21.75 or 30.00','USD21.75','1,234.56','(21.75)','$$21.75','-$-21.75','21.75-$',
+             '$21.75€','792281625142643375935439503.36')]
+        cases += [{'text':text,'kind':'invalid'} for text in ('21.7','21.750','21','$21.7','21.750$','',None)]
+        script='''const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+const file=process.argv[1],root=process.argv[2],cases=JSON.parse(process.argv[3]);
+const source=fs.readFileSync(file,'utf8').split('(async () => {')[0];
+function context(version){const request=path.join(root,'money-'+version+'.json');
+ fs.writeFileSync(request,JSON.stringify({evaluationVersion:version,price:7.25,albumId:1,requireCartStatus:true,structuralPrecondition:true}));
+ const fixtureRequire=name=>name==='playwright'?{chromium:{}}:name==='playwright/package.json'?{version:'fixture'}:name==='./product-response.cjs'?require(path.join(path.dirname(file),'product-response.cjs')):require(name);
+ const c=vm.createContext({require:fixtureRequire,__filename:file,__dirname:path.dirname(file),process:{argv:['node',file,request,root],version:'fixture'},URL,Buffer,setTimeout});
+ vm.runInContext(source,c);return c;
+}
+const current=context('1.6.0'),parse=vm.runInContext('(text)=>moneyObservation(text)',current);
+for(const item of cases){const actual=parse(item.text);assert.equal(actual.kind,item.kind,item.text);if(item.minor!==undefined)assert.equal(actual.minor,item.minor,item.text);}
+const state={totals:['$14.50'],cartStatus:['Cart (2)'],rows:[{id:'row-1',count:'2',album:'/Store/Details/1'}],possibleControls:[],rowMarkerObservation:{kind:'known'}};
+for(const version of ['1.4.0','1.5.0','1.6.0']){const c=context(version),matches=vm.runInContext('(state)=>matches(state,2)',c),populated=vm.runInContext('(state)=>populated(state,2)',c);
+ assert.equal(matches(state),version==='1.6.0');assert.equal(populated(state),version==='1.6.0');
+ assert.equal(matches({...state,totals:[]}),false);assert.equal(matches({...state,totals:['$99.99']}),false);
+ if(version==='1.6.0'){assert.equal(populated({...state,totals:['$99.99']}),true);assert.equal(populated({...state,totals:['14.50 or 20.00']}),false);assert.equal(populated({...state,totals:['14.5']}),false);}
+}'''
+        result=subprocess.run(['node','-e',script,str(collector),str(self.root),json.dumps(cases)],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
+
+    def test_music_16_generic_marked_rows_are_observed_and_malformed_rows_never_establish_empty(self):
+        collector=Path(__file__).resolve().parents[2]/'inner/browser/cart-review.cjs'
+        script='''const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+(async()=>{const file=process.argv[1],root=process.argv[2],source=fs.readFileSync(file,'utf8').split('(async () => {')[0];
+function row(tag,id,count,links=['http://127.0.0.1:1234/Store/Details/1'],counterCopies=1,visible=true){
+ const counters=count===undefined?[]:Array.from({length:counterCopies},()=>({id:'item-count-'+id.slice(4),textContent:count}));
+ const anchors=links.map(href=>({href}));
+ return {tagName:tag,id,counters,outerHTML:'<'+tag.toLowerCase()+' id="'+id+'">'+counters.map(e=>'<span id="'+e.id+'">'+e.textContent+'</span>').join('')+anchors.map(e=>'<a href="'+e.href+'">Album</a>').join('')+'</'+tag.toLowerCase()+'>',
+ getClientRects:()=>visible?[{}]:[],contains:e=>counters.includes(e),querySelector:q=>counters[0],querySelectorAll:q=>q==='a[href]'?anchors:counters};
+}
+function context(version){const request=path.join(root,'rows-'+version+'.json');fs.writeFileSync(request,JSON.stringify({evaluationVersion:version,price:7.25,albumId:1,requireCartStatus:true,structuralPrecondition:true}));
+ const fixtureRequire=n=>n==='playwright'?{chromium:{}}:n==='playwright/package.json'?{version:'fixture'}:n==='./product-response.cjs'?require(path.join(path.dirname(file),'product-response.cjs')):require(n);
+ const c=vm.createContext({require:fixtureRequire,__filename:file,__dirname:path.dirname(file),process:{argv:['node',file,request,root],version:'fixture'},URL,Buffer,setTimeout,getComputedStyle:()=>({visibility:'visible'}),location:{href:'http://127.0.0.1:1234/ShoppingCart'}});vm.runInContext(source,c);return c;
+}
+async function observe(c,rows,total,status,orphans=[]){const marker=text=>({textContent:text,outerHTML:'<span>'+text+'</span>',getClientRects:()=>[{}]});
+ c.document={documentElement:{outerHTML:'synthetic DOM'},querySelectorAll:q=>q==='tr[id^="row-"]'?rows.filter(r=>r.tagName==='TR'):q==='[id^="row-"]'?rows:q==='[id^="item-count-"]'?orphans:q==='[id="cart-total"]'?[marker(total)]:q==='[id="cart-status"]'?[marker(status)]:[]};
+ return vm.runInContext('observe',c)({evaluate:async(fn,arg)=>fn(arg)});
+}
+const c=context('1.6.0'),match=vm.runInContext('(s,n)=>matches(s,n)',c),populate=vm.runInContext('(s,n)=>populated(s,n)',c);
+let state=await observe(c,[row('DIV','row-1','2')],'14.50','Cart (2)');
+assert.equal(state.rows.length,1,'valid div marked row must not disappear');assert.equal(state.rowMarkerObservation.kind,'known');assert.equal(match(state,2),true);assert.equal(populate(state,2),true);
+assert(state.visibleCartHtml.includes('<div id="row-1">'));
+state=await observe(c,[row('DIV','row-1','1')],'7.25','Cart (1)');assert.equal(match(state,1),true);
+state=await observe(c,[row('DIV','row-01','02',['http://127.0.0.1:1234/Store/Details/01/','http://127.0.0.1:1234/Store/Details/1'])],'14.50','Cart (2)');assert.equal(match(state,2),true,'same decoded ID links/counter aliases remain unambiguous');
+for(const id of ['row-0','row-000']){state=await observe(c,[row('DIV',id,'2')],'14.50','Cart (2)');assert.equal(populate(state,2),false,'zero is decoded but cannot establish a positive owned removal identity');assert.equal(match(state,2),false);}
+for(const rows of [[row('DIV','row-bad','1')],[row('DIV','row-1',undefined)],[row('DIV','row-1','not-an-int')],
+ [row('DIV','row-1','1',[],1)],[row('DIV','row-1','1',undefined,2)],
+ [row('DIV','row-1','1',['http://127.0.0.1:1234/Store/Details/1','http://127.0.0.1:1234/Store/Details/2'])],
+ [row('DIV','row-1','1'),row('DIV','row-1','1')]]){
+ state=await observe(c,rows,'0.00','Cart (0)');assert(state.rows.length>0);assert.equal(state.rowMarkerObservation.kind,'unknown');assert.equal(match(state,0),false);assert.equal(populate(state,1),false);
+}
+const orphan={id:'item-count-1',textContent:'1',outerHTML:'<span id="item-count-1">1</span>',getClientRects:()=>[{}]};
+state=await observe(c,[],'0.00','Cart (0)',[orphan]);assert.equal(state.rowMarkerObservation.kind,'unknown');assert.equal(match(state,0),false);assert(state.visibleCartHtml.includes(orphan.outerHTML));
+state=await observe(c,[row('DIV','row-1','1',undefined,1,false)],'0.00','Cart (0)');assert.equal(state.rows.length,0);assert.equal(match(state,0),true);
+for(const version of ['1.4.0','1.5.0']){const old=context(version),oldMatch=vm.runInContext('(s,n)=>matches(s,n)',old);
+ const div=await observe(old,[row('DIV','row-1','1')],'0.00','Cart (0)');assert.equal(div.rows.length,0);assert.equal(oldMatch(div,0),true);assert.equal(div.rowMarkerObservation,undefined);
+ const table=await observe(old,[row('TR','row-1','1')],'7.25','Cart (1)');assert.equal(oldMatch(table,1),true);
+}
+})().catch(e=>{console.error(e);process.exitCode=1});'''
+        result=subprocess.run(['node','-e',script,str(collector),str(self.root)],capture_output=True,text=True)
+        self.assertEqual(0,result.returncode,result.stderr)
+
+    def test_music_16_click_locator_follows_generic_marker_and_unsupported_rows_remain_partial(self):
+        collector=Path(__file__).resolve().parents[2]/'inner/browser/cart-review.cjs'
+        script='''const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+(async()=>{const file=process.argv[1],root=process.argv[2],source=fs.readFileSync(file,'utf8');
+for(const [version,malformed] of [['1.4.0',false],['1.5.0',false],['1.6.0',false],['1.6.0',true],['1.6.0','zero'],['1.6.0','zero-alias']]){
+ const out=path.join(root,'flow-'+version+'-'+malformed);fs.mkdirSync(out);const request=path.join(out,'request.json');
+ fs.writeFileSync(request,JSON.stringify({evaluationVersion:version,price:7.25,albumId:1,requireCartStatus:true,structuralPrecondition:true,baseUrl:'http://127.0.0.1:1234',runInstanceId:'fixture',artifactSha256:'fixture',specSha256:'fixture'}));
+ const executable=path.join(out,'fixture-browser');fs.writeFileSync(executable,'finite VM placeholder: no actual browser');
+ const fixtureProcess={argv:['node',file,request,out],version:'fixture',env:{},exitCode:0};let clock=0,clicks=0;let c;
+ const visible={getClientRects:()=>[{}]};
+ const browser={version:()=> 'finite-vm',close:async()=>{},newContext:async()=>{let quantity=0;
+   function document(){const id=malformed===true?'row-bad':malformed==='zero'?'row-0':malformed==='zero-alias'?'row-000':'row-1';const count={...visible,id:'item-count-'+id.slice(4),textContent:String(quantity)};
+     const row={...visible,tagName:version==='1.6.0'?'DIV':'TR',id,outerHTML:'<div id="'+id+'"><span id="'+count.id+'">'+quantity+'</span><a href="/Store/Details/1">Album</a></div>',
+       contains:e=>e===count,querySelector:()=>count,querySelectorAll:q=>q==='a[href]'?[{href:'http://127.0.0.1:1234/Store/Details/1'}]:[count]};
+     const rows=quantity>0||malformed===true?[row]:[];const marker=text=>({...visible,textContent:text,outerHTML:'<span>'+text+'</span>'});
+     return {documentElement:{outerHTML:'finite synthetic DOM'},querySelectorAll:q=>q==='[id^="row-"]'?rows:q==='tr[id^="row-"]'?rows.filter(r=>r.tagName==='TR'):q==='[id^="item-count-"]'?rows.length?[count]:[]:q==='[id="cart-total"]'?[marker((quantity*7.25).toFixed(2))]:q==='[id="cart-status"]'?[marker('Cart ('+quantity+')')]:[]};
+   }
+   const control={count:async()=>1,isEnabled:async()=>true,click:async()=>{quantity--;clicks++;},or:()=>control};
+   const page={setDefaultTimeout:()=>{},setDefaultNavigationTimeout:()=>{},on:()=>{},goto:async url=>{if(url.includes('AddToCart'))quantity++;},
+     evaluate:async(fn,arg)=>{c.document=document();return fn(arg);},screenshot:async args=>fs.writeFileSync(args.path,'finite VM placeholder: not real PNG'),
+     locator:selector=>{assert.equal(selector,version==='1.6.0'?'[id="row-1"]:visible':'tr[id="row-1"]');return {locator:()=>control,getByRole:()=>control};}};
+   return {newPage:async()=>page,close:async()=>{},tracing:{start:async()=>{},stop:async args=>fs.writeFileSync(args.path,'finite VM placeholder: not real trace')}};
+ }};
+ const fixtureRequire=n=>n==='playwright'?{chromium:{executablePath:()=>executable,launch:async()=>browser}}:n==='playwright/package.json'?{version:'fixture'}:n==='./product-response.cjs'?require(path.join(path.dirname(file),'product-response.cjs')):require(n);
+ c=vm.createContext({require:fixtureRequire,__filename:file,__dirname:path.dirname(file),process:fixtureProcess,URL,Buffer,setTimeout,getComputedStyle:()=>({visibility:'visible'}),location:{href:'http://127.0.0.1:1234/ShoppingCart'},performance:{now:()=>clock+=1000}});
+ await vm.runInContext(source,c);const receipt=JSON.parse(fs.readFileSync(path.join(out,'receipt.json'))),result=JSON.parse(fs.readFileSync(path.join(out,'collector-result.json')));
+ assert.equal(receipt.faults.length,0);assert.equal(receipt.productFailures.length,0);assert.equal(receipt.removals.length,2);
+ if(malformed){assert.equal(clicks,0);assert.equal(result.status,'partial');for(const r of receipt.removals){assert.equal(r.action,'not-run-precondition');assert.equal(r.reason,malformed===true?'cart_row_markers_unsupported':'positive_owned_row_id_not_established');}}
+ else{assert.equal(clicks,2);assert.equal(result.status,'observed');for(const r of receipt.removals){assert.equal(r.action,'click-remove');assert.equal(r.completion,'expected_state_stable');}}
+}
+})().catch(e=>{console.error(e);process.exitCode=1});'''
         result=subprocess.run(['node','-e',script,str(collector),str(self.root)],capture_output=True,text=True)
         self.assertEqual(0,result.returncode,result.stderr)
 

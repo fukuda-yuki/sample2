@@ -151,8 +151,12 @@ def main():
         event('adopted_wave04', **{k: v for k, v in out.items() if k != 'status'}, status=out['status'])
         if out['error'] or not out['status']: stop('wave04_owner_error', error=out['error'])
     summary = json.loads((W/SUMMARY).read_text(encoding='utf-8'))
+    recorded = rows(Path(summary['batch'])/'attempts.jsonl')
     for spec in sorted((Path(summary['batch'])/'waves').glob('*/spec.json')):
-        if not (spec.parent/'closure.json').exists():
+        matching = [e for e in recorded if e.get('wave', {}).get('path') == str(spec)]
+        reserved = {e['slot'] for e in matching if e['kind']=='pair_attempt_reserved'}
+        finished = {e['slot'] for e in matching if e['kind'] in ('pair_accepted', 'pair_recovery_decision')}
+        if not (spec.parent/'closure.json').exists() or not reserved <= finished:
             rc, out = run_wave(next_label(), [], resume=spec)
             if rc or out['error']: stop('saved_wave_recovery_failed', wave=str(spec), error=out['error'])
     refresh = subprocess.run([PY, '-B', '-X', 'utf8', str(OWNER), '--status'], cwd=summary['repo'],

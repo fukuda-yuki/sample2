@@ -170,5 +170,88 @@ class CampaignTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             catalog_delivery.publish(Path('.'),'arbitrary-001','a'*40,tag_prefix='arbitrary-')
 
+    def test_owned_policy_changes_only_next_wave_admission(self):
+        owned,legacy=c.policy(),c.legacy_policy()
+        self.assertEqual(owned['next_wave_requires'],c.OWNED_NEXT_WAVE)
+        self.assertEqual(legacy['next_wave_requires'],c.LEGACY_NEXT_WAVE)
+        self.assertEqual({k:v for k,v in owned.items() if k!='next_wave_requires'},
+                         {k:v for k,v in legacy.items() if k!='next_wave_requires'})
+        self.assertFalse(owned['balance']);self.assertFalse(owned['paid_fallback'])
+        self.assertTrue(c.owned_policy({'policy':owned}));self.assertFalse(c.owned_policy({'policy':legacy}))
+
+    def test_observer_snapshot_retries_only_transient_permission_denial(self):
+        monitor=Mock();monitor.snapshot.side_effect=[PermissionError('sharing violation'),{'host_healthy':True}]
+        with patch.object(c.time,'sleep'):
+            self.assertEqual(c._observer_snapshot(monitor),{'host_healthy':True})
+        monitor=Mock();monitor.snapshot.side_effect=PermissionError('persistent')
+        with patch.object(c.time,'sleep'),self.assertRaises(PermissionError):
+            c._observer_snapshot(monitor)
+        self.assertEqual(monitor.snapshot.call_count,c.OBSERVER_READ_RETRIES)
+        monitor=Mock();monitor.snapshot.side_effect=RuntimeError('Independent observer status stale or unbound')
+        with self.assertRaisesRegex(RuntimeError,'stale'):c._observer_snapshot(monitor)
+        self.assertEqual(monitor.snapshot.call_count,1)
+
+    def test_owned_closure_is_refused_under_legacy_policy(self):
+        from outer.harness import util
+        with tempfile.TemporaryDirectory() as tmp:
+            wave=Path(tmp)/'waves/w/spec.json';wave.parent.mkdir(parents=True);util.write_new_json(wave,{'pairs':[1]})
+            closure=wave.parent/'closure.json'
+            util.write_new_json(closure,dict(wave=c.live_pilot.reference(wave),closed=True,closure_kind=c.OWNED_CLOSURE_KIND))
+            with patch.object(c,'wave_spec',return_value={'pairs':[1]}), \
+                 patch.object(c,'validate',return_value={'policy':c.legacy_policy()}):
+                with self.assertRaisesRegex(ValueError,'owned closure campaign policy'):
+                    c.verify_closure(Path(tmp),Path(tmp)/'plan.json',wave,closure)
+
+    def test_owned_close_never_calls_publication_or_sharing(self):
+        from research import acquisition_sharing
+        with tempfile.TemporaryDirectory() as tmp:
+            d=Path(tmp)/'waves/w';d.mkdir(parents=True);(d/'spec.json').write_text('{}')
+            c.util.write_new_json(d/'_launcher/result.json',dict(operational_complete=True,owned_closure_confirmed=True,
+                plan=None,wave=None,verification={'confirmed':True,'evidence':None}))
+            p={'batch':tmp,'policy':c.policy()}
+            with patch.object(c,'validate',return_value=p),patch.object(c,'wave_spec',return_value={'pairs':[1],'epoch_plan':{}}), \
+                 patch.object(c,'document',return_value={}),patch.object(c.live_pilot,'reference',return_value=None), \
+                 patch.object(c.live_pilot,'checked'), \
+                 patch.object(c,'_close_wave_owned',return_value={'owned':True}) as owned, \
+                 patch.object(acquisition_sharing,'validate_gate',side_effect=AssertionError('no publication gate')), \
+                 patch.object(catalog_delivery,'publish',side_effect=AssertionError('no publication')):
+                self.assertEqual(c._close_wave(Path(tmp),Path(tmp)/'plan.json',d/'spec.json'),{'owned':True})
+            owned.assert_called_once()
+
+    def test_predecessor_recovery_only_revisits_held_latest_attempt(self):
+        from research import campaign_transition
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'succ';root.mkdir()
+            wave=Path(tmp)/'old/waves/w/spec.json';wave.parent.mkdir(parents=True);c.util.write_new_json(wave,{'pairs':[5,6]})
+            ref=c.live_pilot.reference(wave)
+            p={'batch':str(root),'policy':c.policy(),'protected_roots':[],
+               'predecessor':{'source_repo':str(Path(tmp)/'old-source'),'plan':ref,'history':{}}}
+            for disposition,message in [('replacement_eligible','Only a held'),('accept_same_attempt','Only a held')]:
+                events=[dict(kind='pair_attempt_reserved',slot=n,wave=ref) for n in (5,6)]+[
+                    dict(kind='pair_recovery_decision',slot=n,wave=ref,decision={'disposition':disposition}) for n in (5,6)]
+                with self.subTest(disposition=disposition), \
+                     patch.object(c,'validate',return_value=p),patch.object(c,'ledger',return_value=events), \
+                     patch.object(c.live_pilot,'checked',side_effect=lambda r:Path(r['path'])), \
+                     patch.object(campaign_transition,'_history',return_value=({'waves':[{'wave':ref}]},[])):
+                    with self.assertRaisesRegex(ValueError,message):
+                        c.reconcile_predecessor_recovery(Path(tmp)/'new-source',Path(tmp)/'plan.json',wave,Path(tmp)/'short')
+            with patch.object(c,'validate',return_value=dict(p,policy=c.legacy_policy())):
+                with self.assertRaisesRegex(ValueError,'owned-policy successor'):
+                    c.reconcile_predecessor_recovery(Path(tmp)/'new-source',Path(tmp)/'plan.json',wave,Path(tmp)/'short')
+
+    def test_predecessor_recovery_destination_never_overlaps_sources_or_evidence(self):
+        from research import campaign_transition
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'succ';root.mkdir()
+            wave=Path(tmp)/'old/waves/w/spec.json';wave.parent.mkdir(parents=True);c.util.write_new_json(wave,{'pairs':[5]})
+            ref=c.live_pilot.reference(wave)
+            p={'batch':str(root),'policy':c.policy(),'protected_roots':[str(Path(tmp)/'old')],
+               'predecessor':{'source_repo':str(Path(tmp)/'old-source'),'plan':ref,'history':{}}}
+            with patch.object(c,'validate',return_value=p), \
+                 patch.object(campaign_transition,'_history',return_value=({'waves':[{'wave':ref}]},[])):
+                for target in (Path(tmp)/'old/recovery',Path(tmp)/'old-source/recovery',Path(tmp)/'new-source/r'):
+                    with self.subTest(target=target),self.assertRaisesRegex(ValueError,'overlaps protected'):
+                        c.reconcile_predecessor_recovery(Path(tmp)/'new-source',Path(tmp)/'plan.json',wave,target)
+
 
 if __name__=='__main__':unittest.main()

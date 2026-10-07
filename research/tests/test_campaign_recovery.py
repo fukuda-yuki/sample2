@@ -290,6 +290,94 @@ class PreservationTests(unittest.TestCase):
         self.assertFalse(observed['assessment_adopted']);self.assertIsNone(observed['reassessed_quality'])
         self.assertEqual(subject.decide_pair({'explore':observed,'preload':arm()}),'accept_same_attempt')
 
+    def test_owned_cleanup_receipts_appended_after_recovery_are_accepted(self):
+        evaluation=self.pair/'explore'/'evaluations'/('attempt-1-'+'f'*32)
+        util.write_new_json(evaluation/'browser-resources.json',{'owner':'s2-browser-'+'1'*32})
+        ref=self.recover()
+        receipts=evaluation/'browser-cleanup-attempts'
+        util.write_new_json(receipts/(('2'*32)+'-1-intent.json'),{'intent':True})
+        util.write_new_json(receipts/(('2'*32)+'-result.json'),{'confirmed':True})
+        (receipts/'index.jsonl').write_text('{}\n')
+        with patch.object(subject.assessment.saved,'_saved_cleanup_bound',return_value=True) as bound:
+            subject.validate_recovery(self.repo,ref,self.plan,self.wave)
+        bound.assert_called_with(evaluation,self.cases[0]['run_instance_id'])
+        with patch.object(subject.assessment.saved,'_saved_cleanup_bound',return_value=False):
+            with self.assertRaisesRegex(ValueError,'Unexpected additions'):
+                subject.validate_recovery(self.repo,ref,self.plan,self.wave)
+
+    def test_other_additions_or_changed_receipts_remain_rejected(self):
+        evaluation=self.pair/'explore'/'evaluations'/('attempt-1-'+'f'*32)
+        util.write_new_json(evaluation/'browser-resources.json',{'owner':'s2-browser-'+'1'*32})
+        ref=self.recover()
+        with patch.object(subject.assessment.saved,'_saved_cleanup_bound',return_value=True):
+            for name in ('browser-cleanup-attempts/notes.json','other/'+'2'*32+'-result.json'):
+                with self.subTest(name=name):
+                    extra=evaluation/name;util.write_new_json(extra,{})
+                    with self.assertRaisesRegex(ValueError,'Unexpected additions'):
+                        subject.validate_recovery(self.repo,ref,self.plan,self.wave)
+                    extra.unlink()
+            (evaluation/'browser-resources.json').write_text('{"changed":true}')
+            with self.assertRaisesRegex(ValueError,'Original fault evidence changed'):
+                subject.validate_recovery(self.repo,ref,self.plan,self.wave)
+
+    def owned_authority(self,policy=None,predecessor=True):
+        from research import repaired_campaign
+        plan=self.base/'successor-plan.json'
+        if plan.exists():plan.unlink()
+        util.write_new_json(plan,dict(policy=policy or repaired_campaign.policy(),
+            predecessor={'plan':self.context['campaign']} if predecessor else {}))
+        return dict(repo=str(self.base/'successor-repo'),plan=live_pilot.reference(plan))
+
+    def test_owned_completion_publishes_nothing_and_closes_bound_recovery(self):
+        from research import repaired_campaign
+        ref=self.recover();authority=self.owned_authority()
+        with patch.object(repaired_campaign,'validate',side_effect=lambda repo,path:util.read_json(path)), \
+             patch.object(subject.delivery,'publish',side_effect=AssertionError('no publication')), \
+             patch.object(subject.delivery,'package',side_effect=AssertionError('no package')):
+            closure=subject.close_recovery(self.repo,self.plan,self.wave,ref,None,owned_authority=authority)
+            verified=subject.validate_closure(self.repo,self.plan,self.wave,closure)
+            self.assertEqual(closure,subject.close_recovery(self.repo,self.plan,self.wave,ref,None,owned_authority=authority))
+        gate=util.read_json(self.destination/'owned-recovery-gate-1.json')
+        self.assertEqual(gate['kind'],subject.OWNED_GATE_KIND);self.assertFalse(gate['publication_performed'])
+        self.assertFalse(gate['acquisition_success']);self.assertEqual(gate['disposition'],'held')
+        self.assertTrue(verified['closed']);self.assertFalse(verified['acquisition_success'])
+
+    def test_owned_completion_requires_owned_policy_authority(self):
+        from research import repaired_campaign
+        ref=self.recover()
+        with patch.object(repaired_campaign,'validate',side_effect=lambda repo,path:util.read_json(path)):
+            with self.assertRaisesRegex(ValueError,'owned-policy authority'):
+                subject.close_recovery(self.repo,self.plan,self.wave,ref,None)
+            with self.assertRaisesRegex(ValueError,'owned closure policy'):
+                subject.close_recovery(self.repo,self.plan,self.wave,ref,None,
+                    owned_authority=self.owned_authority(policy=repaired_campaign.legacy_policy()))
+            with self.assertRaisesRegex(ValueError,'direct successor'):
+                subject.close_recovery(self.repo,self.plan,self.wave,ref,None,
+                    owned_authority=self.owned_authority(predecessor=False))
+        self.assertFalse((self.destination/'closure.json').exists())
+
+    def test_owned_gate_tamper_is_rejected(self):
+        from research import repaired_campaign
+        ref=self.recover();authority=self.owned_authority()
+        with patch.object(repaired_campaign,'validate',side_effect=lambda repo,path:util.read_json(path)):
+            closure=subject.close_recovery(self.repo,self.plan,self.wave,ref,None,owned_authority=authority)
+            for key,value in [('disposition','accept_same_attempt'),('publication_performed',True),('acquisition_success',True)]:
+                with self.subTest(key=key):
+                    path=self.destination/'owned-recovery-gate-1.json';original=util.read_json(path)
+                    util.write_json_atomic(path,dict(original,**{key:value}))
+                    with self.assertRaises(ValueError):
+                        subject._verify_publication(live_pilot.reference(path),ref,1)
+                    util.write_json_atomic(path,original)
+            subject.validate_closure(self.repo,self.plan,self.wave,closure)
+
+    def test_historical_owned_gate_without_authority_still_validates(self):
+        ref=self.recover();value=subject._read(ref)
+        path=self.destination/'owned-recovery-gate-1.json'
+        util.write_new_json(path,dict(kind=subject.OWNED_GATE_KIND,recovery=ref,slot=1,campaign=value['campaign'],
+            wave=value['wave'],source_commit=value['source_commit'],quality_acceptance=False,acquisition_success=False,
+            publication_performed=False,disposition='held'))
+        self.assertEqual(subject._verify_publication(live_pilot.reference(path),ref,1)['disposition'],'held')
+
     def test_mocked_release_restore_cleanup_and_bound_closure(self):
         ref=self.recover();workspace=self.base/'public-fault'
         with patch.object(subject.sharing,'known_secret',return_value=b'fixture-scan-secret-never-transmitted'):

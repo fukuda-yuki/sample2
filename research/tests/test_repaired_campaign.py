@@ -294,4 +294,53 @@ class CampaignTests(unittest.TestCase):
             self.assertFalse(c._inherited_decision({k:v for k,v in p.items() if k!='predecessor'},decision))
 
 
+    def ancestor_fixture(self, tmp, older_has_wave=True):
+        wave,ref,closure,recovery,p,decision=self.inherited_fixture(tmp)
+        older={'path':str(Path(tmp)/'older-plan.json'),'sha256':'2'*64}
+        c.util.write_new_json(Path(tmp)/'old-plan.json',{'policy':c.policy(),'predecessor':{
+            'source_repo':str(Path(tmp)/'older-source'),'plan':older,'history':{'level':2}}})
+        histories={1:({'waves':[]},[]),2:({'waves':[{'wave':ref}] if older_has_wave else []},[])}
+        history=lambda h:histories[h.get('level',1)]
+        return wave,ref,closure,recovery,p,decision,history
+
+    def test_inherited_decision_of_an_older_ancestor_is_verified_under_that_ancestor(self):
+        from research import campaign_transition, campaign_recovery
+        with tempfile.TemporaryDirectory() as tmp:
+            wave,ref,closure,recovery,p,decision,history=self.ancestor_fixture(tmp)
+            with patch.object(campaign_transition,'_history',side_effect=history), \
+                 patch.object(c.live_pilot,'checked',side_effect=lambda r:Path(r['path'])), \
+                 patch.object(campaign_recovery,'validate_closure',return_value={'decisions':{}}) as validate:
+                c._verify_inherited_recovery(Path(tmp)/'new',p,c.util.read_json(closure),decision['closure'])
+            validate.assert_called_once_with(Path(tmp)/'older-source',Path(tmp)/'older-plan.json',wave,recovery)
+
+    def test_ancestor_walk_without_retained_wave_or_with_cycle_stays_foreign(self):
+        from research import campaign_transition, campaign_recovery
+        with tempfile.TemporaryDirectory() as tmp:
+            wave,ref,closure,recovery,p,decision,history=self.ancestor_fixture(tmp,older_has_wave=False)
+            c.util.write_json_atomic(Path(tmp)/'older-plan.json',{'policy':c.policy()})
+            for case in ('chain_ends','cycle'):
+                if case=='cycle':
+                    c.util.write_json_atomic(Path(tmp)/'older-plan.json',{'policy':c.policy(),'predecessor':p['predecessor']})
+                with self.subTest(case=case), \
+                     patch.object(campaign_transition,'_history',side_effect=history), \
+                     patch.object(c.live_pilot,'checked',side_effect=lambda r:Path(r['path'])), \
+                     patch.object(campaign_recovery,'validate_closure',side_effect=AssertionError('not reached')):
+                    with self.assertRaisesRegex(ValueError,'Foreign inherited'):
+                        c._verify_inherited_recovery(Path(tmp)/'new',p,c.util.read_json(closure),decision['closure'])
+
+    def test_ancestor_walk_keeps_wrapper_location_and_shape_checks(self):
+        from research import campaign_transition, campaign_recovery
+        with tempfile.TemporaryDirectory() as tmp:
+            wave,ref,closure,recovery,p,decision,history=self.ancestor_fixture(tmp)
+            foreign=Path(tmp)/'elsewhere/closure.json';c.util.write_new_json(foreign,c.util.read_json(closure))
+            bad_shape=dict(c.util.read_json(closure),closed=False)
+            for saved,location in ((c.util.read_json(foreign),foreign),(bad_shape,closure)):
+                with self.subTest(location=location), \
+                     patch.object(campaign_transition,'_history',side_effect=history), \
+                     patch.object(c.live_pilot,'checked',side_effect=lambda r:Path(r['path'])), \
+                     patch.object(campaign_recovery,'validate_closure',side_effect=AssertionError('not reached')):
+                    with self.assertRaisesRegex(ValueError,'Foreign inherited'):
+                        c._verify_inherited_recovery(Path(tmp)/'new',p,saved,c.live_pilot.reference(location))
+
+
 if __name__=='__main__':unittest.main()

@@ -100,7 +100,7 @@ try:
     assert p0['bounds']['active_pairs'] == 2 and p0['bounds']['active_runs'] == 4
     if refresh_only:
         with proofsvc.session(repo, event):
-            st = status(campaign.validate(repo, P), dict(action='ledger_refresh'))
+            st = status(util.read_json(P), dict(action='ledger_refresh'))
             event('status', accepted=st['accepted_count'], unresolved=st['unresolved_slots'], usage=st['usage'])
     else:
         assert os.environ.get('OPENCODE_GO_API_KEY'), 'provider key missing'

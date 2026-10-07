@@ -241,34 +241,32 @@ class CampaignTransitionTests(unittest.TestCase):
         self.assertEqual(sum(e['kind']=='pair_attempt_reserved' for e in events),3)
         self.assertEqual([e['slot'] for e in events if e['kind']=='pair_accepted'],[1,2])
 
-    def test_nested_operation_reuses_deep_closure_but_checks_ownership_each_time(self):
+    def test_retired_ownership_checked_once_per_operation_and_again_on_next(self):
         with validation_scope():
             p=self.create()
             self.assertTrue(transition.validate_predecessor(self.repo,p))
-            self.assertEqual(self.wave_check.call_count,1)
             checked=self.owned_closure.call_count
             self.assertTrue(transition.validate_predecessor(self.repo,p))
-            self.assertGreater(self.owned_closure.call_count,checked)
-            self.owned_closure.side_effect=ValueError('Owned closure changed')
-            with self.assertRaisesRegex(ValueError,'Owned closure changed'):
-                transition.validate_predecessor(self.repo,p)
+            self.assertEqual(self.owned_closure.call_count,checked)
             self.assertEqual(self.wave_check.call_count,1)
+        self.owned_closure.side_effect=ValueError('Owned closure changed')
+        with validation_scope(), self.assertRaisesRegex(ValueError,'Owned closure changed'):
+            transition.validate_predecessor(self.repo,p)
 
-    def test_current_usage_and_permanent_stop_are_checked_on_memo_hit(self):
+    def test_retired_usage_and_permanent_stop_rechecked_each_operation(self):
         p=self.create();self.wave_check.reset_mock()
         with validation_scope():
             self.assertTrue(transition.validate_predecessor(self.repo,p))
-            self.usage['requests']+=1
-            with self.assertRaisesRegex(ValueError,'Retained predecessor evidence changed'):
+        self.usage['requests']+=1
+        with validation_scope(), self.assertRaisesRegex(ValueError,'Retained predecessor evidence changed'):
+            transition.validate_predecessor(self.repo,p)
+        self.usage['requests']-=1
+        with validation_scope(), patch.object(transition.campaign,'campaign_stop_pending',return_value=False):
+            with self.assertRaisesRegex(ValueError,'not permanently fenced'):
                 transition.validate_predecessor(self.repo,p)
-            self.usage['requests']-=1
-            with patch.object(transition.campaign,'campaign_stop_pending',return_value=False):
-                with self.assertRaisesRegex(ValueError,'not permanently fenced'):
-                    transition.validate_predecessor(self.repo,p)
-            self.stop.write_bytes(b'changed original STOP')
-            with self.assertRaisesRegex(ValueError,'Original STOP bytes changed'):
-                transition.validate_predecessor(self.repo,p)
-            self.assertEqual(self.wave_check.call_count,1)
+        self.stop.write_bytes(b'changed original STOP')
+        with validation_scope(), self.assertRaisesRegex(ValueError,'Original STOP bytes changed'):
+            transition.validate_predecessor(self.repo,p)
 
     def test_next_operation_rechecks_deep_file_even_when_closure_ref_is_unchanged(self):
         p=self.create();self.wave_check.reset_mock()
@@ -288,12 +286,13 @@ class CampaignTransitionTests(unittest.TestCase):
                 transition.validate_predecessor(self.repo,p)
         self.assertEqual(self.wave_check.call_count,2)
 
-    def test_changed_closure_reference_is_revalidated_inside_scope(self):
+    def test_changed_retired_closure_is_revalidated_on_next_operation(self):
         p=self.create();self.wave_check.reset_mock()
         with validation_scope():
             transition.validate_predecessor(self.repo,p)
-            closure=self.wave_path.parent/'closure.json'
-            util.write_json_atomic(closure,dict(closed=False,wave=self.wave_ref))
+        closure=self.wave_path.parent/'closure.json'
+        util.write_json_atomic(closure,dict(closed=False,wave=self.wave_ref))
+        with validation_scope():
             with self.assertRaisesRegex(ValueError,'Unclosed wave'):
                 transition.validate_predecessor(self.repo,p)
         self.assertEqual(self.wave_check.call_count,2)

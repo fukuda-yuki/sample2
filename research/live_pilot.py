@@ -193,6 +193,8 @@ def owner_plan(path, repo):
     if kind==KIND: return validate_plan(plan,repo)
     if kind==MAIN_KIND:
         from research import acquisition_readiness
+        if plan.get('operational_pipeline') is True:
+            return acquisition_readiness.verify_pipeline_phase(path, repo)
         return acquisition_readiness.verify_main_phase(path,repo)
     if kind==RECOVERY_KIND:
         from research import readiness_recovery
@@ -573,7 +575,8 @@ def retire_observer(monitor,budget_watch,*,owned_terminal_confirmed):
     return ack
 
 
-def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,postprocess_lock=None):
+def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,postprocess_lock=None,
+                             defer_postprocess=False):
     """One real production pair and observer session; no publication/resend."""
     from research.resource_supervisor import ProcessMonitor
     plan=owner_plan(owner_plan_path,repo); phase=util.read_json(checked(reference(phase_path)))
@@ -642,9 +645,10 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
         result=pair_execution.execute_pair(dict(plan_sha256=digest,cohort=phase['cohort'],
             runtime=phase['runtime'],pair_concurrency=2,require_fixed_instances=True),
             phase['assignments'][0]['cases'],batch,repo=repo,concurrency=2,
-            prepare=prepare,implement=implement,postprocess=postprocess,admit=admit)
+            prepare=prepare,implement=implement,postprocess=postprocess,admit=admit,
+            defer_postprocess=defer_postprocess)
         budget_watch.check()
-        if result.get('reason')!='pair_publication_restore_cleanup_required':
+        if result.get('reason') not in ('pair_publication_restore_cleanup_required', 'evaluation_pending'):
             budget_watch.latch('pair_execution_held')
         else:
             proofs=[validate_owned_terminal(batch/b['run_id'],b) for b in bindings]
@@ -655,6 +659,9 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
             util.write_new_json(batch/'owned-terminal-proof.json',dict(plan_sha256=digest,
                 phase_sha256=util.sha256_file(phase_path),runs=proofs))
             owned_terminal_confirmed=True
+            # Already stopped Runs must never receive a later peer's stop marker.
+            with budget_watch.lock:
+                budget_watch.terminal_history.update(b['run_id'] for b in bindings)
         return result
     except BaseException as exc:
         budget_watch.latch(type(exc).__name__); raise

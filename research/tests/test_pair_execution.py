@@ -59,6 +59,14 @@ class PairExecutionTests(unittest.TestCase):
     def test_serial_regression(self):
         self.execute(concurrency=1); self.assertEqual(self.peak,1); self.assertEqual(self.stopped,['A','B'])
 
+    def test_acquisition_can_finish_before_any_evaluation(self):
+        result=self.execute(defer_postprocess=True)
+        self.assertEqual(result['reason'],'evaluation_pending')
+        current=pair.state(self.batch/'_control/pair-journal.jsonl')
+        self.assertEqual(set(current['implementations']),{'A','B'})
+        self.assertFalse(current['results']);self.assertFalse(self.heavy)
+        self.assertEqual(self.execute(defer_postprocess=True)['reason'],'dispatched_identity_never_replayed')
+
     def test_admission_after_prepare_rejects_before_first_dispatch(self):
         @contextmanager
         def admit(binding):

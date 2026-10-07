@@ -36,6 +36,30 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def bounded_probe(probe, owned_roots):
+    """Retry a collector timeout once inside the existing ten-second deadline.
+
+    A fresh successful observation is required; never reuse stale counters or
+    retry ownership/identity/resource faults. Keep the failed observation in the
+    saved sample so transport missingness remains visible.
+    """
+    tick = time.monotonic()
+    first = probe(owned_roots)
+    if first.get('ok') is not False or first.get('error') not in ('TimeoutExpired', 'probe_timeout'):
+        return first
+    remaining = 10 - (time.monotonic() - tick)
+    if remaining <= 0:
+        return first
+    result = dict(probe(owned_roots, timeout_seconds=remaining))
+    elapsed = time.monotonic() - tick
+    if result.get('ok') is True and elapsed > 10:
+        result = {'schema': result.get('schema'), 'ok': False,
+                  'error': 'probe_deadline_exceeded', 'late_collector_result': result}
+    result.update(retry_evidence=[first], probe_elapsed_seconds=elapsed,
+                  probe_started_at=first.get('probe_started_at'), timeout_seconds=10)
+    return result
+
+
 def checked(reference):
     path = Path(reference['path']).resolve()
     if util.sha256_file(path) != reference['sha256']:
@@ -363,7 +387,7 @@ class Supervisor:
         probe = Monitor.__init__.__kwdefaults__['probe_fn']
         def scoped_probe(_):
             scope = self.scope
-            sample = probe(roots(self.phase, scope['bindings']))
+            sample = bounded_probe(probe, roots(self.phase, scope['bindings']))
             sample['observer_scope_generation'] = scope['generation']
             return sample
         self.monitor = Monitor(self.directory / 'samples', lambda: [], probe_fn=scoped_probe)

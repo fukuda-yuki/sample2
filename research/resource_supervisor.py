@@ -115,8 +115,11 @@ def safe_environment():
     return {name: os.environ[name] for name in names if name in os.environ}
 
 
-def validate_startup_ready(config,phase,pid,receipt):
-    """A fresh startup receipt is process/config/source-bound, not health."""
+def validate_startup_ready(config,phase,pid,receipt,*,current_source=True):
+    """A fresh startup receipt is process/config/source-bound, not health.
+
+    Live startup and closure also require the executing supervisor source;
+    saved historical receipts are verified under their own phase pins."""
     directory=native_path(config['directory'])
     if (type(receipt.get('schema_version')) is not int or receipt['schema_version']!=1
             or receipt.get('kind')!='resource_observer_startup_ready_v1' or receipt.get('validated') is not True
@@ -125,10 +128,35 @@ def validate_startup_ready(config,phase,pid,receipt):
             or any(receipt.get(k)!=config[k] for k in ('session','phase','directory'))
             or receipt.get('config_sha256')!=util.sha256_file(directory/'config.json')
             or receipt.get('source_sha256')!=phase.get('source_pins',{}).get('research/resource_supervisor.py')
-            or receipt.get('source_sha256')!=util.sha256_file(__file__)
+            or current_source and receipt.get('source_sha256')!=util.sha256_file(__file__)
             or util.sha256_file(checked(config['phase']))!=config['phase']['sha256']):
         raise ValueError('Foreign or unverified observer startup receipt')
     return True
+
+
+# Controller readers (ProcessMonitor._status) open status.json with Python's
+# open(), i.e. without FILE_SHARE_DELETE; while one holds it, the Windows
+# replace below fails with a sharing violation. Retry only that, boundedly
+# (about 1.9 s total); a persistent denial still raises and latches STOP.
+POINTER_REPLACE_RETRIES = 20
+
+
+def publish_pointer(path, value):
+    path = Path(path)
+    temp = path.with_name(path.name + '.' + uuid.uuid4().hex + '.tmp')
+    with temp.open('w', encoding='utf-8', newline='\n') as stream:
+        json.dump(value, stream, ensure_ascii=False, indent=2)
+        stream.write('\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+    for attempt in range(POINTER_REPLACE_RETRIES):
+        try:
+            temp.replace(path)
+            return
+        except PermissionError:
+            if os.name != 'nt' or attempt == POINTER_REPLACE_RETRIES - 1:
+                raise
+            time.sleep(0.01 * (attempt + 1))
 
 
 class ProcessMonitor:
@@ -390,7 +418,7 @@ class Supervisor:
             'generation': current_generation, 'sampled_scope_generation': generation, 'published_at': now(),
             'published_tick': time.monotonic(), 'snapshot': snapshot,
             'diagnostics': diagnostics})
-        util.write_json_atomic(self.directory / 'status.json',
+        publish_pointer(self.directory / 'status.json',
             {'path': str(path), 'sha256': util.sha256_file(path)})
         self.published_token = token
 

@@ -91,6 +91,26 @@ def assignments():
     return result
 
 
+_PIPELINE_PHASES = {}
+
+
+def verify_pipeline_phase(path, repo):
+    """Validate the current epoch once per process, never traverse predecessor data.
+
+    The exact plan and executing code hashes are still checked on every entry.
+    Each prepared Run validates its own inputs, runtime and owned resources.
+    """
+    path, repo = live_pilot.safe_path(path), live_pilot.safe_path(repo)
+    value = util.read_json(path)
+    if value.get('operational_pipeline') is not True:
+        raise ValueError('Explicit acquisition/evaluation pipeline required')
+    live_pilot.verify_pins(repo, value['source_pins'])
+    key = (str(path), str(repo), util.sha256_file(path))
+    if key not in _PIPELINE_PHASES:
+        _PIPELINE_PHASES[key] = _verify_main_phase_static(path, repo)
+    return copy.deepcopy(_PIPELINE_PHASES[key])
+
+
 def verify_main_phase(path,repo, *, check_tree=True):
     # Current tree membership is fresh; closed-gate callers inspect their exact
     # original roots instead of walking every unrelated historical pair again.

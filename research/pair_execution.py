@@ -175,7 +175,7 @@ def _stop_active(futures, batch, stop):
 
 def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
                  implement=machine.implement, postprocess=machine.postprocess, stop=runtime.request_stop,
-                 admit=None):
+                 admit=None, defer_postprocess=False):
     """cases: two {run_id, task, condition, attempt, pair, slot} assignments.
 
     plan: {plan_sha256, cohort, runtime}. Caller checks plan/approval/resources.
@@ -269,6 +269,10 @@ def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
         if fault or not all(c['run_id'] in current['implementations'] for c in cases):
             append(journal, {'kind': 'pause', 'pair': pair, 'reason': 'implementation_fault'})
             return {'status': 'held', 'reason': 'implementation_fault'}
+        if defer_postprocess:
+            append(journal, {'kind': 'evaluation_queued', 'pair': pair})
+            return {'status': 'acquired', 'reason': 'evaluation_pending', 'pair': pair,
+                    'runs': [b['run_id'] for b in assignments]}
         return _postprocess(plan, assignments, batch, repo, journal, postprocess)
 
 

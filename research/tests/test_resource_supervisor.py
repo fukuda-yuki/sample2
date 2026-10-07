@@ -12,6 +12,43 @@ from research import resource_supervisor as supervisor
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_probe_timeout_retries_once_within_original_deadline_and_retains_failure(self):
+        failed = {'ok': False, 'error': 'TimeoutExpired', 'probe_elapsed_seconds': 4.4}
+        good = {'ok': True, 'containers': [], 'probe_elapsed_seconds': .5}
+        probe = Mock(side_effect=[failed, good])
+        with patch.object(supervisor.time, 'monotonic', side_effect=[100, 104.4, 104.9]):
+            result = supervisor.bounded_probe(probe, ['owned-root'])
+        self.assertTrue(result['ok'])
+        self.assertEqual(probe.call_count, 2)
+        self.assertAlmostEqual(probe.call_args_list[1].kwargs['timeout_seconds'], 5.6)
+        self.assertEqual(result['retry_evidence'], [failed])
+        self.assertAlmostEqual(result['probe_elapsed_seconds'], 4.9)
+
+    def test_probe_repeated_timeout_stays_failed(self):
+        failed = {'ok': False, 'error': 'TimeoutExpired'}
+        probe = Mock(side_effect=[failed, dict(failed)])
+        with patch.object(supervisor.time, 'monotonic', side_effect=[100, 104, 108]):
+            result = supervisor.bounded_probe(probe, [])
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['retry_evidence'], [failed])
+        self.assertEqual(probe.call_count, 2)
+
+    def test_probe_identity_fault_and_exhausted_deadline_never_retry(self):
+        for error, elapsed in [('container_label_identity_mismatch', 1), ('probe_timeout', 10)]:
+            failed = {'ok': False, 'error': error}
+            probe = Mock(return_value=failed)
+            with patch.object(supervisor.time, 'monotonic', side_effect=[100, 100+elapsed]):
+                self.assertEqual(supervisor.bounded_probe(probe, []), failed)
+            self.assertEqual(probe.call_count, 1)
+
+    def test_late_retry_success_is_not_healthy(self):
+        probe = Mock(side_effect=[{'ok': False, 'error': 'TimeoutExpired'}, {'ok': True}])
+        with patch.object(supervisor.time, 'monotonic', side_effect=[100, 104, 110.1]):
+            result = supervisor.bounded_probe(probe, [])
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['error'], 'probe_deadline_exceeded')
+        self.assertTrue(result['late_collector_result']['ok'])
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

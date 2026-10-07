@@ -132,6 +132,11 @@ class PreservationTests(unittest.TestCase):
             (root/'private-original.bin').write_bytes(b'private-original')
             util.write_new_json(root/'manifest.json',dict(run_id=case['run_id'],
                 run_instance_id=case['run_instance_id'],end_reason='operator_stop'))
+            # One recorded request keeps these preservation fixtures held under
+            # the confirmed no-send replacement rule.
+            started=root/'usage'/'raw'/'started.jsonl';started.parent.mkdir(parents=True)
+            started.write_bytes((json.dumps(dict(run_id=case['run_id'],session_id=case['run_instance_id'],
+                request_id='fixture-request'))+'\n').encode())
         (self.pair/'journal.jsonl').write_text('original-journal')
         util.write_new_json(self.wave,{'pairs':[1]})
         self.plan=self.base/'plan.json';util.write_new_json(self.plan,{'fixed':100})

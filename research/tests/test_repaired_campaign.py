@@ -14,6 +14,28 @@ from research import catalog_delivery
 
 
 class CampaignTests(unittest.TestCase):
+    def test_cancelled_null_usage_is_retained_as_unknown_beside_lower_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);run=root/'pair-1/run'
+            c.util.write_new_json(run/'manifest.json',dict(duration_seconds=12))
+            c.pair_execution.append(run/'usage/raw/started.jsonl',dict(request_id='one'))
+            c.pair_execution.append(run/'usage/raw/started.jsonl',dict(request_id='two'))
+            c.pair_execution.append(run/'usage/raw/events.jsonl',dict(request_id='one',
+                usage={'input_tokens':40,'output_tokens':2},usage_complete=True,status='completed'))
+            c.pair_execution.append(run/'usage/raw/events.jsonl',dict(request_id='two',
+                usage=None,usage_complete=False,status='cancelled'))
+            child=dict(batch=tmp,assignments=[dict(cases=[dict(run_id='run',run_instance_id='instance')])])
+            entry=dict(kind='pair_attempt_reserved',slot=1,epoch_plan={})
+            with patch.object(c,'ledger',return_value=[entry]),patch.object(c,'document',return_value=child),\
+                    patch.object(c.pair_execution,'state',return_value={'dispatch':{'run':{}}}):
+                observed=c.observed_usage({})
+            self.assertEqual(observed['requests'],2)
+            self.assertEqual(observed['observed_tokens'],42)
+            self.assertTrue(observed['observed_tokens_are_lower_bound'])
+            self.assertEqual(observed['unknown_usage_requests'],[dict(run_instance_id='instance',
+                request_id='two',status='cancelled',observed_tokens=None)])
+            self.assertEqual(observed['accumulated_run_seconds'],12)
+
     def test_explicit_stop_does_not_revalidate_unrelated_recovery_clearances(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

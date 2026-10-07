@@ -295,7 +295,8 @@ def usage_evidence(root, case):
         if row.get('run_id') != case['run_id'] or row.get('session_id') != case['run_instance_id']:
             continue
         for key in totals:
-            number = row.get('usage', {}).get(key)
+            usage = row.get('usage')
+            number = usage.get(key) if isinstance(usage, dict) else None
             if type(number) is int and number >= 0: totals[key] += number
             else: complete = False
         complete = complete and row.get('usage_complete') is True

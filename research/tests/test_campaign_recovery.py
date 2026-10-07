@@ -94,6 +94,17 @@ class EvidenceTests(unittest.TestCase):
         self.assertIsNone(result['total_tokens']);self.assertTrue(result['usage_unknown'])
         self.assertEqual(result['send_evidence'],'known_no_send')
 
+    def test_cancelled_null_usage_preserves_prior_observed_tokens(self):
+        self.journal('started',[dict(self.row(),request_id='completed'),self.row()])
+        self.journal('events',[
+            dict(self.row(status='completed',usage={'input_tokens':40,'output_tokens':2},usage_complete=True),request_id='completed'),
+            self.row(status='cancelled',usage=None,usage_complete=False,send_evidence='observed_send')])
+        result=subject.usage_evidence(self.root,self.case)
+        self.assertEqual(result['observed_tokens'],{'input_tokens':40,'output_tokens':2})
+        self.assertIsNone(result['total_tokens'])
+        self.assertTrue(result['usage_unknown'])
+        self.assertEqual(result['technical_evidence'],[])
+
     def test_partial_usage_retains_observed_lower_bound(self):
         self.journal('started',[self.row()])
         self.journal('events',[self.row(status='provider_error',http_status=503,

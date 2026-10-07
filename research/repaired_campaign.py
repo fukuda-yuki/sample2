@@ -377,7 +377,17 @@ def observed_usage(p, exclude=()):
                 if name=='started': counts['requests']+=len(rows)
                 else:
                     for row in rows:
-                        usage=row.get('usage',{})
+                        usage=row.get('usage')
+                        if not isinstance(usage,dict):
+                            if usage is not None or row.get('usage_complete') is not False:
+                                raise ValueError('Invalid observed usage')
+                            # A cancelled transmitted request has an unknown total,
+                            # not zero usage. Keep its identity beside the lower bound.
+                            counts.setdefault('unknown_usage_requests',[]).append(dict(
+                                run_instance_id=ident,request_id=row.get('request_id'),
+                                status=row.get('status'),observed_tokens=None))
+                            counts['observed_tokens_are_lower_bound']=True
+                            continue
                         for field in ('input_tokens','output_tokens'):
                             value=usage.get(field)
                             if type(value) is not int or value<0: raise ValueError('Unknown or invalid observed usage')

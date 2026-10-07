@@ -3,7 +3,7 @@ current successor (S2_SUMMARY, default succession-v7.json) via the proven per-wa
 (reserve -> launch 4 runs / 2 pairs -> owned close or sanctioned recovery under the confirmed no-send
 rule -> post-close check -> resource release check -> campaign-status.json; fresh proof session per phase).
 Pairs: replacement_eligible slots first (new attempt IDs, after their backoff), then the next initial slots.
-Stops only on a real blocker: held/unknown send status, budget bounds, unhandled owner exception after
+Held slots remain untouched while other unattempted slots can proceed. Stops on budget bounds, unhandled owner exception after
 reservation, or 100 accepted. Low quality is never a stop or discard reason. No publication.
 Usage: driver_continuous.py [--selftest] [--adopt-chain PID]"""
 from pathlib import Path
@@ -47,13 +47,13 @@ def choose(status, attempt_rows):
     if status['accepted_count'] >= 100: return [], None, 'complete_100_accepted'
     unresolved = {int(k): v for k, v in status.get('unresolved_slots', {}).items()}
     held = sorted(n for n, d in unresolved.items() if d != 'replacement_eligible')
-    if held: return [], None, 'held_or_unknown_send_slots:'+','.join(map(str, held))
     eligible = sorted(n for n, d in unresolved.items() if d == 'replacement_eligible')
     pairs = eligible[:2]
     nxt = status.get('next_initial_slot')
     while len(pairs) < 2 and nxt is not None and nxt <= 100:
         pairs.append(nxt); nxt += 1
-    if not pairs: return [], None, 'no_pending_slots'
+    if not pairs:
+        return [], None, ('held_or_unknown_send_slots:'+','.join(map(str, held)) if held else 'no_pending_slots')
     nb = not_before_map(attempt_rows)
     waits = [nb[n] for n in pairs if n in eligible and n in nb]
     return pairs, (max(waits) if waits else None), None
@@ -89,7 +89,8 @@ def selftest():
            dict(kind='pair_recovery_decision', slot=8, not_before='2026-01-02T00:00:00+00:00')]
     assert choose(st, att) == ([8, 10], '2026-01-02T00:00:00+00:00', None), choose(st, att)
     assert choose(dict(st, unresolved_slots={}), [])[0:3] == ([10, 11], None, None)
-    assert choose(dict(st, unresolved_slots={'8': 'held'}), [])[2].startswith('held_or_unknown')
+    assert choose(dict(st, unresolved_slots={'8': 'held'}), [])[0] == [10, 11]
+    assert choose(dict(st, unresolved_slots={'8': 'held'}, next_initial_slot=None), [])[2].startswith('held_or_unknown')
     assert choose(dict(st, unresolved_slots={'8': 'replacement_eligible', '9': 'replacement_eligible', '3': 'replacement_eligible'}), [])[0] == [3, 8]
     assert choose(dict(st, unresolved_slots={}, next_initial_slot=100), [])[0] == [100]
     assert choose(dict(st, unresolved_slots={}, next_initial_slot=None), [])[2] == 'no_pending_slots'

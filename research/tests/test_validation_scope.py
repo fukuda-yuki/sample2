@@ -154,3 +154,15 @@ class NestedPredecessorMemoTests(unittest.TestCase):
     def test_campaign_without_predecessor_needs_no_proof(self):
         self.assertTrue(self.ct.validate_predecessor(self.repo, {}))
         self.assertEqual(self.calls, [])
+
+    def test_rpc_evidence_body_shares_one_scope_across_all_arms(self):
+        from unittest.mock import patch
+        from research import proof_session, campaign_recovery
+        def evidence(*args):
+            for _ in range(4):
+                self.ct.validate_predecessor(self.repo, self.top)
+            return True
+        with patch.object(campaign_recovery, '_validate_recovery_evidence', side_effect=evidence):
+            self.assertTrue(proof_session.dispatch('recovery-evidence', dict(
+                context=dict(repo=self.repo,wave_path=self.repo), path=self.repo, value={})))
+        self.assertEqual(self.calls, ['top','middle','root'])

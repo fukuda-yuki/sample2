@@ -344,7 +344,8 @@ def validate_observer_terminal(plan,plan_reference,pair,child,terminal):
             raise ValueError('Observer evidence pin changed')
     config=util.read_json(directory/'config.json')
     if phase.get('kind') in STARTUP_KINDS:
-        validate_startup_ready(config,phase,terminal.get('observer_pid'),util.read_json(directory/'startup-ready.json'))
+        validate_startup_ready(config,phase,terminal.get('observer_pid'),util.read_json(directory/'startup-ready.json'),
+            current_source=False)
     if (config.get('session')!=session or config.get('phase')!=dict(path=str(phase_path),sha256=phase_hash)
             or str(config.get('directory','')).removeprefix('\\\\?\\')!=str(directory)):
         raise ValueError('Observer config binding changed')

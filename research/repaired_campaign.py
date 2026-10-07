@@ -77,7 +77,7 @@ def validate(repo, path):
     for old in [repo,*map(live_pilot.safe_path,p['protected_roots'])]:
         if live_pilot.within(root,old) or live_pilot.within(old,root):
             raise ValueError('Campaign overlaps protected source/data')
-    if p.get('policy') not in (policy(), legacy_policy()):
+    if p.get('policy') not in (policy(), historical_owned_policy(), legacy_policy()):
         raise ValueError('Research acquisition policy changed')
     if p.get('storage_policy')!='new_campaign_ntfs_compression_originals_retained':
         raise ValueError('Explicit bounded new-root storage policy required')
@@ -89,22 +89,29 @@ def validate(repo, path):
     return p
 
 
-def policy(next_wave=OWNED_NEXT_WAVE):
-    return dict(initial_denominator=100, quality_failure_is_valid=True,
+def policy(next_wave=OWNED_NEXT_WAVE, *, isolate_held=True):
+    value = dict(initial_denominator=100, quality_failure_is_valid=True,
         low_quality_replacement=False, ambiguous_send='reconcile_never_blind_resend',
         technical_failure='saved_same_version_assessment_before_whole_pair_replacement',
         cross_attempt_arm_composition=False, all_attempts_and_usage_retained=True,
         next_wave_requires=next_wave,
         balance=False, paid_fallback=False, purchases=False)
+    if next_wave == OWNED_NEXT_WAVE and isolate_held:
+        value['held_attempts'] = 'retain_unaccepted_after_verified_owned_recovery_continue_other_slots'
+    return value
+
+
+def historical_owned_policy():
+    return policy(isolate_held=False)
 
 
 def legacy_policy():
     """Exact historical policy; retained plans keep validating unchanged."""
-    return policy(LEGACY_NEXT_WAVE)
+    return policy(LEGACY_NEXT_WAVE, isolate_held=False)
 
 
 def owned_policy(p):
-    return p.get('policy') == policy()
+    return p.get('policy') in (policy(), historical_owned_policy())
 
 
 @scoped_validation
@@ -835,7 +842,8 @@ def reconcile_recovery(repo,path,wave_path,recovery_closure_ref):
                     wave=wave_ref,epoch_plan=w['epoch_plan'],observations=decision['observations'],
                     quality_complete=decision.get('quality_complete',False),
                     adoption='same_attempt_saved_assessments_or_valid_product_failure',closure=live_pilot.reference(target)))
-        if any(d['disposition']=='held' for d in value['decisions'].values()):
+        if (any(d['disposition']=='held' for d in value['decisions'].values())
+                and p.get('policy') != policy()):
             return dict(reconciled=True,clearance=False,reason='unresolved_technical_evidence',closure=live_pilot.reference(target))
         clearance=dict(kind='campaign_stop_clearance_v1',campaign=live_pilot.reference(path),
             source_repo=str(Path(repo).resolve()),wave_closure=live_pilot.reference(target),

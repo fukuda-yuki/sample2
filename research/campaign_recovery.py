@@ -77,6 +77,16 @@ def _validate_controller(value, acquisition_plan):
         raise ValueError('Invalid recovery controller provenance')
     if not _controller_names(repo, acquisition_plan) <= pins.keys():
         raise ValueError('Recovery controller applicability pins are incomplete')
+    head = repaired_runtime._git(repo, 'rev-parse', 'HEAD')
+    if head != commit:
+        # The recording checkout has since advanced (e.g. a later recovery's
+        # controller).  The recorded code stays verifiable from retained Git
+        # history: an ancestor of the clean current HEAD whose committed blobs
+        # hash exactly to the recorded pins.  Current imports are never used.
+        if repaired_runtime._git(repo, 'status', '--porcelain'):
+            raise ValueError('Recovery controller checkout changed')
+        _committed_history(repo, commit, head, pins)
+        return value
     for name, digest in pins.items():
         repaired_runtime._relative(name)
         path = repo/name
@@ -89,6 +99,41 @@ def _validate_controller(value, acquisition_plan):
         raise ValueError('Recovery controller checkout changed')
     repaired_runtime._committed_files(repo, commit, pins)
     return value
+
+
+def _committed_history(repo, commit, head, pins):
+    import subprocess
+    from outer.harness.security import child_environment
+    base = ['git', '-c', 'safe.directory=' + Path(repo).as_posix()]
+    ancestor = subprocess.run(base + ['merge-base', '--is-ancestor', commit, head], cwd=repo,
+        env=child_environment(), capture_output=True)
+    if ancestor.returncode != 0:
+        raise ValueError('Recovery controller checkout changed: commit is not retained history')
+    names = sorted(pins)
+    for name in names:
+        repaired_runtime._relative(name)
+        if '\n' in name or '\r' in name:
+            raise ValueError('Git batch path contains a line break')
+    request = ''.join(commit + ':' + name + '\n' for name in names).encode()
+    data = subprocess.run(base + ['cat-file', '--batch'], input=request, cwd=repo,
+        env=child_environment(), capture_output=True, check=True).stdout
+    offset = 0
+    for name in names:
+        boundary = data.find(b'\n', offset)
+        if boundary < 0:
+            raise ValueError('Truncated Git blob header')
+        fields = data[offset:boundary].split()
+        if len(fields) != 3 or fields[1] != b'blob' or not fields[2].isdigit():
+            raise ValueError('Missing or non-blob committed source: ' + name)
+        size = int(fields[2]); offset = boundary + 1
+        blob = data[offset:offset + size]; offset += size
+        if len(blob) != size or data[offset:offset + 1] != b'\n':
+            raise ValueError('Truncated Git blob content')
+        offset += 1
+        if util.sha256_bytes(blob) != pins[name]:
+            raise ValueError('Recovery controller source changed: ' + name)
+    if offset != len(data):
+        raise ValueError('Unexpected extra Git batch output')
 
 
 def _capture_controller(acquisition_plan):

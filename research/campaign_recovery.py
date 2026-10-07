@@ -325,7 +325,7 @@ def decide_pair(arms):
     # At least one invalid arm needs positively classified technical evidence.
     # An already valid product failure is never itself a replacement reason.
     for arm, okay in zip(arms.values(), valid):
-        if not okay and not arm.get('technical_evidence'):
+        if not okay and not arm.get('technical_evidence') and not arm.get('pre_dispatch_fault'):
             return 'held'
     return 'replacement_eligible'
 
@@ -343,6 +343,78 @@ def _acquisition_outcome(root, case):
         end_reason_observed='end_reason' in manifest)
 
 
+PRE_DISPATCH_CATEGORY = 'pre_dispatch_campaign_fault'
+
+
+def _pre_dispatch_fault(ctx, case, root, usage, observation):
+    """Positive technical evidence for an arm stopped by the campaign fault
+    before dispatch.  ALL conditions must hold from immutable original bytes,
+    otherwise None and the pair stays held:
+    1 no dispatch and no implementation record (pair journal, implementation
+      receipt, runtime allocation, started manifest);
+    2 confirmed no-send: zero recorded requests and tokens, no usage journal;
+    3 the bound launcher result records the campaign fault stop and lists this
+      Run as not_allocated (stopped before dispatch);
+    4 launcher child exit and observer shutdown confirmed (resources released)."""
+    root = Path(root)
+    if observation.get('classification') != 'held_unresolved_evidence' or observation.get('model_calls') != 0:
+        return None
+    pair_dir = Path(ctx['epoch']['batch'])/('pair-'+str(case['pair']))
+    if root != pair_dir/case['run_id']:
+        return None
+    journal = pair_dir/'_control/pair-journal.jsonl'
+    try:
+        state = pair_execution.state(journal) if journal.exists() else {'dispatch': {}, 'implementations': {}}
+    except Exception:
+        return None
+    if case['run_id'] in state.get('dispatch', {}) or case['run_id'] in state.get('implementations', {}):
+        return None
+    if any((root/name).exists() for name in ('implementation-receipt.json', 'runtime.json', 'snapshot.json')):
+        return None
+    if (root/'manifest.json').exists():
+        try: manifest = util.read_json(root/'manifest.json')
+        except (OSError, ValueError): return None
+        if (manifest.get('run_id') != case['run_id'] or manifest.get('run_instance_id') != case['run_instance_id']
+                or manifest.get('started_at') is not None or manifest.get('end_reason') is not None):
+            return None
+    tokens = usage.get('observed_tokens')
+    if (usage.get('observed_requests') != 0 or not isinstance(tokens, dict)
+            or set(tokens) != {'input_tokens', 'output_tokens'} or any(v != 0 for v in tokens.values())
+            or usage.get('total_tokens') not in (None, 0) or usage.get('send_evidence') != 'known_no_send'
+            or usage.get('journal_errors') or usage.get('transmission_issues')
+            or usage.get('source_journals') or usage.get('technical_evidence')):
+        return None
+    if (root/'usage').exists() and any(item.is_file() for item in (root/'usage').rglob('*')):
+        return None
+    path = ctx['wave_path'].parent/'_launcher/result.json'
+    if not path.is_file():
+        return None
+    try: launch = util.read_json(path)
+    except (OSError, ValueError): return None
+    stop = launch.get('stop') if isinstance(launch.get('stop'), dict) else {}
+    if (launch.get('kind') != 'repaired_campaign_wave_launcher_v1_result' or launch.get('wave') != ctx['wave_ref']
+            or launch.get('plan') != ctx['campaign'] or launch.get('epoch_plan') != ctx['wave']['epoch_plan']
+            or case['pair'] not in (launch.get('pairs') or []) or launch.get('operational_complete') is not False
+            or launch.get('stop_requested') is not True or launch.get('reason') != 'campaign_stop'
+            or stop.get('reason') != 'campaign_stop' or not stop.get('durable_stop_paths')):
+        return None
+    if (not isinstance(launch.get('child'), dict) or launch['child'].get('exit_confirmed') is not True
+            or not isinstance(launch.get('observer_closure'), dict)
+            or launch['observer_closure'].get('confirmed') is not True or launch.get('errors')):
+        return None
+    # The launcher's own per-Run record must say it never allocated this Run.
+    runs = [run for run in launch.get('owned_runs') or []
+            if run.get('run_id') == case['run_id'] or run.get('run_instance_id') == case['run_instance_id']]
+    if (len(runs) != 1 or runs[0].get('run_id') != case['run_id']
+            or runs[0].get('run_instance_id') != case['run_instance_id'] or runs[0].get('status') != 'not_allocated'
+            or runs[0].get('unknown') is not False or runs[0].get('stop_attempted') is not False
+            or runs[0].get('helper') is not None):
+        return None
+    return dict(category=PRE_DISPATCH_CATEGORY, launcher_result=live_pilot.reference(path),
+                pair_journal=live_pilot.reference(journal) if journal.exists() else None,
+                observed_requests=0, observed_tokens=0)
+
+
 def _assess_arm(ctx, case, root, holder):
     outcome_path = holder/'outcome.json'
     if outcome_path.exists():
@@ -358,6 +430,8 @@ def _assess_arm(ctx, case, root, holder):
         technical_evidence=_technical(root, case, usage), opportunity='not_applicable',
         assessment=None, assessment_adopted=False, assessment_valid_product_failure=False,
         valid_data=observation.get('classification') in VALID)
+    fault = _pre_dispatch_fault(ctx, case, root, usage, observation)
+    if fault: value['pre_dispatch_fault'] = fault
     if observation.get('classification') in VALID:
         value['opportunity'] = 'already_observed'
     elif observation.get('recoverable') is True:
@@ -506,6 +580,27 @@ def _owned_cleanup_addition(name, original, addition, value):
     return assessment.saved._saved_cleanup_bound(directory, arms[parts[0]]) is True
 
 
+def _superseding_wrapper(ctx, path, value, target):
+    """A later same-wave recovery may append exactly one recovery-closure.json
+    wrapper beside this recovery's closure.json wrapper.  It is tolerated only
+    when it wraps a different, fully verified recovery of the same wave and
+    campaign; this recovery's own bytes are never changed."""
+    try: wrapper = util.read_json(target)
+    except (OSError, ValueError): return False
+    if (target.name != 'recovery-closure.json' or target.parent != ctx['wave_path'].parent
+            or set(wrapper) != {'wave', 'closed', 'recovery'} or wrapper['wave'] != value['wave']
+            or wrapper['closed'] is not True or not isinstance(wrapper['recovery'], dict)):
+        return False
+    other = Path(wrapper['recovery'].get('path', ''))
+    if other.name != 'closure.json' or other.parent == path.parent:
+        return False
+    if util.read_json(ctx['wave_path'].parent/'closure.json') != dict(wave=value['wave'], closed=True,
+            recovery=live_pilot.reference(path.parent/'closure.json')):
+        return False
+    verified = validate_closure(ctx['repo'], live_pilot.checked(ctx['campaign']), ctx['wave_path'], wrapper['recovery'])
+    return verified.get('wave') == value['wave'] and verified.get('campaign') == value['campaign']
+
+
 def _validate_recovery_evidence(ctx,path,value):
     repo = ctx['repo']
     if (path.name!='decision.json' or value.get('kind')!=KIND or value.get('campaign')!=ctx['campaign']
@@ -528,6 +623,7 @@ def _validate_recovery_evidence(ctx,path,value):
         for addition in extra:
             if _owned_cleanup_addition(name,original,addition,value): continue
             target=Path(original)/addition
+            if name=='wave' and _superseding_wrapper(ctx,path,value,target): continue
             closure=path.parent/'closure.json'
             if (name!='wave' or addition not in ('closure.json','recovery-closure.json')
                     or not closure.exists() or util.read_json(target)!=dict(wave=value['wave'],closed=True,
@@ -571,6 +667,9 @@ def _validate_recovery_evidence(ctx,path,value):
                     or arm.get('opportunity')=='exhausted'):
                 raise ValueError('Missing saved-assessment receipt')
             if technical!=arm['technical_evidence']: raise ValueError('Technical replacement evidence differs')
+            if 'pre_dispatch_fault' in arm and (not arm['pre_dispatch_fault'] or arm['pre_dispatch_fault']!=
+                    _pre_dispatch_fault(ctx,case,root,arm['usage'],arm['observation'])):
+                raise ValueError('Pre-dispatch campaign fault evidence differs')
         if decision['disposition'] != decide_pair(decision['arms']):
             raise ValueError('Unsupported replacement or adoption decision')
         arms=decision['arms']

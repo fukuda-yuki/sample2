@@ -253,5 +253,45 @@ class CampaignTests(unittest.TestCase):
                     with self.subTest(target=target),self.assertRaisesRegex(ValueError,'overlaps protected'):
                         c.reconcile_predecessor_recovery(Path(tmp)/'new-source',Path(tmp)/'plan.json',wave,target)
 
+    def inherited_fixture(self, tmp):
+        wave=Path(tmp)/'old/waves/w/spec.json';wave.parent.mkdir(parents=True);c.util.write_new_json(wave,{'pairs':[6]})
+        ref=c.live_pilot.reference(wave);closure=wave.parent/'closure.json'
+        recovery={'path':str(Path(tmp)/'r/closure.json'),'sha256':'0'*64}
+        c.util.write_new_json(closure,dict(wave=ref,closed=True,recovery=recovery))
+        p={'batch':str(Path(tmp)/'succ'),'policy':c.policy(),
+           'predecessor':{'source_repo':str(Path(tmp)/'old-source'),'plan':{'path':str(Path(tmp)/'old-plan.json'),'sha256':'1'*64},'history':{}}}
+        decision=dict(kind='pair_recovery_decision',slot=6,wave=ref,decision={'disposition':'replacement_eligible'},
+                      closure=c.live_pilot.reference(closure),not_before='2026-01-01T00:00:00+00:00')
+        return wave,ref,closure,recovery,p,decision
+
+    def test_inherited_replacement_decision_is_verified_under_predecessor_campaign(self):
+        from research import campaign_transition, campaign_recovery
+        with tempfile.TemporaryDirectory() as tmp:
+            wave,ref,closure,recovery,p,decision=self.inherited_fixture(tmp)
+            with patch.object(campaign_transition,'history_events',return_value=[decision]), \
+                 patch.object(campaign_transition,'_history',return_value=({'waves':[{'wave':ref}]},[])), \
+                 patch.object(c.live_pilot,'checked',side_effect=lambda r:Path(r['path'])), \
+                 patch.object(campaign_recovery,'validate_closure',return_value={'decisions':{}}) as validate:
+                self.assertTrue(c._inherited_decision(p,decision))
+                c._verify_inherited_recovery(Path(tmp)/'new',p,c.util.read_json(closure),decision['closure'])
+            validate.assert_called_once_with(Path(tmp)/'old-source',Path(tmp)/'old-plan.json',wave,recovery)
+
+    def test_inherited_decision_requires_retained_predecessor_wave_and_its_own_wrapper(self):
+        from research import campaign_transition, campaign_recovery
+        with tempfile.TemporaryDirectory() as tmp:
+            wave,ref,closure,recovery,p,decision=self.inherited_fixture(tmp)
+            foreign=Path(tmp)/'elsewhere/closure.json';c.util.write_new_json(foreign,c.util.read_json(closure))
+            cases=[({'waves':[]},closure),({'waves':[{'wave':ref}]},foreign)]
+            for history,location in cases:
+                with self.subTest(location=location), \
+                     patch.object(campaign_transition,'_history',return_value=(history,[])), \
+                     patch.object(c.live_pilot,'checked',side_effect=lambda r:Path(r['path'])), \
+                     patch.object(campaign_recovery,'validate_closure',side_effect=AssertionError('not reached')):
+                    with self.assertRaisesRegex(ValueError,'Foreign inherited'):
+                        c._verify_inherited_recovery(Path(tmp)/'new',p,c.util.read_json(location),c.live_pilot.reference(location))
+            with patch.object(campaign_transition,'history_events',return_value=[]):
+                self.assertFalse(c._inherited_decision(p,decision))
+            self.assertFalse(c._inherited_decision({k:v for k,v in p.items() if k!='predecessor'},decision))
+
 
 if __name__=='__main__':unittest.main()

@@ -307,3 +307,86 @@ class CampaignLauncherTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class ObserverBoundStopTests(unittest.TestCase):
+    """An observer's own fault latch at its pair phase STOP path is in scope."""
+    setUp = CampaignLauncherTests.setUp
+    context = CampaignLauncherTests.context
+    retained = CampaignLauncherTests.retained
+
+    def latch(self, number=2, mutate=None, config_mutate=None):
+        phase = live_pilot.observer_phase(self.epoch, self.epoch_ref, number)
+        phase_path = Path(phase['batch']) / 'phase.json'
+        session = uuid.uuid4().hex
+        value = dict(reason='supervisor_status_evidence_fault', session=session,
+            phase_sha256=util.sha256_file(phase_path), generation=1, decided_at='t', decided_tick=1.0,
+            bindings=[], HTTP_fence_confirmed=False)
+        directory = Path(self.epoch['batch']) / '_observers' / session
+        config = dict(phase=dict(path=str(phase_path), sha256=value['phase_sha256']), session=session,
+            directory=str(directory))
+        if config_mutate: config_mutate(config)
+        util.write_new_json(directory / 'config.json', config)
+        util.write_new_json(directory / 'fault-latch.json', value)
+        stop = dict(value); mutate and mutate(stop)
+        target = subject.phase_stop_path(phase)
+        util.write_new_json(target, stop)
+        return phase, target
+
+    def test_bound_observer_latch_is_accepted_without_overwrite(self):
+        phase, target = self.latch()
+        before = target.read_bytes()
+        ctx = self.retained(); result = subject.latch_stop(ctx, 'fixture')
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(len(result['durable_stop_paths']), 6)
+        self.assertEqual(target.read_bytes(), before)
+
+    def test_unbound_or_forged_phase_latches_remain_foreign(self):
+        cases = [dict(mutate=lambda v: v.update(phase_sha256='0' * 64)),
+                 dict(mutate=lambda v: v.update(reason='edited')),
+                 dict(config_mutate=lambda c: c.update(session='f' * 32)),
+                 dict(config_mutate=lambda c: c['phase'].update(sha256='1' * 64))]
+        for case in cases:
+            with self.subTest(case=case):
+                self.setUp()
+                phase, target = self.latch(**case)
+                self.assertFalse(subject.bound_observer_stop(self.epoch, phase, target))
+                ctx = self.retained(); result = subject.latch_stop(ctx, 'fixture')
+                self.assertEqual([e['path'] for e in result['errors']], [str(live_pilot.safe_path(target))])
+
+    def test_bound_latch_at_other_pair_path_is_not_accepted(self):
+        phase, target = self.latch(number=2)
+        other = live_pilot.observer_phase(self.epoch, self.epoch_ref, 1)
+        self.assertFalse(subject.bound_observer_stop(self.epoch, other, target))
+
+    def recovery_ctx(self, stop_errors, confirmed=False):
+        from research import campaign_recovery
+        directory = self.wave.parent / '_launcher'
+        rows = [dict(run_id=c['run_id'], run_instance_id=c['run_instance_id'],
+            root=str(Path(self.epoch['batch']) / ('pair-' + str(p['pair'])) / c['run_id']), status='not_allocated',
+            stop_attempted=False, closure_confirmed=False, unknown=False, stop_receipt={}, helper=None)
+            for p in self.epoch['assignments'] for c in p['cases']]
+        wave = dict(self.spec, assignments=self.epoch['assignments'])
+        ctx = dict(wave_path=self.wave, campaign=live_pilot.reference(self.plan), wave_ref=live_pilot.reference(self.wave),
+                   wave=wave, epoch=self.epoch)
+        util.write_new_json(directory / 'result.json', dict(kind='repaired_campaign_wave_launcher_v1_result',
+            plan=ctx['campaign'], wave=ctx['wave_ref'], epoch_plan=self.epoch_ref, pairs=[1, 2],
+            operational_complete=False, owned_closure_confirmed=confirmed, owned_runs=rows, errors=[],
+            child=dict(exit_code=0, exit_confirmed=True), observer_closure=dict(confirmed=True),
+            stop=dict(reason='campaign_stop', durable_stop_paths=[], errors=stop_errors)))
+        return campaign_recovery, ctx
+
+    def test_recovery_accepts_fault_closure_whose_only_stop_error_is_bound_latch(self):
+        phase, target = self.latch()
+        recovery, ctx = self.recovery_ctx([dict(path=str(target), error_type='ValueError')])
+        self.assertEqual(recovery._owned_closure(ctx)['path'], str(self.wave.parent / '_launcher' / 'result.json'))
+
+    def test_recovery_refuses_other_stop_errors(self):
+        phase, target = self.latch(mutate=lambda v: v.update(phase_sha256='0' * 64))
+        for errors in ([dict(path=str(target), error_type='ValueError')],
+                       [dict(path=str(self.batch / '_control/dispatch-stop.json'), error_type='ValueError')],
+                       [dict(path=str(target), error_type='OSError')]):
+            with self.subTest(errors=errors):
+                for f in (self.wave.parent / '_launcher').glob('result.json'): f.unlink()
+                recovery, ctx = self.recovery_ctx(errors)
+                with self.assertRaises(ValueError): recovery._owned_closure(ctx)

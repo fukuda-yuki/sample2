@@ -158,6 +158,29 @@ def _context(repo, campaign_plan_path, wave_path):
                 epoch=epoch, wave_path=live_pilot.safe_path(wave_path))
 
 
+def _observer_bound_stop_errors(ctx, errors):
+    """A launcher marker refused only because the pair observer had already
+    latched its own bound fault STOP at that exact phase path is not an
+    unresolved resource; every other STOP write error still blocks recovery."""
+    from research import campaign_launcher
+    if not isinstance(errors, list) or not errors:
+        return False
+    phases = {}
+    for number in ctx['wave']['pairs']:
+        phase = live_pilot.observer_phase(ctx['epoch'], ctx['wave']['epoch_plan'], number)
+        phases[str(live_pilot.safe_path(campaign_launcher.phase_stop_path(phase)))] = phase
+    for error in errors:
+        if not isinstance(error, dict) or set(error) != {'path', 'error_type'} or error['error_type'] != 'ValueError':
+            return False
+        try:
+            key = str(live_pilot.safe_path(error['path']))
+        except (OSError, ValueError, TypeError):
+            return False
+        if key not in phases or not campaign_launcher.bound_observer_stop(ctx['epoch'], phases[key], key):
+            return False
+    return True
+
+
 def _owned_closure(ctx):
     """Consume exact supervisor receipts; a generic process exit is insufficient."""
     path = ctx['wave_path'].parent/'_launcher/result.json'
@@ -166,7 +189,9 @@ def _owned_closure(ctx):
             or value.get('plan') != ctx['campaign'] or value.get('wave') != ctx['wave_ref']
             or value.get('epoch_plan') != ctx['wave']['epoch_plan']
             or value.get('pairs') != ctx['wave']['pairs']
-            or value.get('owned_closure_confirmed') is not True):
+            or value.get('owned_closure_confirmed') is not True
+            and not (value.get('operational_complete') is not True
+                     and _observer_bound_stop_errors(ctx, value.get('stop', {}).get('errors')))):
         raise ValueError('Exact supervisor-owned closure is required before recovery')
     if value.get('operational_complete') is True:
         proof = _read(value['verification']['evidence'])
@@ -178,7 +203,9 @@ def _owned_closure(ctx):
         expected = {c['run_instance_id']: c for p in ctx['wave']['assignments'] for c in p['cases']}
         if (len(rows) != len(expected) or {r.get('run_instance_id') for r in rows} != set(expected)
                 or value.get('child', {}).get('exit_confirmed') is not True
-                or value.get('errors') != [] or value.get('stop', {}).get('errors') != []
+                or value.get('errors') != []
+                or value.get('stop', {}).get('errors') not in ([], None)
+                and not _observer_bound_stop_errors(ctx, value['stop']['errors'])
                 or value.get('observer_closure', {}).get('confirmed') is not True):
             raise ValueError('Fault closure does not establish every selected owned resource')
         for row in rows:

@@ -120,6 +120,35 @@ def owned_rows(context):
     return rows
 
 
+def phase_stop_path(phase):
+    return Path(phase['batch']) / '_control' / phase['phase_id'] / 'dispatch-stop.json'
+
+
+def bound_observer_stop(epoch, phase, path):
+    """True only for the pair observer's own durable fault latch at that pair's
+    phase STOP path: same phase digest, a retained observer session bound to the
+    exact phase file, and byte-equal JSON to that session's fault-latch.json."""
+    try:
+        path = live_pilot.safe_path(path)
+        if path != live_pilot.safe_path(phase_stop_path(phase)):
+            return False
+        value = util.read_json(path)
+        phase_path = live_pilot.safe_path(Path(phase['batch']) / 'phase.json')
+        session = value.get('session')
+        if (not isinstance(session, str) or len(session) != 32 or any(c not in '0123456789abcdef' for c in session)
+                or not value.get('reason') or value.get('phase_sha256') != util.sha256_file(phase_path)):
+            return False
+        directory = Path(epoch['batch']) / '_observers' / session
+        config = util.read_json(directory / 'config.json')
+        bound = config.get('phase', {})
+        if (config.get('session') != session or bound.get('sha256') != value['phase_sha256']
+                or live_pilot.safe_path(bound.get('path', '')) != phase_path):
+            return False
+        return util.read_json(directory / 'fault-latch.json') == value
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def latch_stop(context, reason):
     """Attempt every durable STOP before a blocking stop operation."""
     marker = dict(kind=KIND + '_stop', plan_sha256=context['plan']['sha256'],
@@ -130,16 +159,22 @@ def latch_stop(context, reason):
     epoch_marker = {**marker, 'plan_sha256': context['epoch_plan']['sha256'],
         'campaign_plan_sha256': context['plan']['sha256']}
     paths.append((Path(context['epoch']['batch']) / '_control/dispatch-stop.json', epoch_marker))
+    phases = {}
     for number in context['pairs']:
         phase = live_pilot.observer_phase(context['epoch'], context['epoch_plan'], number)
-        paths.append((Path(phase['batch']) / '_control' / phase['phase_id'] / 'dispatch-stop.json', epoch_marker))
+        target = phase_stop_path(phase)
+        phases[str(live_pilot.safe_path(target))] = phase
+        paths.append((target, epoch_marker))
     written, errors = [], []
     for path, value in paths:
         try:
             path = live_pilot.safe_path(path)
             if path.exists():
                 old = util.read_json(path)
-                if (old.get('plan_sha256') != value['plan_sha256']
+                phase = phases.get(str(path))
+                if phase is not None and bound_observer_stop(context['epoch'], phase, path):
+                    pass  # The pair observer already latched this exact phase STOP.
+                elif (old.get('plan_sha256') != value['plan_sha256']
                         or (path == event_path and old.get('wave_sha256') != value['wave_sha256'])):
                     raise ValueError('Foreign existing STOP')
             else:

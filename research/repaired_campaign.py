@@ -282,6 +282,8 @@ def _reserve_wave(repo,path,epoch_ref,pairs):
             from research import campaign_recovery
             if saved.get('kind')==PREDECESSOR_RECOVERY_KIND:
                 verified=_verify_predecessor_recovery(repo,path,p,saved,decision['closure'])
+            elif _inherited_decision(p,decision):
+                verified=_verify_inherited_recovery(repo,p,saved,decision['closure'])
             else:
                 verified=campaign_recovery.validate_closure(repo,path,live_pilot.checked(saved['wave']),saved['recovery'])
             if verified['decisions'][str(n)]!=decision['decision']:
@@ -835,6 +837,28 @@ def _verify_predecessor_recovery(repo,path,p,saved,saved_ref):
     if saved['wave'] not in [row['wave'] for row in history['waves']]:
         raise ValueError('Recovery wave is not retained predecessor history')
     return campaign_recovery.validate_closure(old_repo,old_path,live_pilot.checked(saved['wave']),saved['recovery'])
+
+
+def _inherited_decision(p,decision):
+    if not p.get('predecessor'):return False
+    from research import campaign_transition
+    return decision in campaign_transition.history_events(p)
+
+
+def _verify_inherited_recovery(repo,p,saved,saved_ref):
+    """A replacement decision that the direct predecessor itself recorded for
+    one of its retained waves is verified under that predecessor's own campaign
+    plan and pinned checkout, exactly as the predecessor verified it."""
+    from research import campaign_recovery, campaign_transition
+    old_repo,old_path,pred=_predecessor_context(repo,p)
+    history,_=campaign_transition._history(pred['history'])
+    if (not isinstance(saved,dict) or set(saved)!={'wave','closed','recovery'} or saved.get('closed') is not True
+            or saved['wave'] not in [row['wave'] for row in history['waves']]):
+        raise ValueError('Foreign inherited recovery decision')
+    location=live_pilot.checked(saved_ref);wave_path=live_pilot.checked(saved['wave'])
+    if location.parent!=wave_path.parent or location.name not in ('closure.json','recovery-closure.json'):
+        raise ValueError('Foreign inherited recovery decision')
+    return campaign_recovery.validate_closure(old_repo,old_path,wave_path,saved['recovery'])
 
 
 @scoped_validation

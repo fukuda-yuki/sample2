@@ -344,48 +344,21 @@ def _acquisition_outcome(root, case):
 
 
 PRE_DISPATCH_CATEGORY = 'pre_dispatch_campaign_fault'
+GATEWAY_START_CATEGORY = 'gateway_start_campaign_fault'
+GATEWAY_START_ERROR = {'type': 'RuntimeError', 'message': 'Gateway failed to start'}
 
 
-def _pre_dispatch_fault(ctx, case, root, usage, observation):
-    """Positive technical evidence for an arm stopped by the campaign fault
-    before dispatch.  ALL conditions must hold from immutable original bytes,
-    otherwise None and the pair stays held:
-    1 no dispatch and no implementation record (pair journal, implementation
-      receipt, runtime allocation, started manifest);
-    2 confirmed no-send: zero recorded requests and tokens, no usage journal;
-    3 the bound launcher result records the campaign fault stop and lists this
-      Run as not_allocated (stopped before dispatch);
-    4 launcher child exit and observer shutdown confirmed (resources released)."""
-    root = Path(root)
-    if observation.get('classification') != 'held_unresolved_evidence' or observation.get('model_calls') != 0:
-        return None
-    pair_dir = Path(ctx['epoch']['batch'])/('pair-'+str(case['pair']))
-    if root != pair_dir/case['run_id']:
-        return None
-    journal = pair_dir/'_control/pair-journal.jsonl'
-    try:
-        state = pair_execution.state(journal) if journal.exists() else {'dispatch': {}, 'implementations': {}}
-    except Exception:
-        return None
-    if case['run_id'] in state.get('dispatch', {}) or case['run_id'] in state.get('implementations', {}):
-        return None
-    if any((root/name).exists() for name in ('implementation-receipt.json', 'runtime.json', 'snapshot.json')):
-        return None
-    if (root/'manifest.json').exists():
-        try: manifest = util.read_json(root/'manifest.json')
-        except (OSError, ValueError): return None
-        if (manifest.get('run_id') != case['run_id'] or manifest.get('run_instance_id') != case['run_instance_id']
-                or manifest.get('started_at') is not None or manifest.get('end_reason') is not None):
-            return None
+def _zero_send(usage):
     tokens = usage.get('observed_tokens')
-    if (usage.get('observed_requests') != 0 or not isinstance(tokens, dict)
+    return not (usage.get('observed_requests') != 0 or not isinstance(tokens, dict)
             or set(tokens) != {'input_tokens', 'output_tokens'} or any(v != 0 for v in tokens.values())
             or usage.get('total_tokens') not in (None, 0) or usage.get('send_evidence') != 'known_no_send'
             or usage.get('journal_errors') or usage.get('transmission_issues')
-            or usage.get('source_journals') or usage.get('technical_evidence')):
-        return None
-    if (root/'usage').exists() and any(item.is_file() for item in (root/'usage').rglob('*')):
-        return None
+            or usage.get('source_journals') or usage.get('technical_evidence'))
+
+
+def _campaign_stop_run(ctx, case):
+    """The bound launcher result's campaign fault stop and its record of this Run."""
     path = ctx['wave_path'].parent/'_launcher/result.json'
     if not path.is_file():
         return None
@@ -402,18 +375,118 @@ def _pre_dispatch_fault(ctx, case, root, usage, observation):
             or not isinstance(launch.get('observer_closure'), dict)
             or launch['observer_closure'].get('confirmed') is not True or launch.get('errors')):
         return None
-    # The launcher's own per-Run record must say it never allocated this Run.
     runs = [run for run in launch.get('owned_runs') or []
             if run.get('run_id') == case['run_id'] or run.get('run_instance_id') == case['run_instance_id']]
     if (len(runs) != 1 or runs[0].get('run_id') != case['run_id']
-            or runs[0].get('run_instance_id') != case['run_instance_id'] or runs[0].get('status') != 'not_allocated'
-            or runs[0].get('unknown') is not False or runs[0].get('stop_attempted') is not False
-            or runs[0].get('helper') is not None):
+            or runs[0].get('run_instance_id') != case['run_instance_id'] or runs[0].get('unknown') is not False):
+        return None
+    return path, runs[0]
+
+
+def _pre_dispatch_fault(ctx, case, root, usage, observation):
+    """Positive zero-send technical evidence for a held arm stopped by the
+    campaign fault; otherwise None and the pair stays held.  Exactly one of:
+
+    pre_dispatch_campaign_fault, ALL of:
+    1 no dispatch and no implementation record (pair journal, implementation
+      receipt, runtime allocation, started manifest);
+    2 confirmed no-send: zero recorded requests and tokens, no usage journal;
+    3 the bound launcher result records the campaign fault stop and lists this
+      Run as not_allocated (stopped before dispatch);
+    4 launcher child exit and observer shutdown confirmed (resources released).
+
+    gateway_start_campaign_fault, ALL of:
+    1 dispatched (exact journal binding) but no implementation record;
+    2 environment_failure whose runtime error is exactly the gateway start
+      failure, with an empty gateway log;
+    3 confirmed no-send: zero requests and tokens, no usage journal or event,
+      normalized usage reports no start and no model call;
+    4 stop confirmed and network removed; launcher campaign fault stop with
+      this Run owned_allocated, closure confirmed, nothing unknown."""
+    root = Path(root)
+    if observation.get('classification') != 'held_unresolved_evidence' or observation.get('model_calls') != 0:
+        return None
+    pair_dir = Path(ctx['epoch']['batch'])/('pair-'+str(case['pair']))
+    if root != pair_dir/case['run_id'] or not _zero_send(usage):
+        return None
+    journal = pair_dir/'_control/pair-journal.jsonl'
+    try:
+        state = pair_execution.state(journal) if journal.exists() else {'dispatch': {}, 'implementations': {}}
+    except Exception:
+        return None
+    if case['run_id'] in state.get('implementations', {}):
+        return None
+    launched = _campaign_stop_run(ctx, case)
+    if launched is None:
+        return None
+    path, run = launched
+    if case['run_id'] in state.get('dispatch', {}):
+        return _gateway_start_fault(case, root, state['dispatch'][case['run_id']], path, run, journal)
+    if any((root/name).exists() for name in ('implementation-receipt.json', 'runtime.json', 'snapshot.json')):
+        return None
+    if (root/'manifest.json').exists():
+        try: manifest = util.read_json(root/'manifest.json')
+        except (OSError, ValueError): return None
+        if (manifest.get('run_id') != case['run_id'] or manifest.get('run_instance_id') != case['run_instance_id']
+                or manifest.get('started_at') is not None or manifest.get('end_reason') is not None):
+            return None
+    if (root/'usage').exists() and any(item.is_file() for item in (root/'usage').rglob('*')):
+        return None
+    # The launcher's own per-Run record must say it never allocated this Run.
+    if (run.get('status') != 'not_allocated' or run.get('stop_attempted') is not False
+            or run.get('helper') is not None):
         return None
     return dict(category=PRE_DISPATCH_CATEGORY, launcher_result=live_pilot.reference(path),
                 pair_journal=live_pilot.reference(journal) if journal.exists() else None,
                 observed_requests=0, observed_tokens=0)
 
+
+def _gateway_start_fault(case, root, binding, path, run, journal):
+    def read(name):
+        try: return util.read_json(root/name) if (root/name).is_file() else None
+        except (OSError, ValueError): return None
+    if (not isinstance(binding, dict) or any(binding.get(k) != v for k, v in case.items())):
+        return None
+    manifest = read('manifest.json') or {}
+    if (manifest.get('run_id') != case['run_id'] or manifest.get('run_instance_id') != case['run_instance_id']
+            or manifest.get('end_reason') != 'environment_failure' or manifest.get('stop_confirmed') is not True):
+        return None
+    if read('evidence/runtime-error.json') != GATEWAY_START_ERROR:
+        return None
+    log = root/'evidence/gateway.log'
+    if not log.is_file() or log.stat().st_size != 0:
+        return None
+    events = root/'usage/events.jsonl'
+    if events.exists() and events.stat().st_size != 0:
+        return None
+    if (root/'usage/raw').exists() and any(item.is_file() for item in (root/'usage/raw').rglob('*')):
+        return None
+    normalized = read('usage/normalized.json') or {}
+    execution = normalized.get('execution_evidence') if isinstance(normalized.get('execution_evidence'), dict) else {}
+    if (normalized.get('run_id') != case['run_id'] or normalized.get('run_instance_id') != case['run_instance_id']
+            or normalized.get('observed_request_count') != 0 or normalized.get('observed_call_count') != 0
+            or normalized.get('raw_files') != [] or normalized.get('input_reached') is not False
+            or execution.get('send_evidence') != 'known_no_send' or execution.get('model_called') is not False
+            or execution.get('started_count') != 0 or execution.get('terminal_count') != 0
+            or execution.get('saved_response_count') != 0):
+        return None
+    receipt = read('implementation-receipt.json')
+    if receipt is not None and (receipt.get('run_id') != case['run_id']
+            or receipt.get('run_instance_id') != case['run_instance_id']
+            or receipt.get('stop_confirmed') is not True or receipt.get('raw') != {}):
+        return None
+    result = read('stop-result.json') or {}
+    cleanup = result.get('network_cleanup') if isinstance(result.get('network_cleanup'), dict) else {}
+    if (result.get('run_id') != case['run_id'] or result.get('stop_confirmed') is not True
+            or cleanup.get('run_instance_id') != case['run_instance_id'] or cleanup.get('confirmed') is not True
+            or cleanup.get('status') != 'removed'):
+        return None
+    if (run.get('status') != 'owned_allocated' or run.get('closure_confirmed') is not True
+            or run.get('stop_attempted') is not True):
+        return None
+    return dict(category=GATEWAY_START_CATEGORY, launcher_result=live_pilot.reference(path),
+                pair_journal=live_pilot.reference(journal), runtime_error=live_pilot.reference(root/'evidence/runtime-error.json'),
+                observed_requests=0, observed_tokens=0)
 
 def _assess_arm(ctx, case, root, holder):
     outcome_path = holder/'outcome.json'

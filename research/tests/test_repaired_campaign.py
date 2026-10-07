@@ -14,6 +14,14 @@ from research import catalog_delivery
 
 
 class CampaignTests(unittest.TestCase):
+    def test_explicit_stop_does_not_revalidate_unrelated_recovery_clearances(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            c.util.write_new_json(root/'_control/stop-events/retired.json', dict(reason='explicit_stop'))
+            c.util.write_new_json(root/'_control/clearances/old.json', dict(wave_closure={'unrelated':'large recovery'}))
+            with patch.object(c,'document',side_effect=AssertionError('unnecessary recovery traversal')):
+                self.assertTrue(c.campaign_stop_pending({'batch':tmp}))
+
     def test_first_supervisor_exception_is_preserved_before_stop(self):
         from outer.harness import util
         with tempfile.TemporaryDirectory() as tmp:

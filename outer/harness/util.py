@@ -5,6 +5,7 @@ Only standard library. No model client, no network access.
 import hashlib
 import json
 import os
+import time
 import uuid
 from pathlib import Path
 
@@ -54,7 +55,25 @@ def write_json_atomic(path, value):
         stream.write('\n')
         stream.flush()
         os.fsync(stream.fileno())
-    temp.replace(path)
+    _replace_with_retry(temp, path)
+
+
+# A concurrent Windows reader opened without FILE_SHARE_DELETE (Python's open)
+# makes MoveFileEx(REPLACE_EXISTING) fail with a sharing violation for the few
+# milliseconds it holds the target. Retry only that, briefly and boundedly; any
+# other error, or a persistent denial, still raises with the temp file retained.
+REPLACE_RETRIES = 20
+
+
+def _replace_with_retry(temp, path):
+    for attempt in range(REPLACE_RETRIES):
+        try:
+            temp.replace(path)
+            return
+        except PermissionError:
+            if os.name != 'nt' or attempt == REPLACE_RETRIES - 1:
+                raise
+            time.sleep(0.01 * (attempt + 1))
 
 
 def append_line(path, value):

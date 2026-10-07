@@ -20,6 +20,7 @@ from outer.harness.security import child_environment
 from research import live_pilot, pair_execution, repaired_runtime
 from research import repaired_campaign as campaign
 from research.validation_scope import scoped_validation, validate_predecessor_once
+from contextvars import ContextVar
 
 KIND = 'repaired_campaign_successor_v1'
 PIN = 'research/campaign_transition.py'
@@ -311,11 +312,35 @@ def create_successor(*, repo, path, batch, predecessor_plan, predecessor_repo, a
         return new
 
 
+_PREDECESSOR_DEPTH = ContextVar('nested_predecessor_validation_depth', default=0)
+
+
 def validate_predecessor(repo, plan):
-    """Read-only original-byte, closure, permanent-fence and clock validation."""
+    """Read-only original-byte, closure, permanent-fence and clock validation.
+
+    A top-level call always rechecks its immediate predecessor's usage, fence,
+    STOP bytes, ownership and closure references. Re-entries reached from inside
+    another predecessor proof (each nested campaign.validate/wave_spec/_context
+    re-enters the whole older retired chain, multiplying cost per successor)
+    reuse a successful proof of the identical plan bytes for the outer operation
+    only; outside a scope or after a failure they are fully recomputed.
+    """
     predecessor = plan.get('predecessor')
     if not predecessor:
         return True
+    depth = _PREDECESSOR_DEPTH.get()
+    token = _PREDECESSOR_DEPTH.set(depth + 1)
+    try:
+        if depth == 0:
+            return _validate_predecessor(repo, plan)
+        key = ('nested-predecessor-campaign', str(live_pilot.safe_path(repo)), _digest(plan))
+        return validate_predecessor_once(key, lambda: _validate_predecessor(repo, plan))
+    finally:
+        _PREDECESSOR_DEPTH.reset(token)
+
+
+def _validate_predecessor(repo, plan):
+    predecessor = plan.get('predecessor')
     if set(predecessor) != {'plan', 'source_repo', 'history', 'retirement'}:
         raise ValueError('Complete typed predecessor binding required')
     repo = live_pilot.safe_path(repo)

@@ -318,12 +318,11 @@ _PREDECESSOR_DEPTH = ContextVar('nested_predecessor_validation_depth', default=0
 def validate_predecessor(repo, plan):
     """Read-only original-byte, closure, permanent-fence and clock validation.
 
-    A top-level call always rechecks its immediate predecessor's usage, fence,
-    STOP bytes, ownership and closure references. Re-entries reached from inside
-    another predecessor proof (each nested campaign.validate/wave_spec/_context
-    re-enters the whole older retired chain, multiplying cost per successor)
-    reuse a successful proof of the identical plan bytes for the outer operation
-    only; outside a scope or after a failure they are fully recomputed.
+    The predecessor is permanently retired before this reader is admitted.
+    Reuse its successful proof for one outer operation, including sibling
+    calls from recovery authority checks. Nothing survives the operation.
+    Current campaign admission, resource ownership and budget checks remain
+    in their live execution paths. A new operation rechecks historical bytes.
     """
     predecessor = plan.get('predecessor')
     if not predecessor:
@@ -331,8 +330,6 @@ def validate_predecessor(repo, plan):
     depth = _PREDECESSOR_DEPTH.get()
     token = _PREDECESSOR_DEPTH.set(depth + 1)
     try:
-        if depth == 0:
-            return _validate_predecessor(repo, plan)
         key = ('nested-predecessor-campaign', str(live_pilot.safe_path(repo)), _digest(plan))
         return validate_predecessor_once(key, lambda: _validate_predecessor(repo, plan))
     finally:

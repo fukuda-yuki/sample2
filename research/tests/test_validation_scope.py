@@ -100,7 +100,7 @@ class NestedPredecessorMemoTests(unittest.TestCase):
         self.ct = campaign_transition
         self.repo = os.path.abspath('.')
         self.calls = []
-        self.fail = set()
+        self.fail_names = set()
         def ref(name):
             return dict(predecessor=dict(plan=dict(path=name, sha256=name), source_repo=self.repo,
                                          history={}, retirement={}))
@@ -108,7 +108,7 @@ class NestedPredecessorMemoTests(unittest.TestCase):
         def fake(repo, plan):
             name = plan['predecessor']['plan']['sha256']
             self.calls.append(name)
-            if name in self.fail:
+            if name in self.fail_names:
                 raise ValueError('Original STOP bytes changed')
             if name == 'top':
                 for _ in range(3):  # campaign.validate + wave_spec + _context per old wave
@@ -119,11 +119,11 @@ class NestedPredecessorMemoTests(unittest.TestCase):
         patcher = patch.object(campaign_transition, '_validate_predecessor', side_effect=fake)
         patcher.start(); self.addCleanup(patcher.stop)
 
-    def test_top_level_is_always_live_and_nested_chain_reused_per_operation(self):
+    def test_retired_chain_including_sibling_calls_is_reused_per_operation(self):
         with validation_scope():
             self.assertTrue(self.ct.validate_predecessor(self.repo, self.top))
             self.assertTrue(self.ct.validate_predecessor(self.repo, self.top))
-        self.assertEqual(self.calls, ['top', 'middle', 'root', 'top'])
+        self.assertEqual(self.calls, ['top', 'middle', 'root'])
 
     def test_next_operation_and_unscoped_calls_recheck_everything(self):
         with validation_scope():
@@ -137,16 +137,16 @@ class NestedPredecessorMemoTests(unittest.TestCase):
         self.assertEqual(self.calls.count('root'), 3)
 
     def test_nested_failure_is_raised_and_never_cached(self):
-        self.fail.add('root')
+        self.fail_names.add('root')
         with validation_scope():
             with self.assertRaisesRegex(ValueError, 'STOP bytes changed'):
                 self.ct.validate_predecessor(self.repo, self.top)
-            self.fail.clear()
+            self.fail_names.clear()
             self.assertTrue(self.ct.validate_predecessor(self.repo, self.top))
         self.assertEqual(self.calls, ['top', 'middle', 'root', 'top', 'middle', 'root'])
 
     def test_depth_resets_after_exception(self):
-        self.fail.add('top')
+        self.fail_names.add('top')
         with self.assertRaises(ValueError):
             self.ct.validate_predecessor(self.repo, self.top)
         self.assertEqual(self.ct._PREDECESSOR_DEPTH.get(), 0)

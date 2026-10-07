@@ -788,12 +788,24 @@ def reconcile_recovery(repo,path,wave_path,recovery_closure_ref):
     verify_closure(repo,path,wave_path,target)
     with pair_execution.exclusive(root/'_allocation'):
         existing=ledger(p)
+        target_ref=live_pilot.reference(target)
         for n in w['pairs']:
             decision=value['decisions'][str(n)]
-            if not any(e['kind']=='pair_recovery_decision' and e.get('slot')==n and e.get('wave')==wave_ref for e in existing):
+            prior=[e for e in existing if e['kind']=='pair_recovery_decision' and e.get('slot')==n and e.get('wave')==wave_ref]
+            if not prior:
                 pair_execution.append(root/'attempts.jsonl',dict(kind='pair_recovery_decision',slot=n,
-                    wave=wave_ref,decision=decision,closure=live_pilot.reference(target),
+                    wave=wave_ref,decision=decision,closure=target_ref,
                     not_before=value['retry_not_before']))
+            elif target.name=='recovery-closure.json' and not any(e.get('closure')==target_ref for e in prior):
+                # Append-only supersession by the single verified second recovery
+                # of the same wave; the earlier decision and closure stay intact.
+                first=prior[-1]
+                if first.get('closure')!=live_pilot.reference(directory/'closure.json'):
+                    raise ValueError('Superseded recovery decision is not the wave closure decision')
+                pair_execution.append(root/'attempts.jsonl',dict(kind='pair_recovery_decision',slot=n,
+                    wave=wave_ref,decision=decision,closure=target_ref,
+                    not_before=value['retry_not_before'],
+                    supersedes=dict(closure=first['closure'],disposition=first['decision']['disposition'])))
             if decision['disposition']=='accept_same_attempt' and not any(
                     e['kind']=='pair_accepted' and e.get('slot')==n for e in existing):
                 attempt=next(e['pair_attempt'] for e in existing if e['kind']=='pair_attempt_reserved'

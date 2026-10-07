@@ -10,7 +10,10 @@ provider failure and does not authorize a quality-based replacement.
 
 The driver can select unattempted slots while an earlier slot is held. Existing
 wave closure, owned-resource release, per-slot retry eligibility and campaign
-STOP admission checks still apply. Held slots are not counted as accepted and
+STOP admission checks still apply. A new explicit held-slot admission policy
+clears only that recovered wave's technical STOP after verified owned recovery;
+historical policies and explicit user/operator STOPs retain their semantics.
+Held slots are not counted as accepted and
 remain visible when all other initial slots have been attempted.
 
 The acquisition checkout and original attempts remain unchanged. Use the

@@ -14,6 +14,31 @@ from research import catalog_delivery
 
 
 class CampaignTests(unittest.TestCase):
+    def test_verified_held_recovery_is_isolated_only_under_new_policy(self):
+        from research import campaign_recovery
+        for new_policy in (False,True):
+            with self.subTest(new_policy=new_policy),tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp);plan=root/'plan.json';wave=root/'waves/one/spec.json'
+                c.util.write_new_json(plan,{})
+                c.util.write_new_json(root/'allocation.json',dict(campaign=c.live_pilot.reference(plan)))
+                c.util.write_new_json(wave,{})
+                c.util.write_new_json(root/'recovery.json',{})
+                p=dict(batch=tmp,policy=c.policy() if new_policy else c.historical_owned_policy())
+                w=dict(pairs=[1],epoch_plan={})
+                ref=c.live_pilot.reference(root/'recovery.json')
+                c.util.write_new_json(root/'_control/dispatch-stop.json',dict(reason='RuntimeError',
+                    plan_sha256=c.util.sha256_file(plan),wave_sha256=c.util.sha256_file(wave)))
+                decision=dict(decisions={'1':{'disposition':'held'}},retry_not_before='2026-10-07T00:00:00+00:00')
+                with patch.object(c,'validate',return_value=p),patch.object(c,'wave_spec',return_value=w),\
+                        patch.object(c,'verify_closure',return_value=True),\
+                        patch.object(campaign_recovery,'validate_closure',return_value=decision):
+                    result=c.reconcile_recovery(root,plan,wave,ref)
+                    self.assertEqual(result['clearance'],new_policy)
+                rows=c.ledger(p)
+                self.assertFalse(any(e['kind']=='pair_accepted' for e in rows))
+                self.assertEqual(rows[-1]['decision']['disposition'],'held')
+                self.assertTrue((root/'_control/dispatch-stop.json').exists())
+
     def test_cancelled_null_usage_is_retained_as_unknown_beside_lower_bound(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);run=root/'pair-1/run'
@@ -201,13 +226,16 @@ class CampaignTests(unittest.TestCase):
             catalog_delivery.publish(Path('.'),'arbitrary-001','a'*40,tag_prefix='arbitrary-')
 
     def test_owned_policy_changes_only_next_wave_admission(self):
-        owned,legacy=c.policy(),c.legacy_policy()
+        owned,legacy=c.historical_owned_policy(),c.legacy_policy()
         self.assertEqual(owned['next_wave_requires'],c.OWNED_NEXT_WAVE)
         self.assertEqual(legacy['next_wave_requires'],c.LEGACY_NEXT_WAVE)
         self.assertEqual({k:v for k,v in owned.items() if k!='next_wave_requires'},
                          {k:v for k,v in legacy.items() if k!='next_wave_requires'})
         self.assertFalse(owned['balance']);self.assertFalse(owned['paid_fallback'])
         self.assertTrue(c.owned_policy({'policy':owned}));self.assertFalse(c.owned_policy({'policy':legacy}))
+        self.assertEqual(c.policy(),dict(owned,
+            held_attempts='retain_unaccepted_after_verified_owned_recovery_continue_other_slots'))
+        self.assertTrue(c.owned_policy({'policy':c.policy()}))
 
     def test_observer_snapshot_retries_only_transient_permission_denial(self):
         monitor=Mock();monitor.snapshot.side_effect=[PermissionError('sharing violation'),{'host_healthy':True}]

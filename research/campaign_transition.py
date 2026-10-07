@@ -30,14 +30,14 @@ PRESERVED = ('campaign_id', 'slots', 'settings', 'bounds', 'base_plan',
 
 
 def _policy_preserved(new, old):
-    """Only the next-wave admission rule may move to the owned closure policy."""
+    """Allow only the recorded publication/held-slot admission upgrades."""
     new_policy, old_policy = new.get('policy'), old.get('policy')
     if new_policy == old_policy:
         return True
-    return (isinstance(new_policy, dict) and isinstance(old_policy, dict)
-            and new_policy == campaign.policy()
-            and {k: v for k, v in new_policy.items() if k != 'next_wave_requires'}
-            == {k: v for k, v in old_policy.items() if k != 'next_wave_requires'})
+    return (new_policy in (campaign.policy(), campaign.historical_owned_policy())
+            and old_policy in (campaign.legacy_policy(), campaign.historical_owned_policy())
+            and not (new_policy == campaign.historical_owned_policy()
+                     and old_policy == campaign.policy()))
 
 
 def _ref(path):

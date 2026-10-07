@@ -339,6 +339,10 @@ def watch_absence(path):
 
 
 # Only these production, read-only proofs are callable across process boundaries.
+from research.validation_scope import scoped_validation
+
+
+@scoped_validation
 def dispatch(name, arguments):
     if name == 'readiness':
         from research import acquisition_readiness

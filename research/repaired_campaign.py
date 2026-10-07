@@ -726,8 +726,8 @@ def _close_wave_owned(repo,path,wave_path,p,w,child,directory,launch,target):
         facts,current=_owned_pair_facts(child,n)
         batch=Path(child['batch'])/f'pair-{n}'
         archives={}
-        for condition,run in facts['runs'].items():
-            ref=run['archive_reference']
+        for condition,run_facts in facts['runs'].items():
+            ref=run_facts['archive_reference']
             preserve.verify(batch/'_archive',ref['package_id'],ref['sha256'])
             archives[condition]=dict(ref,verified=True)
         receipt=directory/f'owned-pair-{n}-completion.json'

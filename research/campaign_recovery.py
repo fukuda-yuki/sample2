@@ -36,6 +36,7 @@ CONTROLLER_MINIMUM = frozenset(('research/campaign_recovery.py',
 INTENT_FIELDS = ('kind', 'campaign', 'wave', 'source_commit', 'recovery_controller',
     'launcher_closure', 'original_paths', 'original_inventory',
     'initial_logical_denominator', 'model_calls', 'acquisition_count_increment')
+TECHNICAL_RETRY_POLICY = 'preserve_unknown_usage_retry_confirmed_technical_fault_v1'
 
 
 def complete_byte_inventory(root):
@@ -358,18 +359,21 @@ def _technical(root, case, usage):
     return facts
 
 
-def decide_pair(arms):
+def decide_pair(arms, retry_policy=None):
     """Pure same-attempt rule; no arm borrowing or quality-based replacement."""
     if set(arms) != {'explore', 'preload'}:
         raise ValueError('Exactly the two original attempt arms required')
+    if retry_policy not in (None, TECHNICAL_RETRY_POLICY):
+        raise ValueError('Unknown technical retry policy')
     valid = [a['observation'].get('classification') in VALID or a.get('assessment_adopted') is True
              or a.get('assessment_valid_product_failure') is True
              for a in arms.values()]
     if all(valid): return 'accept_same_attempt'
     for arm in arms.values():
         usage = arm['usage']
-        if (usage['send_evidence'] == 'unknown' or usage['journal_errors'] or usage['transmission_issues']
-                or arm.get('opportunity') not in ('already_observed', 'exhausted', 'not_applicable')):
+        if (arm.get('opportunity') not in ('already_observed', 'exhausted', 'not_applicable')
+                or (retry_policy is None and (usage['send_evidence'] == 'unknown'
+                    or usage['journal_errors'] or usage['transmission_issues']))):
             return 'held'
     # At least one invalid arm needs positively classified technical evidence.
     # An already valid product failure is never itself a replacement reason.
@@ -507,7 +511,8 @@ def recover_wave(repo, campaign_plan_path, wave_path, destination):
         intent = dict(kind=KIND, campaign=ctx['campaign'], wave=ctx['wave_ref'],
             source_commit=ctx['plan']['source_commit'], recovery_controller=controller, launcher_closure=closure,
             original_paths={n:str(p) for n,p in sources.items()}, original_inventory=inventory,
-            initial_logical_denominator=100, model_calls=0, acquisition_count_increment=0)
+            initial_logical_denominator=100, model_calls=0, acquisition_count_increment=0,
+            retry_policy=TECHNICAL_RETRY_POLICY)
         _write(destination/'intent.json', intent)
         archive_path = destination/'original-archive.json'
         if archive_path.exists():
@@ -527,7 +532,7 @@ def recover_wave(repo, campaign_plan_path, wave_path, destination):
         for pair in ctx['wave']['assignments']:
             arms = {c['condition']:_assess_arm(ctx,c,sources['pair-'+str(pair['pair'])]/c['run_id'],
                 destination/'arms'/c['run_instance_id']) for c in pair['cases']}
-            decisions[str(pair['pair'])] = dict(disposition=decide_pair(arms),
+            decisions[str(pair['pair'])] = dict(disposition=decide_pair(arms, intent['retry_policy']),
                 observations={k:a['observation'] for k,a in arms.items()},
                 assessments={k:a['assessment'] for k,a in arms.items() if a.get('assessment')},
                 arms=arms, run_instances={c['condition']:c['run_instance_id'] for c in pair['cases']},
@@ -627,8 +632,11 @@ def _validate_recovery_evidence(ctx,path,value):
             or value.get('source_commit')!=ctx['plan']['source_commit']):
         raise ValueError('Foreign recovery decision')
     intent = util.read_json(path.parent/'intent.json')
-    if set(intent) != set(INTENT_FIELDS) or intent != {k:value.get(k) for k in INTENT_FIELDS}:
+    fields = (*INTENT_FIELDS, 'retry_policy') if 'retry_policy' in intent else INTENT_FIELDS
+    if set(intent) != set(fields) or intent != {k:value.get(k) for k in fields}:
         raise ValueError('Recovery decision differs from its immutable intent')
+    if value.get('retry_policy') not in (None, TECHNICAL_RETRY_POLICY):
+        raise ValueError('Unknown technical retry policy')
     _validate_controller(value.get('recovery_controller'), ctx['plan'])
     for name, original in value['original_paths'].items():
         current=complete_byte_inventory(live_pilot.safe_path(original))
@@ -686,7 +694,7 @@ def _validate_recovery_evidence(ctx,path,value):
             if 'no_send_fault' in arm and (not arm['no_send_fault'] or arm['no_send_fault']!=
                     _no_send_fault(ctx,case,root,arm['usage'],arm['observation'])):
                 raise ValueError('Confirmed no-send evidence differs')
-        if decision['disposition'] != decide_pair(decision['arms']):
+        if decision['disposition'] != decide_pair(decision['arms'], value.get('retry_policy')):
             raise ValueError('Unsupported replacement or adoption decision')
         arms=decision['arms']
         complete=all(a.get('assessment_adopted') or a['observation'].get('classification')=='already_evaluable' for a in arms.values())

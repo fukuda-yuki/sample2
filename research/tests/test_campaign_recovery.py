@@ -43,6 +43,19 @@ class DecisionTests(unittest.TestCase):
         arms={'explore':arm('held_unresolved_evidence',technical=True,send='unknown',opportunity='not_applicable'),'preload':arm()}
         self.assertEqual(subject.decide_pair(arms),'held')
 
+    def test_versioned_technical_retry_retains_unknown_usage(self):
+        arms={'explore':arm('held_unresolved_evidence',technical=True,send='unknown',opportunity='not_applicable'),'preload':arm()}
+        arms['explore']['usage']['transmission_issues'] = ['terminal_missing']
+        before = copy.deepcopy(arms)
+        self.assertEqual(subject.decide_pair(arms, subject.TECHNICAL_RETRY_POLICY), 'replacement_eligible')
+        self.assertEqual(arms, before)
+        self.assertEqual(subject.decide_pair(arms), 'held')
+
+    def test_versioned_retry_cannot_replace_low_quality_or_unclassified_failure(self):
+        self.assertEqual(subject.decide_pair({'explore':arm(),'preload':arm()}, subject.TECHNICAL_RETRY_POLICY), 'accept_same_attempt')
+        arms={'explore':arm('held_unresolved_evidence',send='unknown',opportunity='not_applicable'),'preload':arm()}
+        self.assertEqual(subject.decide_pair(arms, subject.TECHNICAL_RETRY_POLICY), 'held')
+
     def test_ambiguous_saved_assessment_holds(self):
         arms={'explore':arm('technical_observation_incomplete',technical=True,opportunity='ambiguous'),'preload':arm()}
         self.assertEqual(subject.decide_pair(arms),'held')

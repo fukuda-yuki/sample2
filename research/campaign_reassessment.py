@@ -64,7 +64,9 @@ def _controllers(repo):
 
 def _source_binding(repo, source, main_plan_ref, *, observe_resources):
     path = live_pilot.checked(main_plan_ref)
-    plan = acquisition_readiness.verify_main_phase(path, repo)
+    # The terminal verifier below walks this exact original Run. Walking every
+    # other pair in the epoch here grows recovery time with unrelated data.
+    plan = acquisition_readiness.verify_main_phase(path, repo, check_tree=False)
     if 'campaign_authority' in plan:
         from research import repaired_campaign
         repaired_campaign.validate_readiness(repo, live_pilot.checked(plan['campaign_authority']))

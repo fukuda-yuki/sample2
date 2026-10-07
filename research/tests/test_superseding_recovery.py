@@ -22,99 +22,67 @@ def _usage(**over):
     return value
 
 
-class PreDispatchFaultTests(unittest.TestCase):
+class NoSendRuleTests(unittest.TestCase):
+    """Single rule: confirmed no-send is replacement evidence; any recorded
+    request/usage or undeterminable send status stays held."""
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
-        base = Path(self.tmp.name)
-        self.batch = base/'epoch'; self.wave_dir = base/'waves'/'w1'
-        wave_path = _write(self.wave_dir/'spec.json', {'wave': 1})
-        plan = _write(base/'plan.json', {'plan': 1}); epoch = _write(base/'epoch.json', {'epoch': 1})
-        self.case = dict(pair=7, run_id='T-preload-1', run_instance_id='a'*32, condition='preload')
-        self.root = self.batch/'pair-7'/self.case['run_id']
-        (self.batch/'pair-7'/'_control').mkdir(parents=True)
-        self.ctx = dict(epoch={'batch': str(self.batch)}, wave_path=wave_path, wave_ref=live_pilot.reference(wave_path),
-                        campaign=live_pilot.reference(plan), wave={'epoch_plan': live_pilot.reference(epoch), 'pairs': [6, 7]})
-        self.launch = dict(kind='repaired_campaign_wave_launcher_v1_result', wave=self.ctx['wave_ref'],
-                           plan=self.ctx['campaign'], epoch_plan=self.ctx['wave']['epoch_plan'], pairs=[6, 7],
-                           operational_complete=False, stop_requested=True, reason='campaign_stop',
-                           stop={'reason': 'campaign_stop', 'durable_stop_paths': ['x']},
-                           child={'exit_code': 0, 'exit_confirmed': True}, observer_closure={'confirmed': True},
-                           errors=[], owned_runs=[self.not_allocated()])
-        self._launch()
+        self.batch = Path(self.tmp.name)/'epoch'
+        self.case = dict(pair=6, run_id='T-explore-1', run_instance_id='c'*32, condition='explore')
+        self.root = self.batch/'pair-6'/self.case['run_id']
+        self.ctx = dict(epoch={'batch': str(self.batch)})
 
-    def not_allocated(self, **over):
-        return {**dict(run_id=self.case['run_id'], run_instance_id='a'*32, status='not_allocated', stop_attempted=False,
-                       closure_confirmed=False, unknown=False, helper=None), **over}
+    def fault(self, usage=None):
+        return recovery._no_send_fault(self.ctx, self.case, self.root, usage or _usage(), HELD)
 
-    def _launch(self, **over):
-        _write(self.wave_dir/'_launcher'/'result.json', {**self.launch, **over})
+    def test_never_created_run_is_confirmed_no_send(self):
+        self.assertEqual(self.fault()['category'], 'confirmed_no_send')
 
-    def fault(self, usage=None, observation=HELD):
-        return recovery._pre_dispatch_fault(self.ctx, self.case, self.root, usage or _usage(), observation)
+    def test_started_run_with_empty_journals_is_confirmed_no_send(self):
+        (self.root/'usage'/'raw').mkdir(parents=True); (self.root/'usage'/'events.jsonl').write_bytes(b'')
+        (self.root/'usage'/'raw'/'started.jsonl').write_bytes(b'')
+        _write(self.root/'usage'/'normalized.json', {'observed_request_count': 0, 'observed_call_count': 0,
+               'execution_evidence': {'send_evidence': 'known_no_send', 'model_called': False, 'started_count': 0}})
+        self.assertIsNotNone(self.fault(_usage(source_journals={'started': {'path': 'x', 'sha256': 'y'}})))
 
-    def test_all_conditions_give_positive_evidence(self):
-        fact = self.fault()
-        self.assertEqual(fact['category'], 'pre_dispatch_campaign_fault')
-        self.assertEqual(fact['observed_requests'], 0)
-
-    def test_prepared_unstarted_manifest_still_pre_dispatch(self):
-        _write(self.root/'manifest.json', dict(run_id=self.case['run_id'], run_instance_id='a'*32, started_at=None, end_reason=None))
-        self.assertIsNotNone(self.fault())
-        _write(self.root/'manifest.json', dict(run_id=self.case['run_id'], run_instance_id='a'*32,
-                                                started_at='2026-10-07T00:00:00+00:00', end_reason=None))
-        self.assertIsNone(self.fault())
-
-    def test_single_recorded_request_stays_held(self):
+    def test_one_request_or_any_tokens_stays_held(self):
         self.assertIsNone(self.fault(_usage(observed_requests=1)))
-
-    def test_any_usage_stays_held(self):
         self.assertIsNone(self.fault(_usage(observed_tokens=dict(input_tokens=1, output_tokens=0))))
-        self.assertIsNone(self.fault(_usage(observed_tokens=dict(input_tokens=0, output_tokens=3))))
-        self.assertIsNone(self.fault(_usage(total_tokens=5)))
+        self.assertIsNone(self.fault(_usage(observed_tokens=dict(input_tokens=0, output_tokens=2))))
+        self.assertIsNone(self.fault(_usage(total_tokens=3)))
+        self.assertIsNone(self.fault(_usage(technical_evidence=[{'category': 'provider'}])))
 
-    def test_unconfirmed_send_or_journal_stays_held(self):
-        self.assertIsNone(self.fault(_usage(send_evidence='unknown')))
-        self.assertIsNone(self.fault(_usage(source_journals={'started': {'path': 'x', 'sha256': 'y'}})))
-        self.assertIsNone(self.fault(_usage(transmission_issues=['unreconciled_request_terminal_inventory'])))
+    def test_recorded_usage_event_or_request_journal_stays_held(self):
+        _write(self.root/'usage'/'events.jsonl', {'request_id': 'r'})
+        self.assertIsNone(self.fault())
+        (self.root/'usage'/'events.jsonl').write_bytes(b'')
         _write(self.root/'usage'/'raw'/'started.jsonl', {'request_id': 'r'})
         self.assertIsNone(self.fault())
 
-    def test_dispatch_or_implementation_record_stays_held(self):
-        journal = self.batch/'pair-7'/'_control'/'pair-journal.jsonl'
-        with mock.patch.object(recovery.pair_execution, 'state', return_value={'dispatch': {self.case['run_id']: {}}, 'implementations': {}}):
-            journal.write_text('', encoding='utf-8')
-            self.assertIsNone(self.fault())
-        with mock.patch.object(recovery.pair_execution, 'state', return_value={'dispatch': {}, 'implementations': {self.case['run_id']: {}}}):
-            self.assertIsNone(self.fault())
-        journal.unlink()
-        for name in ('runtime.json', 'implementation-receipt.json'):
-            path = _write(self.root/name, {})
-            self.assertIsNone(self.fault()); path.unlink()
+    def test_normalized_usage_reporting_a_request_stays_held(self):
+        for value in ({'observed_request_count': 1}, {'observed_call_count': 1},
+                      {'execution_evidence': {'started_count': 1}}, {'execution_evidence': {'model_called': True}}):
+            _write(self.root/'usage'/'normalized.json', value)
+            self.assertIsNone(self.fault(), value)
 
-    def test_launcher_must_show_pre_dispatch_fault_and_release(self):
-        for over in (dict(operational_complete=True), dict(stop_requested=False), dict(reason='user_stop'),
-                     dict(child={'exit_confirmed': False}), dict(observer_closure={'confirmed': False}),
-                     dict(errors=['e']), dict(pairs=[6]),
-                     dict(owned_runs=[]), dict(owned_runs=[self.not_allocated(status='owned_allocated')]),
-                     dict(owned_runs=[self.not_allocated(unknown=True)]), dict(owned_runs=[self.not_allocated(stop_attempted=True)]),
-                     dict(owned_runs=[self.not_allocated(), self.not_allocated()]),
-                     dict(owned_runs=[self.not_allocated(run_instance_id='b'*32)])):
-            self._launch(**over)
-            self.assertIsNone(self.fault(), over)
-        (self.wave_dir/'_launcher'/'result.json').unlink()
+    def test_undeterminable_send_status_stays_held(self):
+        self.assertIsNone(self.fault(_usage(send_evidence='unknown')))
+        self.assertIsNone(self.fault(_usage(journal_errors=['invalid_json'])))
+        self.assertIsNone(self.fault(_usage(transmission_issues=['unreconciled_request_terminal_inventory'])))
+        (self.root/'usage').mkdir(parents=True); (self.root/'usage'/'normalized.json').write_bytes(b'{not json')
         self.assertIsNone(self.fault())
 
-    def test_non_held_observation_never_promoted(self):
-        self.assertIsNone(self.fault(observation={'classification': 'already_evaluable', 'model_calls': 0}))
+    def test_foreign_run_root_stays_held(self):
+        self.assertIsNone(recovery._no_send_fault(self.ctx, self.case, self.batch/'pair-7'/self.case['run_id'], _usage(), HELD))
 
 
 class DecidePairTests(unittest.TestCase):
     def arm(self, fault):
         value = dict(observation=HELD, usage=_usage(), opportunity='not_applicable', technical_evidence=[])
-        if fault: value['pre_dispatch_fault'] = {'category': 'pre_dispatch_campaign_fault'}
+        if fault: value['no_send_fault'] = {'category': 'confirmed_no_send'}
         return value
 
-    def test_pre_dispatch_fault_is_replacement_evidence(self):
+    def test_confirmed_no_send_is_replacement_evidence(self):
         self.assertEqual(recovery.decide_pair({'explore': self.arm(True), 'preload': self.arm(True)}), 'replacement_eligible')
 
     def test_arm_without_evidence_keeps_pair_held(self):
@@ -211,117 +179,6 @@ class LedgerSupersessionTests(unittest.TestCase):
         out = self.reconcile('held')
         self.assertFalse(out['clearance'])
         self.assertEqual(self.rows()[-1]['decision']['disposition'], 'held')
-
-
-class GatewayStartFaultTests(unittest.TestCase):
-    """Dispatched Run whose gateway never started: zero-send evidence only."""
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
-        base = Path(self.tmp.name)
-        self.batch = base/'epoch'; self.wave_dir = base/'waves'/'w1'
-        wave_path = _write(self.wave_dir/'spec.json', {'wave': 1})
-        plan = _write(base/'plan.json', {'plan': 1}); epoch = _write(base/'epoch.json', {'epoch': 1})
-        self.case = dict(pair=6, run_id='T-explore-1', run_instance_id='c'*32, condition='explore')
-        self.root = r = self.batch/'pair-6'/self.case['run_id']
-        self.journal = _write(self.batch/'pair-6'/'_control'/'pair-journal.jsonl', {})
-        self.ctx = dict(epoch={'batch': str(self.batch)}, wave_path=wave_path, wave_ref=live_pilot.reference(wave_path),
-                        campaign=live_pilot.reference(plan), wave={'epoch_plan': live_pilot.reference(epoch), 'pairs': [6, 7]})
-        self.run = dict(run_id=self.case['run_id'], run_instance_id='c'*32, status='owned_allocated', stop_attempted=True,
-                        closure_confirmed=True, unknown=False)
-        self.launch = dict(kind='repaired_campaign_wave_launcher_v1_result', wave=self.ctx['wave_ref'],
-                           plan=self.ctx['campaign'], epoch_plan=self.ctx['wave']['epoch_plan'], pairs=[6, 7],
-                           operational_complete=False, stop_requested=True, reason='campaign_stop',
-                           stop={'reason': 'campaign_stop', 'durable_stop_paths': ['x']},
-                           child={'exit_confirmed': True}, observer_closure={'confirmed': True}, errors=[], owned_runs=[self.run])
-        _write(self.wave_dir/'_launcher'/'result.json', self.launch)
-        ident = dict(run_id=self.case['run_id'], run_instance_id='c'*32)
-        _write(r/'manifest.json', {**ident, 'end_reason': 'environment_failure', 'stop_confirmed': True, 'started_at': 't'})
-        _write(r/'evidence'/'runtime-error.json', {'type': 'RuntimeError', 'message': 'Gateway failed to start'})
-        (r/'evidence'/'gateway.log').write_bytes(b'')
-        (r/'usage'/'raw').mkdir(parents=True); (r/'usage'/'events.jsonl').write_bytes(b'')
-        _write(r/'usage'/'normalized.json', {**ident, 'observed_request_count': 0, 'observed_call_count': 0, 'raw_files': [],
-               'input_reached': False, 'execution_evidence': {'send_evidence': 'known_no_send', 'model_called': False,
-               'started_count': 0, 'terminal_count': 0, 'saved_response_count': 0}})
-        _write(r/'implementation-receipt.json', {**ident, 'stop_confirmed': True, 'collection_status': 'fixed', 'raw': {}})
-        _write(r/'stop-result.json', {'run_id': self.case['run_id'], 'stop_confirmed': True, 'network_cleanup':
-               {'run_instance_id': 'c'*32, 'confirmed': True, 'status': 'removed'}})
-        _write(r/'runtime.json', ident)
-        self.state = {'dispatch': {self.case['run_id']: dict(self.case)}, 'implementations': {}}
-
-    def fault(self, usage=None, state=None):
-        with mock.patch.object(recovery.pair_execution, 'state', return_value=state or self.state):
-            return recovery._pre_dispatch_fault(self.ctx, self.case, self.root, usage or _usage(), HELD)
-
-    def relaunch(self, **over):
-        _write(self.wave_dir/'_launcher'/'result.json', {**self.launch, **over})
-
-    def test_gateway_never_started_zero_send_is_evidence(self):
-        fact = self.fault()
-        self.assertEqual(fact['category'], 'gateway_start_campaign_fault')
-        self.assertEqual((fact['observed_requests'], fact['observed_tokens']), (0, 0))
-
-    def test_any_gateway_log_line_stays_held(self):
-        (self.root/'evidence'/'gateway.log').write_bytes(b'listening\n')
-        self.assertIsNone(self.fault())
-
-    def test_any_usage_event_or_journal_stays_held(self):
-        (self.root/'usage'/'events.jsonl').write_bytes(b'{"request_id":"r"}\n')
-        self.assertIsNone(self.fault())
-        (self.root/'usage'/'events.jsonl').write_bytes(b'')
-        _write(self.root/'usage'/'raw'/'started.jsonl', {'request_id': 'r'})
-        self.assertIsNone(self.fault())
-
-    def test_requests_or_tokens_stay_held(self):
-        self.assertIsNone(self.fault(_usage(observed_requests=1)))
-        self.assertIsNone(self.fault(_usage(observed_tokens=dict(input_tokens=7, output_tokens=0))))
-        self.assertIsNone(self.fault(_usage(source_journals={'events': {'path': 'x', 'sha256': 'y'}})))
-        n = util_read(self.root/'usage'/'normalized.json')
-        _write(self.root/'usage'/'normalized.json', {**n, 'observed_request_count': 1})
-        self.assertIsNone(self.fault())
-        _write(self.root/'usage'/'normalized.json', {**n, 'execution_evidence': {**n['execution_evidence'], 'started_count': 1}})
-        self.assertIsNone(self.fault())
-        _write(self.root/'usage'/'normalized.json', {**n, 'execution_evidence': {**n['execution_evidence'], 'model_called': True}})
-        self.assertIsNone(self.fault())
-
-    def test_implementation_record_stays_held(self):
-        self.assertIsNone(self.fault(state={**self.state, 'implementations': {self.case['run_id']: {}}}))
-        r = util_read(self.root/'implementation-receipt.json')
-        _write(self.root/'implementation-receipt.json', {**r, 'raw': {'opencode': 'x'}})
-        self.assertIsNone(self.fault())
-
-    def test_unknown_or_unconfirmed_closure_stays_held(self):
-        for over in (dict(unknown=True), dict(closure_confirmed=False), dict(stop_attempted=False), dict(status='not_allocated')):
-            self.relaunch(owned_runs=[{**self.run, **over}])
-            self.assertIsNone(self.fault(), over)
-        self.relaunch(observer_closure={'confirmed': False}); self.assertIsNone(self.fault())
-        self.relaunch()
-        s = util_read(self.root/'stop-result.json')
-        _write(self.root/'stop-result.json', {**s, 'network_cleanup': {**s['network_cleanup'], 'status': 'retained'}})
-        self.assertIsNone(self.fault())
-
-    def test_missing_campaign_fault_stop_stays_held(self):
-        for over in (dict(reason='user_stop'), dict(stop={'reason': 'campaign_stop', 'durable_stop_paths': []}),
-                     dict(stop={'reason': 'operator_stop', 'durable_stop_paths': ['x']}), dict(stop_requested=False),
-                     dict(operational_complete=True)):
-            self.relaunch(**over)
-            self.assertIsNone(self.fault(), over)
-        (self.wave_dir/'_launcher'/'result.json').unlink()
-        self.assertIsNone(self.fault())
-
-    def test_other_environment_failures_stay_held(self):
-        _write(self.root/'evidence'/'runtime-error.json', {'type': 'RuntimeError', 'message': 'Worker failed'})
-        self.assertIsNone(self.fault())
-        _write(self.root/'evidence'/'runtime-error.json', {'type': 'RuntimeError', 'message': 'Gateway failed to start'})
-        m = util_read(self.root/'manifest.json')
-        _write(self.root/'manifest.json', {**m, 'end_reason': 'timeout'})
-        self.assertIsNone(self.fault())
-
-    def test_binding_must_match_case(self):
-        self.assertIsNone(self.fault(state={**self.state, 'dispatch': {self.case['run_id']: {**self.case, 'run_instance_id': 'd'*32}}}))
-
-
-def util_read(path):
-    return json.loads(path.read_text(encoding='utf-8'))
 
 
 if __name__ == '__main__':

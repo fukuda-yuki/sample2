@@ -857,16 +857,39 @@ def _inherited_decision(p,decision):
     return decision in campaign_transition.history_events(p)
 
 
+def _inherited_owner(repo,p,wave_ref):
+    """Retired campaign (plan, pinned checkout) whose retained history holds wave_ref.
+
+    Walks the hash-checked predecessor bindings back from the direct predecessor,
+    so a decision recorded several administrative successions earlier (with
+    wave-less intermediate successors) is verified under its own campaign."""
+    from research import campaign_transition
+    seen=set()
+    while True:
+        old_repo,old_path,pred=_predecessor_context(repo,p)
+        history,_=campaign_transition._history(pred['history'])
+        if wave_ref in [row['wave'] for row in history['waves']]:
+            return old_repo,old_path
+        if pred['plan']['sha256'] in seen:
+            raise ValueError('Foreign inherited recovery decision')
+        seen.add(pred['plan']['sha256'])
+        try:
+            older=util.read_json(old_path)
+        except (OSError,ValueError):
+            raise ValueError('Foreign inherited recovery decision')
+        if not isinstance(older,dict) or not older.get('predecessor'):
+            raise ValueError('Foreign inherited recovery decision')
+        repo,p=old_repo,older
+
+
 def _verify_inherited_recovery(repo,p,saved,saved_ref):
     """A replacement decision that the direct predecessor itself recorded for
     one of its retained waves is verified under that predecessor's own campaign
     plan and pinned checkout, exactly as the predecessor verified it."""
-    from research import campaign_recovery, campaign_transition
-    old_repo,old_path,pred=_predecessor_context(repo,p)
-    history,_=campaign_transition._history(pred['history'])
-    if (not isinstance(saved,dict) or set(saved)!={'wave','closed','recovery'} or saved.get('closed') is not True
-            or saved['wave'] not in [row['wave'] for row in history['waves']]):
+    from research import campaign_recovery
+    if not isinstance(saved,dict) or set(saved)!={'wave','closed','recovery'} or saved.get('closed') is not True:
         raise ValueError('Foreign inherited recovery decision')
+    old_repo,old_path=_inherited_owner(repo,p,saved['wave'])
     location=live_pilot.checked(saved_ref);wave_path=live_pilot.checked(saved['wave'])
     if location.parent!=wave_path.parent or location.name not in ('closure.json','recovery-closure.json'):
         raise ValueError('Foreign inherited recovery decision')

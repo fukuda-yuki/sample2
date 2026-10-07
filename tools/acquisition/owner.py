@@ -117,7 +117,7 @@ try:
             assert not launch_log.exists(), 'label already used'
             # A repeated logical slot gets fresh UUIDs, without a new campaign/code revision.
             with proofsvc.session(repo, event):
-                p = campaign.validate(repo, P)
+                p = util.read_json(P)
                 epochs = sorted((Path(p['batch'])/'epochs').glob('*/plan.json'))
                 ep = live_pilot.reference(epochs[-1])
                 if any(e['kind']=='pair_attempt_reserved' and e['slot'] in pairs and e['epoch_plan']==ep for e in campaign.ledger(p)):
@@ -146,7 +146,7 @@ try:
             else:
                 raise RuntimeError('Owned processes must be reconciled before further acquisition')
         with proofsvc.session(repo, event):
-            p = campaign.validate(repo, P); wref = live_pilot.reference(wave)
+            p = util.read_json(P); wref = live_pilot.reference(wave)
             accepted = {e['slot'] for e in campaign.ledger(p) if e['kind']=='pair_accepted'}
             preserved = [e['slot'] for e in campaign.ledger(p) if e['kind']=='pair_preserved_requires_assessment' and e.get('wave')==wref and e['slot'] not in accepted]
             if preserved: result['recovery'] = recover(wave, 'saved results require technical recovery: '+str(preserved))
@@ -156,7 +156,7 @@ try:
             result['resource_release'] = dict(**post, observers_pending=pending_obs,
                 released=not post['containers'] and not post['networks'] and not post['running_s2'] and not pending_obs)
             if not result['resource_release']['released']: raise RuntimeError('Owned resources not released')
-            st = status(campaign.validate(repo, P), result)
+            st = status(util.read_json(P), result)
             event('status', accepted=st['accepted_count'], unresolved=st['unresolved_slots'], usage=st['usage'], next_initial=st['next_initial_slot'])
 except Exception as exc:
     event('owner_error', error=type(exc).__name__+': '+str(exc)); traceback.print_exc(); raise

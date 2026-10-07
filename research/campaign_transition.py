@@ -24,8 +24,19 @@ from research.validation_scope import scoped_validation, validate_predecessor_on
 KIND = 'repaired_campaign_successor_v1'
 PIN = 'research/campaign_transition.py'
 SCOPE_PIN = 'research/validation_scope.py'
-PRESERVED = ('campaign_id', 'slots', 'settings', 'bounds', 'policy', 'base_plan',
+PRESERVED = ('campaign_id', 'slots', 'settings', 'bounds', 'base_plan',
              'storage_policy', 'readiness_source_repo')
+
+
+def _policy_preserved(new, old):
+    """Only the next-wave admission rule may move to the owned closure policy."""
+    new_policy, old_policy = new.get('policy'), old.get('policy')
+    if new_policy == old_policy:
+        return True
+    return (isinstance(new_policy, dict) and isinstance(old_policy, dict)
+            and new_policy == campaign.policy()
+            and {k: v for k, v in new_policy.items() if k != 'next_wave_requires'}
+            == {k: v for k, v in old_policy.items() if k != 'next_wave_requires'})
 
 
 def _ref(path):
@@ -267,7 +278,7 @@ def create_successor(*, repo, path, batch, predecessor_plan, predecessor_repo, a
         new = copy.deepcopy(old)
         new.update(source_commit=commit, source_pins=pins, batch=str(batch),
             protected_roots=list(dict.fromkeys(old['protected_roots']+[str(old_root), str(old_repo)])),
-            authorization_reference=authorization, created_at=run.now())
+            authorization_reference=authorization, created_at=run.now(), policy=campaign.policy())
         # The old executable already treats this explicit STOP as uncleared.
         # No existing STOP or clearance is changed. A failed subsequent write
         # therefore leaves the old campaign safely and permanently fenced.
@@ -314,7 +325,7 @@ def validate_predecessor(repo, plan):
     old_path = live_pilot.checked(predecessor['plan'])
     old = campaign.validate(old_repo, old_path)
     repaired_runtime._committed_files(old_repo, old['source_commit'], old['source_pins'])
-    if repo == old_repo or any(plan.get(k) != old.get(k) for k in PRESERVED):
+    if repo == old_repo or any(plan.get(k) != old.get(k) for k in PRESERVED) or not _policy_preserved(plan, old):
         raise ValueError('Successor changed original campaign identity/design/budget')
     root, old_root = live_pilot.safe_path(plan['batch']), live_pilot.safe_path(old['batch'])
     if root == old_root or root.is_relative_to(old_root) or old_root.is_relative_to(root):

@@ -29,6 +29,16 @@ BOUNDS = dict(max_pair_attempts=300, max_run_attempts=600, active_pairs=2,
     disk_free_min_bytes=8*1024**3)
 EXTRA_PINS = ('research/repaired_campaign.py', 'research/campaign_launcher.py',
               'research/campaign_reassessment.py','research/campaign_recovery.py')
+# Historical campaigns admitted the next wave only after an actual public
+# Release round trip. The owned policy (explicit user decision, 2026-10-07)
+# admits it after owned acquisition, evaluation, local archive and verified
+# resource release. Every other research rule is unchanged.
+LEGACY_NEXT_WAVE = 'actual_publication_restore_cleanup_and_owned_closure'
+OWNED_NEXT_WAVE = 'owned_acquisition_evaluation_archive_and_resource_release_closure'
+OWNED_CLOSURE_KIND = 'owned_operational_closure_v1'
+OWNED_PAIR_KIND = 'owned_pair_completion_receipt_v1'
+PREDECESSOR_RECOVERY_KIND = 'successor_predecessor_wave_recovery_v1'
+OBSERVER_READ_RETRIES = 5
 
 
 def document(ref):
@@ -67,7 +77,7 @@ def validate(repo, path):
     for old in [repo,*map(live_pilot.safe_path,p['protected_roots'])]:
         if live_pilot.within(root,old) or live_pilot.within(old,root):
             raise ValueError('Campaign overlaps protected source/data')
-    if p.get('policy') != policy():
+    if p.get('policy') not in (policy(), legacy_policy()):
         raise ValueError('Research acquisition policy changed')
     if p.get('storage_policy')!='new_campaign_ntfs_compression_originals_retained':
         raise ValueError('Explicit bounded new-root storage policy required')
@@ -79,13 +89,22 @@ def validate(repo, path):
     return p
 
 
-def policy():
+def policy(next_wave=OWNED_NEXT_WAVE):
     return dict(initial_denominator=100, quality_failure_is_valid=True,
         low_quality_replacement=False, ambiguous_send='reconcile_never_blind_resend',
         technical_failure='saved_same_version_assessment_before_whole_pair_replacement',
         cross_attempt_arm_composition=False, all_attempts_and_usage_retained=True,
-        next_wave_requires='actual_publication_restore_cleanup_and_owned_closure',
+        next_wave_requires=next_wave,
         balance=False, paid_fallback=False, purchases=False)
+
+
+def legacy_policy():
+    """Exact historical policy; retained plans keep validating unchanged."""
+    return policy(LEGACY_NEXT_WAVE)
+
+
+def owned_policy(p):
+    return p.get('policy') == policy()
 
 
 @scoped_validation
@@ -261,7 +280,10 @@ def _reserve_wave(repo,path,epoch_ref,pairs):
             decision=decisions[-1]
             saved=document(decision['closure'])
             from research import campaign_recovery
-            verified=campaign_recovery.validate_closure(repo,path,live_pilot.checked(saved['wave']),saved['recovery'])
+            if saved.get('kind')==PREDECESSOR_RECOVERY_KIND:
+                verified=_verify_predecessor_recovery(repo,path,p,saved,decision['closure'])
+            else:
+                verified=campaign_recovery.validate_closure(repo,path,live_pilot.checked(saved['wave']),saved['recovery'])
             if verified['decisions'][str(n)]!=decision['decision']:
                 raise ValueError('Recovery decision differs from immutable verified closure')
             if datetime.now(timezone.utc)<datetime.fromisoformat(decision['not_before']):
@@ -364,6 +386,18 @@ def observed_usage(p, exclude=()):
     return counts
 
 
+def _observer_snapshot(monitor):
+    """Bounded retry of a Windows sharing violation on the observer's atomic
+    status replacement. Staleness, binding and health checks are unchanged; a
+    persistent denial still raises and latches STOP."""
+    for attempt in range(OBSERVER_READ_RETRIES):
+        try:
+            return monitor.snapshot()
+        except PermissionError:
+            if attempt==OBSERVER_READ_RETRIES-1: raise
+            time.sleep(0.1*(attempt+1))
+
+
 class CampaignWatch(live_pilot.PilotWatch):
     def __init__(self,child,digest,campaign,prior,origin,owner_pid,wave_dir):
         super().__init__(child,digest,wall_started_at=origin)
@@ -436,7 +470,7 @@ class CampaignWatch(live_pilot.PilotWatch):
         if c['disk_free_bytes']<limits['disk_free_min_bytes']: raise RuntimeError('Disk floor')
         if c['http_inflight']>limits['http_inflight_max']: raise RuntimeError('Global HTTP overlap ceiling')
         for monitor in list(self.monitors):
-            sample=monitor.snapshot()
+            sample=_observer_snapshot(monitor)
             if sample.get('host_healthy') is not True or sample.get('resource_healthy') is not True:
                 raise RuntimeError('Independent observer unhealthy')
             for key,limit in self.plan['thresholds'].items():
@@ -537,6 +571,11 @@ def verify_closure(repo,path,wave_path,closure_path):
         from research import campaign_recovery
         campaign_recovery.validate_closure(repo,path,wave_path,c['recovery'])
         return True
+    if c.get('closure_kind')==OWNED_CLOSURE_KIND:
+        if not owned_policy(validate(repo,path)):
+            raise ValueError('Owned wave closure requires the owned closure campaign policy')
+        _verify_owned_closure(repo,path,wave_path,w,c)
+        return True
     from research import acquisition_sharing
     child=document(w['epoch_plan'])
     if set(c.get('gates',{}))!={str(n) for n in w['pairs']}:raise ValueError('Both wave gates required')
@@ -568,6 +607,8 @@ def _close_wave(repo,path,wave_path):
     if target.exists():
         verify_closure(repo,path,wave_path,target)
         return _record_closed_wave(p,w,util.read_json(target))
+    if owned_policy(p):
+        return _close_wave_owned(repo,path,wave_path,p,w,child,directory,launch,target)
     from research import campaign_reassessment
     gates={}; observations={}
     for n in w['pairs']:
@@ -578,6 +619,128 @@ def _close_wave(repo,path,wave_path):
         observations[str(n)]={case['condition']:campaign_reassessment.classify(repo=repo,
             source=batch/case['run_id'],main_plan_ref=w['epoch_plan']) for case in child['assignments'][n-1]['cases']}
     closure=dict(wave=live_pilot.reference(wave_path),closed=True,gates=gates,observations=observations,at=run.now())
+    util.write_new_json(target,closure)
+    verify_closure(repo,path,wave_path,target)
+    return _record_closed_wave(p,w,closure)
+
+
+def _launcher_proof(path,wave_path,directory):
+    launch=util.read_json(directory/'_launcher/result.json')
+    if (launch.get('kind')!='repaired_campaign_wave_launcher_v1_result'
+            or launch.get('operational_complete') is not True or launch.get('plan')!=live_pilot.reference(path)
+            or launch.get('wave')!=live_pilot.reference(wave_path) or launch.get('owned_closure_confirmed') is not True
+            or launch.get('verification',{}).get('confirmed') is not True):
+        raise ValueError('Owned closure requires exact launcher terminal proof')
+    proof=document(launch['verification']['evidence'])
+    if (proof.get('confirmed') is not True or proof.get('plan')!=live_pilot.reference(path)
+            or proof.get('wave')!=live_pilot.reference(wave_path)):
+        raise ValueError('Owned closure lacks bound independent verification')
+    return launch
+
+
+def _wave_outcome(path,wave_path,directory,w):
+    outcome=util.read_json(directory/'result.json')
+    if (outcome.get('plan_sha256')!=util.sha256_file(path) or outcome.get('wave_sha256')!=util.sha256_file(wave_path)
+            or outcome.get('epoch_plan')!=w['epoch_plan'] or outcome.get('operational_complete') is not True
+            or outcome.get('errors') or outcome.get('fault') is not None
+            or outcome.get('watcher_shutdown_verified') is not True
+            or set(outcome.get('pair_results',{}))!={str(n) for n in w['pairs']}
+            or any(v.get('reason')!='pair_publication_restore_cleanup_required' for v in outcome['pair_results'].values())):
+        raise ValueError('Owned closure requires operationally complete acquisition and evaluation')
+    return outcome
+
+
+def _owned_pair_facts(child,n):
+    """Owned acquisition, evaluation, local archive and resource-release facts."""
+    from outer.harness import preserve
+    from research import saved_reassessment
+    batch=Path(child['batch'])/f'pair-{n}'
+    current=pair_execution.state(batch/'_control/pair-journal.jsonl')
+    cases=child['assignments'][n-1]['cases']
+    if set(current['dispatch'])!={c['run_id'] for c in cases} or set(current['results'])!={c['run_id'] for c in cases}:
+        raise ValueError('Owned closure requires both dispatched arms with durable results')
+    proof=util.read_json(batch/'owned-terminal-proof.json')
+    observer=util.read_json(batch/'observer-terminal.json')
+    if observer.get('observer_ack_verified') is not True or len(proof.get('runs',[]))!=2:
+        raise ValueError('Owned pair terminal/observer proof incomplete')
+    runs={}
+    for case in cases:
+        root=batch/case['run_id']
+        manifest=util.read_json(root/'manifest.json')
+        if manifest.get('run_instance_id')!=case['run_instance_id'] or manifest.get('stop_confirmed') is not True:
+            raise ValueError('Owned closure requires confirmed stop of the exact Run')
+        reference=util.read_json(root/'archive-reference.json')
+        row=current['results'][case['run_id']]['row']
+        if row.get('archive')!=reference:
+            raise ValueError('Owned local archive reference differs from durable result')
+        package=batch/'_archive/packages'/reference['package_id']
+        if not package.is_dir():raise ValueError('Owned local archive package missing')
+        cleanup=[]
+        for resource_file in sorted(root.rglob('browser-resources.json')):
+            if not saved_reassessment._saved_cleanup_bound(resource_file.parent,case['run_instance_id']):
+                raise ValueError('Owned browser/scoring resource release unconfirmed')
+            cleanup.append(live_pilot.reference(resource_file))
+        runs[case['condition']]=dict(run_id=case['run_id'],run_instance_id=case['run_instance_id'],
+            manifest=live_pilot.reference(root/'manifest.json'),archive_reference=reference,
+            archive_package=str(package),browser_resources=cleanup)
+    return dict(journal=live_pilot.reference(batch/'_control/pair-journal.jsonl'),
+        owned_terminal_proof=live_pilot.reference(batch/'owned-terminal-proof.json'),
+        observer_terminal=live_pilot.reference(batch/'observer-terminal.json'),runs=runs), current
+
+
+def _verify_owned_closure(repo,path,wave_path,w,c):
+    directory=Path(wave_path).parent;child=document(w['epoch_plan'])
+    launch=_launcher_proof(path,wave_path,directory)
+    _wave_outcome(path,wave_path,directory,w)
+    if (c.get('publication_performed') is not False or c.get('launcher')!=live_pilot.reference(directory/'_launcher/result.json')
+            or c.get('outcome')!=live_pilot.reference(directory/'result.json')
+            or c.get('policy')!=OWNED_NEXT_WAVE or c.get('resource_release',{}).get('scoring_containers_absent') is not True
+            or set(c.get('gates',{}))!={str(n) for n in w['pairs']}
+            or set(c.get('observations',{}))!={str(n) for n in w['pairs']}):
+        raise ValueError('Owned wave closure incomplete or foreign')
+    for n in w['pairs']:
+        receipt=document(c['gates'][str(n)])
+        facts,_=_owned_pair_facts(child,n)
+        if (receipt.get('kind')!=OWNED_PAIR_KIND or receipt.get('pair')!=n or receipt.get('wave')!=live_pilot.reference(wave_path)
+                or receipt.get('epoch_plan')!=w['epoch_plan'] or receipt.get('campaign')!=live_pilot.reference(path)
+                or receipt.get('publication_performed') is not False or receipt.get('facts')!=facts
+                or receipt.get('launcher')!=c['launcher']):
+            raise ValueError('Owned pair completion receipt invalid')
+    return launch
+
+
+def _close_wave_owned(repo,path,wave_path,p,w,child,directory,launch,target):
+    """No external write: owned acquisition, evaluation, archive and release."""
+    from outer.harness import preserve, runtime
+    from research import campaign_reassessment
+    import json as _json
+    _launcher_proof(path,wave_path,directory); _wave_outcome(path,wave_path,directory,w)
+    listing=[_json.loads(line) for line in runtime.docker('ps','-a','--no-trunc','--format','{{json .}}',
+        timeout=30).stdout.splitlines() if line.strip()]
+    if any(row.get('Names','').startswith('s2-score-') for row in listing):
+        raise ValueError('Unreleased scoring resource prevents owned closure')
+    gates={};observations={}
+    for n in w['pairs']:
+        facts,current=_owned_pair_facts(child,n)
+        batch=Path(child['batch'])/f'pair-{n}'
+        archives={}
+        for condition,run in facts['runs'].items():
+            ref=run['archive_reference']
+            preserve.verify(batch/'_archive',ref['package_id'],ref['sha256'])
+            archives[condition]=dict(ref,verified=True)
+        receipt=directory/f'owned-pair-{n}-completion.json'
+        value=dict(kind=OWNED_PAIR_KIND,pair=n,campaign=live_pilot.reference(path),wave=live_pilot.reference(wave_path),
+            epoch_plan=w['epoch_plan'],launcher=live_pilot.reference(directory/'_launcher/result.json'),
+            facts=facts,archive_verified=archives,publication_performed=False,at=run.now())
+        if not receipt.exists():util.write_new_json(receipt,value)
+        gates[str(n)]=live_pilot.reference(receipt)
+        observations[str(n)]={case['condition']:campaign_reassessment.classify(repo=repo,
+            source=batch/case['run_id'],main_plan_ref=w['epoch_plan']) for case in child['assignments'][n-1]['cases']}
+    closure=dict(wave=live_pilot.reference(wave_path),closed=True,closure_kind=OWNED_CLOSURE_KIND,
+        policy=OWNED_NEXT_WAVE,launcher=live_pilot.reference(directory/'_launcher/result.json'),
+        outcome=live_pilot.reference(directory/'result.json'),gates=gates,observations=observations,
+        resource_release=dict(scoring_containers_absent=True,launcher_owned_closure_confirmed=True,
+            checked_at=run.now()),publication_performed=False,at=run.now())
     util.write_new_json(target,closure)
     verify_closure(repo,path,wave_path,target)
     return _record_closed_wave(p,w,closure)
@@ -650,6 +813,91 @@ def reconcile_recovery(repo,path,wave_path,recovery_closure_ref):
             if util.read_json(out)!=clearance:raise ValueError('Immutable STOP clearance differs')
         else:util.write_new_json(out,clearance)
     return dict(reconciled=True,clearance=not campaign_stop_pending(p),closure=live_pilot.reference(target))
+
+
+def _predecessor_context(repo,p):
+    pred=p.get('predecessor')
+    if not pred or not owned_policy(p):
+        raise ValueError('Predecessor recovery requires an owned-policy successor')
+    return live_pilot.safe_path(pred['source_repo']),live_pilot.checked(pred['plan']),pred
+
+
+def _verify_predecessor_recovery(repo,path,p,saved,saved_ref):
+    from research import campaign_recovery
+    old_repo,old_path,pred=_predecessor_context(repo,p)
+    location=live_pilot.checked(saved_ref)
+    if (saved.get('campaign')!=live_pilot.reference(path) or saved.get('predecessor_plan')!=pred['plan']
+            or saved.get('closed') is not True
+            or location.parent!=Path(p['batch'])/'predecessor-recovery'):
+        raise ValueError('Foreign predecessor recovery wrapper')
+    from research import campaign_transition
+    history,_=campaign_transition._history(pred['history'])
+    if saved['wave'] not in [row['wave'] for row in history['waves']]:
+        raise ValueError('Recovery wave is not retained predecessor history')
+    return campaign_recovery.validate_closure(old_repo,old_path,live_pilot.checked(saved['wave']),saved['recovery'])
+
+
+@scoped_validation
+def reconcile_predecessor_recovery(repo,path,wave_path,destination):
+    """Same-attempt saved-artifact recovery of a retired predecessor wave whose
+    recorded decision remained held. No model call, no publication; predecessor
+    bytes and ledgers are never changed. The successor ledger records the new
+    decision (and any same-attempt adoption) bound to this immutable recovery."""
+    from research import campaign_recovery, campaign_transition
+    p=validate(repo,path);root=Path(p['batch'])
+    old_repo,old_path,pred=_predecessor_context(repo,p)
+    history,_=campaign_transition._history(pred['history'])
+    wave_ref=live_pilot.reference(wave_path)
+    if wave_ref not in [row['wave'] for row in history['waves']]:
+        raise ValueError('Not a retained predecessor wave')
+    w=util.read_json(live_pilot.checked(wave_ref))
+    # Recovery evidence may need a short Windows path (saved evaluator trees are
+    # deep); it must stay outside every source/evidence root. The binding
+    # successor-owned wrapper is always retained inside the successor root.
+    destination=live_pilot.safe_path(destination)
+    for protected in [repo,old_repo,*map(live_pilot.safe_path,p['protected_roots'])]:
+        protected=live_pilot.safe_path(protected)
+        if destination==protected or destination.is_relative_to(protected) or protected.is_relative_to(destination):
+            raise ValueError('Predecessor recovery destination overlaps protected source/evidence')
+    with pair_execution.exclusive(root/'_allocation'):
+        events=ledger(p)
+        for n in w['pairs']:
+            if any(e['kind']=='pair_accepted' and e['slot']==n for e in events):raise ValueError('Slot already accepted')
+            reserved=[e for e in events if e['kind']=='pair_attempt_reserved' and e['slot']==n]
+            decisions=[e for e in events if e['kind']=='pair_recovery_decision' and e['slot']==n]
+            if not reserved or reserved[-1]['wave']!=wave_ref:
+                raise ValueError('Only the latest attempt of a slot may be recovered')
+            if not decisions or decisions[-1]['wave']!=wave_ref or decisions[-1]['decision']['disposition']!='held':
+                raise ValueError('Only a held predecessor decision may be revisited')
+        recovery=campaign_recovery.recover_wave(old_repo,old_path,wave_path,destination)
+        closure=campaign_recovery.close_recovery(old_repo,old_path,wave_path,recovery,None,
+            owned_authority=dict(repo=str(live_pilot.safe_path(repo)),plan=live_pilot.reference(path)))
+        value=campaign_recovery.validate_closure(old_repo,old_path,wave_path,closure)
+        wrapper=dict(kind=PREDECESSOR_RECOVERY_KIND,campaign=live_pilot.reference(path),
+            predecessor_plan=pred['plan'],wave=wave_ref,closed=True,recovery=closure)
+        target=root/'predecessor-recovery'/(Path(wave_path).parent.name+'-'+destination.name+'.json')
+        target.parent.mkdir(exist_ok=True)
+        if target.exists():
+            if util.read_json(target)!=wrapper:raise ValueError('Retained successor recovery wrapper differs')
+        else:util.write_new_json(target,wrapper)
+        ref=live_pilot.reference(target)
+        _verify_predecessor_recovery(repo,path,p,wrapper,ref)
+        events=ledger(p)
+        for n in w['pairs']:
+            decision=value['decisions'][str(n)]
+            if not any(e['kind']=='pair_recovery_decision' and e['slot']==n and e.get('closure')==ref for e in events):
+                pair_execution.append(root/'attempts.jsonl',dict(kind='pair_recovery_decision',slot=n,
+                    wave=wave_ref,decision=decision,closure=ref,not_before=value['retry_not_before'],
+                    predecessor_recovery=True))
+            if decision['disposition']=='accept_same_attempt' and not any(
+                    e['kind']=='pair_accepted' and e.get('slot')==n for e in events):
+                attempt=[e for e in events if e['kind']=='pair_attempt_reserved' and e['slot']==n][-1]['pair_attempt']
+                pair_execution.append(root/'attempts.jsonl',dict(kind='pair_accepted',slot=n,pair_attempt=attempt,
+                    wave=wave_ref,epoch_plan=w['epoch_plan'],observations=decision['observations'],
+                    quality_complete=decision.get('quality_complete',False),
+                    adoption='same_attempt_saved_assessments_or_valid_product_failure',closure=ref))
+    return dict(reconciled=True,closure=ref,decisions={n:d['disposition'] for n,d in value['decisions'].items()},
+        retry_not_before=value['retry_not_before'])
 
 
 def _main():

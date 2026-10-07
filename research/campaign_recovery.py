@@ -21,6 +21,10 @@ from research.validation_scope import scoped_validation
 
 KIND = 'repaired_campaign_factual_recovery_v1'
 GATE_KIND = 'repaired_campaign_fault_publication_v1'
+# Owned completion of a factual recovery under the owned closure policy: the
+# recovery decision, private archive and validated evidence are retained
+# locally; nothing is published. Not an acquisition-success or quality gate.
+OWNED_GATE_KIND = 'owned_recovery_completion_v1'
 VALID = {'already_evaluable', 'normal_product_failure_partial_observation'}
 CONTROLLER_KIND = 'repaired_campaign_recovery_controller_v1'
 CONTROLLER_MINIMUM = frozenset(('research/campaign_recovery.py',
@@ -451,6 +455,30 @@ def validate_recovery(repo, recovery_ref, campaign_plan_path, wave_path):
         lambda: _validate_recovery_evidence(ctx,path,value))
 
 
+CLEANUP_RECEIPT = re.compile(r'[0-9a-f]{32}-(?:[0-9]+-intent|result)\.json|index\.jsonl')
+
+
+def _owned_cleanup_addition(name, original, addition, value):
+    """An append-only receipt of the sanctioned owned browser/scoring release.
+
+    browser_cleanup.cleanup only appends receipts beside the registered owned
+    resources of one recovered arm. Original files must still be unchanged;
+    any other addition remains a change to fault evidence."""
+    from pathlib import PurePosixPath
+    parts = PurePosixPath(addition).parts
+    if (name == 'wave' or not name.startswith('pair-') or len(parts) != 5 or parts[1] != 'evaluations'
+            or parts[3] != 'browser-cleanup-attempts' or not CLEANUP_RECEIPT.fullmatch(parts[4])):
+        return False
+    decision = value['decisions'].get(name.removeprefix('pair-'))
+    if not decision:
+        return False
+    arms = {arm['case']['run_id']: arm['case']['run_instance_id'] for arm in decision['arms'].values()}
+    if parts[0] not in arms:
+        return False
+    directory = Path(original)/parts[0]/'evaluations'/parts[2]
+    return assessment.saved._saved_cleanup_bound(directory, arms[parts[0]]) is True
+
+
 def _validate_recovery_evidence(ctx,path,value):
     repo = ctx['repo']
     if (path.name!='decision.json' or value.get('kind')!=KIND or value.get('campaign')!=ctx['campaign']
@@ -471,6 +499,7 @@ def _validate_recovery_evidence(ctx,path,value):
         # The campaign appends one administrative wrapper only after this
         # closure exists. Existing normal closure bytes are never overwritten.
         for addition in extra:
+            if _owned_cleanup_addition(name,original,addition,value): continue
             target=Path(original)/addition
             closure=path.parent/'closure.json'
             if (name!='wave' or addition not in ('closure.json','recovery-closure.json')
@@ -703,8 +732,37 @@ def share_public(repo,recovery_ref,slot,workspace,review):
     return _write(workspace/'fault-gate.json',gate)
 
 
+def _verify_owned_gate(path,gate,value,recovery_ref,slot):
+    if (gate.get('recovery')!=recovery_ref or gate.get('slot')!=slot or path.name!=f'owned-recovery-gate-{slot}.json'
+            or path.parent!=Path(recovery_ref['path']).parent
+            or gate.get('campaign')!=value['campaign'] or gate.get('wave')!=value['wave']
+            or gate.get('source_commit')!=value['source_commit']
+            or gate.get('quality_acceptance') is not False or gate.get('acquisition_success') is not False
+            or gate.get('publication_performed') is not False
+            or gate.get('disposition')!=value['decisions'][str(slot)]['disposition']):
+        raise ValueError('Owned recovery completion gate invalid')
+    if 'authority' in gate:
+        _owned_authority(gate['authority'],value['campaign'])
+    return gate
+
+
+def _owned_authority(authority,campaign_ref):
+    """An owned-policy campaign that is, or directly succeeds, the recovered one."""
+    from research import repaired_campaign as campaign
+    if not isinstance(authority,dict) or set(authority)!={'repo','plan'}:
+        raise ValueError('Owned recovery authority must name a repo and campaign plan')
+    plan=campaign.validate(live_pilot.safe_path(authority['repo']),live_pilot.checked(authority['plan']))
+    if not campaign.owned_policy(plan):
+        raise ValueError('Owned recovery completion requires the owned closure policy')
+    if authority['plan']!=campaign_ref and (plan.get('predecessor') or {}).get('plan')!=campaign_ref:
+        raise ValueError('Owned recovery authority is not this campaign or its direct successor')
+    return plan
+
+
 def _verify_publication(ref,recovery_ref,slot):
     path=live_pilot.checked(ref); gate=util.read_json(path); value=_read(recovery_ref)
+    if gate.get('kind')==OWNED_GATE_KIND:
+        return _verify_owned_gate(path,gate,value,recovery_ref,slot)
     if (path.name!='fault-gate.json' or gate.get('kind')!=GATE_KIND or gate.get('recovery')!=recovery_ref
             or gate.get('slot')!=slot or gate.get('campaign')!=value['campaign'] or gate.get('wave')!=value['wave']
             or gate.get('quality_acceptance') is not False or gate.get('acquisition_success') is not False
@@ -742,8 +800,20 @@ def _verify_publication(ref,recovery_ref,slot):
 
 
 @scoped_validation
-def close_recovery(repo,campaign_plan_path,wave_path,recovery_ref,publication_refs):
+def close_recovery(repo,campaign_plan_path,wave_path,recovery_ref,publication_refs,*,owned_authority=None):
     value=validate_recovery(repo,recovery_ref,campaign_plan_path,wave_path)
+    if publication_refs is None:
+        # Owned completion: no external write. Requires an owned-policy authority.
+        if owned_authority is None: raise ValueError('Owned completion requires an owned-policy authority')
+        _owned_authority(owned_authority,value['campaign'])
+        publication_refs={}
+        for slot in sorted(value['decisions'],key=int):
+            gate=dict(kind=OWNED_GATE_KIND,recovery=recovery_ref,slot=int(slot),campaign=value['campaign'],
+                wave=value['wave'],source_commit=value['source_commit'],quality_acceptance=False,
+                acquisition_success=False,publication_performed=False,
+                disposition=value['decisions'][slot]['disposition'],authority=owned_authority)
+            publication_refs[slot]=_write(Path(recovery_ref['path']).parent/f'owned-recovery-gate-{slot}.json',gate)
+    elif owned_authority is not None: raise ValueError('Publication and owned completion are exclusive')
     if set(publication_refs)!=set(value['decisions']): raise ValueError('Every wave pair needs factual publication')
     for slot,ref in publication_refs.items(): _verify_publication(ref,recovery_ref,int(slot))
     closure=dict(kind=KIND,closed=True,campaign=value['campaign'],wave=value['wave'],recovery=recovery_ref,

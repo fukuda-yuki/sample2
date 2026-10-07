@@ -300,3 +300,23 @@ class CampaignTransitionTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+
+class LegacyPolicyPredecessorTests(CampaignTransitionTests):
+    """A historical publication-gated predecessor may hand over to the owned policy."""
+    def setUp(self):
+        legacy=transition.campaign.legacy_policy()
+        with patch.object(transition.campaign,'policy',return_value=legacy):
+            super().setUp()
+
+    def test_only_next_wave_rule_moves_to_owned_policy(self):
+        p=self.create()
+        self.assertEqual(self.old['policy'],transition.campaign.legacy_policy())
+        self.assertEqual(p['policy'],transition.campaign.policy())
+        self.assertTrue(transition.validate_predecessor(self.repo,p))
+        for key,value in [('paid_fallback',True),('balance',True),('low_quality_replacement',True),
+                          ('initial_denominator',99),('next_wave_requires','anything_else')]:
+            with self.subTest(key=key):
+                altered=copy.deepcopy(p);altered['policy']=dict(p['policy'],**{key:value})
+                with self.assertRaises(ValueError):transition.validate_predecessor(self.repo,altered)

@@ -691,6 +691,7 @@ def _owned_pair_facts(child,n):
 
 
 def _verify_owned_closure(repo,path,wave_path,w,c):
+    from outer.harness import preserve
     directory=Path(wave_path).parent;child=document(w['epoch_plan'])
     launch=_launcher_proof(path,wave_path,directory)
     _wave_outcome(path,wave_path,directory,w)
@@ -703,9 +704,15 @@ def _verify_owned_closure(repo,path,wave_path,w,c):
     for n in w['pairs']:
         receipt=document(c['gates'][str(n)])
         facts,_=_owned_pair_facts(child,n)
+        archives={}
+        for condition,run_facts in facts['runs'].items():
+            ref=run_facts['archive_reference']
+            preserve.verify(Path(child['batch'])/f'pair-{n}'/'_archive',ref['package_id'],ref['sha256'])
+            archives[condition]=dict(ref,verified=True)
         if (receipt.get('kind')!=OWNED_PAIR_KIND or receipt.get('pair')!=n or receipt.get('wave')!=live_pilot.reference(wave_path)
                 or receipt.get('epoch_plan')!=w['epoch_plan'] or receipt.get('campaign')!=live_pilot.reference(path)
                 or receipt.get('publication_performed') is not False or receipt.get('facts')!=facts
+                or receipt.get('archive_verified')!=archives
                 or receipt.get('launcher')!=c['launcher']):
             raise ValueError('Owned pair completion receipt invalid')
     return launch

@@ -80,6 +80,10 @@ class OwnedCompletionTests(unittest.TestCase):
                 second = c.close_wave(root, plan, wave)
                 self.assertEqual(first, second)
                 self.assertEqual(receipt_bytes, {f.name:f.read_bytes() for f in directory.glob('*.json')})
+                payload = next((root/'data/pair-1/_archive/packages').glob('*/payload/manifest.json'))
+                payload.write_text('{}')
+                with self.assertRaisesRegex(ValueError, 'Package missing, extra or modified file'):
+                    c.close_wave(root, plan, wave)
             accepted = [e for e in c.ledger(p) if e['kind']=='pair_accepted']
             self.assertEqual([e['slot'] for e in accepted], [1, 2])
             self.assertFalse(first['publication_performed'])

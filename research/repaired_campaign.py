@@ -176,6 +176,10 @@ def campaign_stop_pending(p):
     """Old STOPs survive; only verified immutable closure can acknowledge them."""
     paths=stop_markers(p)
     if not paths:return False
+    # These stops cannot be cleared by technical recovery. Avoid traversing
+    # unrelated historical recoveries when admission is already stopped.
+    if any(util.read_json(path).get('reason') in ('user_stop','operator_stop','explicit_stop') for path in paths):
+        return True
     root=Path(p['batch']); acknowledged={}
     for file in (root/'_control/clearances').glob('*.json'):
         clearance=util.read_json(file)

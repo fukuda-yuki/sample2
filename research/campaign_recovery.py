@@ -105,9 +105,13 @@ def _committed_history(repo, commit, head, pins):
     import subprocess
     from outer.harness.security import child_environment
     base = ['git', '-c', 'safe.directory=' + Path(repo).as_posix()]
-    ancestor = subprocess.run(base + ['merge-base', '--is-ancestor', commit, head], cwd=repo,
-        env=child_environment(), capture_output=True)
-    if ancestor.returncode != 0:
+    # Proof sessions only admit reviewed read-only git verbs: 'show' walks
+    # head..commit, which is empty exactly when commit is an ancestor of head.
+    if not re.fullmatch('[a-f0-9]{40}', head):
+        raise ValueError('Invalid recovery controller checkout HEAD')
+    walk = subprocess.run(base + ['show', '-s', '--format=%H', head + '..' + commit], cwd=repo,
+        env=child_environment(), capture_output=True, text=True)
+    if walk.returncode != 0 or walk.stdout.strip():
         raise ValueError('Recovery controller checkout changed: commit is not retained history')
     names = sorted(pins)
     for name in names:

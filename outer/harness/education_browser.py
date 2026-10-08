@@ -195,7 +195,7 @@ def _compose(condition, frozen, baseline, assets, out, instance, sequence):
     return process.returncode
 
 
-def complete_evaluation(repo, condition, frozen, baseline, published, assets, out, instance, sequence):
+def complete_evaluation(repo, condition, frozen, baseline, published, assets, out, instance, sequence, *, native_state=False):
     repo, frozen, baseline, published, assets, out = map(Path, (repo, frozen, baseline, published, assets, out))
     if (out/'evaluation.json').exists() or (out/'browser-school').exists():
         raise FileExistsError('School browser completion already attempted: '+str(out))
@@ -226,8 +226,16 @@ def complete_evaluation(repo, condition, frozen, baseline, published, assets, ou
                 return code
             review = out/'browser-school'; review.mkdir()
             state = out/'browser-state'; state.mkdir()
-            shutil.copyfile(assets/'initial-store.sqlite', state/'school.sqlite')
-            intent['initial_database_sha256'] = util.sha256_file(assets/'initial-store.sqlite')
+            business = []
+            if version == 'education-1.1.0':
+                # Let the submitted application create its own schema, including private
+                # metadata tables, from the same frozen public import as HTTP scoring.
+                business = runtime.mount(assets/'legacy-school.sqlite', '/inputs/existing-business/legacy-school.sqlite', True)
+                intent['initial_database_policy'] = 'missing_target_application_import'
+                intent['import_sha256'] = util.sha256_file(assets/'legacy-school.sqlite')
+            else:
+                shutil.copyfile(assets/'initial-store.sqlite', state/'school.sqlite')
+                intent['initial_database_sha256'] = util.sha256_file(assets/'initial-store.sqlite')
             util.reject_links(published); configs = list(published.glob('*.runtimeconfig.json'))
             if len(configs) != 1: raise ValueError('Published school application missing or ambiguous')
             assembly = configs[0].name.removesuffix('.runtimeconfig.json')+'.dll'
@@ -238,7 +246,9 @@ def complete_evaluation(repo, condition, frozen, baseline, published, assets, ou
             browser_cleanup.register(out, instance, 'container', name)
             command = ['docker', 'run', '-d', '--name', name, '--label', 'sample2.browser-review='+owner,
                        '--network', network, '--publish', '127.0.0.1::8080', *runtime.sandbox_args(),
-                       *runtime.mount(published, '/app', True), *runtime.mount(state, '/data'), '--workdir', '/app',
+                       *runtime.mount(published, '/app', True),
+                       *(['--mount', 'type=volume,destination=/data'] if native_state else runtime.mount(state, '/data')),
+                       *business, '--workdir', '/app',
                        '--env', 'ASPNETCORE_ENVIRONMENT=Production', '--env', 'ConnectionStrings__SchoolContext=Data Source=/data/school.sqlite',
                        condition['runtime_lock']['images']['evaluator'], 'dotnet', assembly, '--urls', 'http://0.0.0.0:8080']
             intent['launch_command'] = command; created = True; runtime.command(command)
@@ -273,6 +283,13 @@ def complete_evaluation(repo, condition, frozen, baseline, published, assets, ou
             receipt = util.read_json(review/'collector-receipt.json')
             if timed_out: raise RuntimeError('School browser collection timed out')
             if version == VERSION and exit_code != 0: raise RuntimeError('School browser collection incomplete')
+            if native_state:
+                # Read the actual application database after its process has stopped.
+                runtime.docker('stop', '--time', '10', name, timeout=25)
+                copied = runtime.docker('cp', name+':/data/.', str(state), check=False, timeout=60)
+                util.write_new_json(out/'native-browser-state-export.json', dict(
+                    container=name, storage='linux-volume', exported=copied.returncode==0))
+                if copied.returncode: raise RuntimeError('Native browser state export failed')
             if receipt.get('studentId'):
                 try:
                     util.write_new_json(review/'database.json', _database_observation(
@@ -301,6 +318,10 @@ def complete_evaluation(repo, condition, frozen, baseline, published, assets, ou
                     logs = runtime.docker('logs', name, check=False, timeout=30)
                     (out/'browser-server.log').write_text(logs.stdout+logs.stderr, encoding='utf-8')
                 except Exception as exc: intent['log_collection_error'] = str(exc)
+            if native_state and created:
+                removed = runtime.docker('rm', '-f', '-v', name, check=False, timeout=30)
+                intent['native_volume_removed'] = removed.returncode == 0
+                if removed.returncode: code = 3
             util.write_new_json(out/'browser-intent.json', intent)
             cleanup = browser_cleanup.cleanup(out, locked=True) if (browser_cleanup._local_path(out)/'browser-resources.json').exists() else {'confirmed': True, 'status': 'no_resources_created'}
             util.write_new_json(out/'browser-cleanup.json', cleanup)

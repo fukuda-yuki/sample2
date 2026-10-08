@@ -652,7 +652,7 @@ def request_stop(root):
     return result
 
 
-def scoring_command(condition, frozen, out, work, assets, version, sequence):
+def scoring_command(condition, frozen, out, work, assets, version, sequence, *, native_work=False):
     name = 's2-score-' + uuid.uuid4().hex
     business = []
     migration = condition['evaluation'].get('migration_contract')
@@ -666,7 +666,9 @@ def scoring_command(condition, frozen, out, work, assets, version, sequence):
         business = mount(initial, '/inputs/existing-business/' + import_input, True)
     cmd = ['docker', 'run', '--name', name, '--network', 'none', *sandbox_args(),
            *mount(frozen, '/artifact', True), *mount(assets, '/assets', True),
-           *business, *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],
+           *business, *mount(out, '/result'),
+           *(['--mount', 'type=volume,destination=/work'] if native_work else mount(work, '/work')),
+           condition['runtime_lock']['images']['evaluator'],
            'dotnet', '/assets/evaluator/' + condition['evaluation']['assembly'], '--artifact', '/artifact',
            '--out', '/result', '--work', '/work', '--spec', '/assets/requirements.json',
            '--catalog', '/assets/catalog.json', '--evaluation-version', version, '--sequence', str(sequence)]

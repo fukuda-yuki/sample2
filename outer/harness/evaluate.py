@@ -199,8 +199,30 @@ def validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_pat
     return True
 
 
+def finish_scoring_container(name, native_work, work_dir, out):
+    """Export Linux scratch before removing its exact owned container/volume."""
+    from . import runtime
+    copied = None
+    try:
+        if native_work:
+            halted = runtime.docker('stop', '--time', '10', name, check=False, timeout=25)
+            if halted.returncode != 0:
+                raise RuntimeError('Native scoring stop before export failed: '+name)
+            copied = runtime.docker('cp', name+':/work/.', str(work_dir), check=False, timeout=180)
+            util.write_new_json(Path(out)/'native-work-export.json', dict(
+                container=name, storage='linux-volume', exported=copied.returncode == 0,
+                destination=str(work_dir), exit_code=copied.returncode))
+    finally:
+        stopped = runtime.docker('rm', '-f', *(['-v'] if native_work else []), name, check=False)
+        if stopped.returncode != 0:
+            raise RuntimeError('Evaluator container stop could not be confirmed: '+name)
+    if native_work and copied.returncode != 0:
+        raise RuntimeError('Native scoring work export failed; see native-work-export.json')
+    return stopped
+
+
 def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None,
-              sequence=None, timeout=SCORING_TIMEOUT_SECONDS):
+              sequence=None, timeout=SCORING_TIMEOUT_SECONDS, native_work=False):
     repo = Path(repo).resolve()
     run_dir = run_mod.run_dir_for(runs_dir, run_id)
     manifest = run_mod.load_manifest(runs_dir, run_id)
@@ -323,7 +345,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     if isolated:
         from . import runtime
         container_name, command = runtime.scoring_command(condition, frozen, http_out, work_dir,
-            run_dir / 'evaluation-assets', str(version), sequence)
+            run_dir / 'evaluation-assets', str(version), sequence, native_work=native_work)
     evidence = run_dir / 'evidence'
     evidence.mkdir(exist_ok=True)
     environment = child_environment()
@@ -341,9 +363,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
             exit_code, timed_out = run_evaluator(command, repo, environment, out, err, timeout)
         finally:
             if container_name:
-                stopped = runtime.docker('rm', '-f', container_name, check=False)
-                if stopped.returncode != 0:
-                    raise RuntimeError('Evaluator container stop could not be confirmed: ' + container_name)
+                stopped = finish_scoring_container(container_name, native_work, work_dir, http_out)
     if browser_required and browser_cart.http_phase_eligible(condition,http_out,
             exit_code=exit_code,timed_out=timed_out,
             cleanup_confirmed=container_name is None or stopped.returncode==0,
@@ -351,7 +371,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
             spec=spec,spec_hash=spec_sha256,evaluator_hash=evaluator_sha256):
         if isolated:
             exit_code = browser_cart.complete_evaluation(repo, condition, frozen, http_out, work_dir / 'publish',
-                run_dir / 'evaluation-assets', temporary, manifest.get('run_instance_id'), sequence)
+                run_dir / 'evaluation-assets', temporary, manifest.get('run_instance_id'), sequence,
+                **({'native_state': True} if native_work and str(version).startswith('education-') else {}))
         else:
             # The research browser runner requires the frozen isolated runtime.
             # Keep legacy HTTP output as evidence, never adopt it as research quality.

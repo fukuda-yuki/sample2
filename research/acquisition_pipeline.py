@@ -251,6 +251,28 @@ def evaluate_pair(repo, attempt):
         return outcome
 
 
+def pending_acquisition_slots(config, attempts, accepted):
+    """Keep saved successful acquisitions out of model retries unless explicitly excluded."""
+    held = set()
+    for attempt in attempts:
+        if attempt['slot'] in accepted: continue
+        batch = Path(attempt['record']).parent
+        saved = util.read_json(batch/'pipeline-acquisition.json')
+        if not saved['acquired']: continue
+        output = batch/'pipeline-evaluation.json'
+        decision = util.read_json(output) if output.exists() else {}
+        excluded = (decision.get('accepted') is False
+            and decision.get('classification') == 'excluded_incomplete_evaluation_user_authorized_reacquisition'
+            and decision.get('retry_requires_new_uuids') is True
+            and decision.get('slot') == attempt['slot']
+            and decision.get('attempt') == saved['attempt'])
+        if not excluded: held.add(attempt['slot'])
+    historical = set(config['attempted_slots']) | {a['slot'] for a in attempts}
+    pending = [n for n in range(1,101) if n not in accepted and n not in held]
+    pending.sort(key=lambda n:(n in historical,n))
+    return pending, held
+
+
 def run_pipeline(repo, config_path):
     config = util.read_json(config_path)
     root = Path(config['root']); events_path = root/'events.jsonl'
@@ -306,10 +328,10 @@ def run_pipeline(repo, config_path):
             while len(accepted) < 100:
                 number = 1 + len(list((root/'epochs').glob('*/plan.json')))
                 epoch = create_epoch(repo, config, number); plan = util.read_json(epoch)
-                pending = [n for n in range(1,101) if n not in accepted]
-                # Initial assigned slots first, then recorded incomplete attempts.
+                pending, held = pending_acquisition_slots(config, attempts, accepted)
+                if held: event('saved_evaluation_held', slots=sorted(held), model_resend=False)
+                if not pending: raise RuntimeError('Saved evaluation recovery required; no model resend')
                 historical = set(config['attempted_slots']) | {a['slot'] for a in attempts}
-                pending.sort(key=lambda n:(n in historical, n))
                 if reserved_count + len(pending) > config['bounds']['max_pair_attempts']:
                     raise RuntimeError('Attempt budget exhausted')
                 consecutive_faults = 0
@@ -377,6 +399,11 @@ def evaluation_process(repo, record):
     batch = Path(record).parent
     output = batch/'pipeline-evaluation.json'
     if output.exists(): return dict(util.read_json(output), batch=str(batch))
+    # Re-evaluate an old epoch with its own frozen controller and browser pins.
+    saved_attempt = util.read_json(record)
+    saved_plan = util.read_json(live_pilot.checked(saved_attempt['epoch']))
+    repo = live_pilot.checked(saved_plan['launch_supervisor']).parent.parent
+    live_pilot.verify_pins(repo, saved_plan['source_pins'])
     for attempt in range(2):
         with (batch/'pipeline-evaluation.log').open('ab') as log:
             result = subprocess.run([sys.executable,'-B','-X','utf8','-m','research.acquisition_pipeline',

@@ -3,6 +3,7 @@
 // directly or force navigation after Save to manufacture the saved state.
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const { chromium } = require('playwright');
+const { workflowStudentId } = require('./education-identity.cjs');
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), out = process.argv[3];
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
 const ref = name => ({ path: name, sha256: sha(fs.readFileSync(path.join(out, name))) });
@@ -112,22 +113,26 @@ async function fill(page, fields) {
     if (responses) await responses.flush();
     if (responses?.failed('create-submit')) { receipt.action = 'product-http-failed'; return; }
     const created = await capture(page, 'created', tabId); receipt.created = ref('created.json');
-    if (!/^\d+$/.test(created.studentId || '')) {
+    const identity = workflowStudentId(created.studentId, created.url, input.baseUrl);
+    const createdId = identity.id;
+    receipt.studentIdentifierSource = identity.source;
+    receipt.conditions.identityHelperSha256 = sha(fs.readFileSync(path.join(__dirname, 'education-identity.cjs')));
+    if (!createdId) {
       receipt.action = 'create-not-completed'; receipt.reason = 'details_identifier_not_observed_after_create';
       await capture(page, 'after', tabId); receipt.after = ref('after.json'); receipt.afterScreenshot = ref('after.png'); return;
     }
-    receipt.studentId = created.studentId;
+    receipt.studentId = createdId;
     // Setup navigation before the measured Save action is explicit in evidence.
-    if (!await navigate('edit-form', '/Student/Edit/' + created.studentId)) return;
+    if (!await navigate('edit-form', '/Student/Edit/' + createdId)) return;
     await capture(page, 'edit', tabId); receipt.edit = ref('edit.json');
     if (!await formSupported(page, 'Save')) { receipt.reason = 'ordinary_save_form_unsupported'; return; }
     await fill(page, input.editFields);
-    operation('edit-submit', 'POST', '/Student/Edit/' + created.studentId);
+    operation('edit-submit', 'POST', '/Student/Edit/' + createdId);
     await page.getByRole('button', { name: 'Save', exact: true }).click({ noWaitAfter: true });
     responses?.confirm('edit-submit');
-    events.push({ at: new Date().toISOString(), kind: 'ui-click-save', studentId: created.studentId });
+    events.push({ at: new Date().toISOString(), kind: 'ui-click-save', studentId: createdId });
     receipt.action = 'create-edit-save';
-    try { await page.waitForURL(url => url.pathname.replace(/\/$/, '') === '/Student/Details/' + created.studentId,
+    try { await page.waitForURL(url => url.pathname.replace(/\/$/, '') === '/Student/Details/' + createdId,
       { timeout: 10000, waitUntil: 'load' }); } catch (_) {}
     if (responses) await responses.flush();
     if (responses?.failed('edit-submit')) { receipt.action = 'product-http-failed'; return; }

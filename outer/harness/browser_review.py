@@ -104,8 +104,8 @@ def coverage_complete(output):
     return _for(output.get('evaluationVersion')).coverage_complete(output)
 
 
-def complete_evaluation(repo, condition, *args):
-    return _for(condition['evaluation']['evaluation_version']).complete_evaluation(repo, condition, *args)
+def complete_evaluation(repo, condition, *args, **kwargs):
+    return _for(condition['evaluation']['evaluation_version']).complete_evaluation(repo, condition, *args, **kwargs)
 
 
 def _stored(directory):

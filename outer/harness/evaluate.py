@@ -199,6 +199,23 @@ def validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_pat
     return True
 
 
+def saved_scoring_provenance(repo, original_repo, run_dir, condition, evaluator_path):
+    """Validate frozen measurement assets at their source; separately record repair code."""
+    from . import runtime
+    repo, original_repo = Path(repo).resolve(), Path(original_repo).resolve()
+    validate_repaired_scoring_provenance(original_repo, run_dir, condition, evaluator_path)
+    if subprocess.check_output(['git', 'status', '--porcelain'], cwd=repo, text=True).strip():
+        raise ValueError('Saved scoring recovery requires committed clean repair code')
+    commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+    return dict(kind='saved_scoring_recovery_v1', original_repo=str(original_repo),
+        repair_repo=str(repo), repair_commit=commit, model_calls=0,
+        controller_files=runtime.controller_files(repo),
+        browser_files={str(p.relative_to(repo)).replace('\\', '/'): util.sha256_file(p)
+                       for p in sorted((repo/'inner/browser').glob('*.cjs'))},
+        frozen_condition_sha256=util.sha256_file(Path(run_dir)/'condition.json'),
+        evaluator_sha256=util.sha256_file(evaluator_path))
+
+
 def finish_scoring_container(name, native_work, work_dir, out):
     """Export Linux scratch before removing its exact owned container/volume."""
     from . import runtime
@@ -222,7 +239,7 @@ def finish_scoring_container(name, native_work, work_dir, out):
 
 
 def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None,
-              sequence=None, timeout=SCORING_TIMEOUT_SECONDS, native_work=False):
+              sequence=None, timeout=SCORING_TIMEOUT_SECONDS, native_work=False, recovery_source_repo=None):
     repo = Path(repo).resolve()
     run_dir = run_mod.run_dir_for(runs_dir, run_id)
     manifest = run_mod.load_manifest(runs_dir, run_id)
@@ -259,11 +276,16 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     evaluator_sha256 = util.sha256_file(evaluator_path)
     pinned_evaluator = evaluation.get('evaluator_sha256')
     pinned_build = evaluation.get('evaluator_build') or {}
+    recovery_provenance = None
     if (condition.get('task_profile_revision') == 'evaluators-20261006'
             or (condition.get('runtime') or {}).get('id') in ('deepseek-music-repaired-v1', 'deepseek-education-repaired-v1')
             or 'repaired_runtime_binding' in (condition.get('runtime_lock') or {})
             or pinned_build.get('binding_kind') == 'accepted_bundle_reuse_v1'):
-        validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_path)
+        if recovery_source_repo is None:
+            validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_path)
+        else:
+            recovery_provenance = saved_scoring_provenance(
+                repo, recovery_source_repo, run_dir, condition, evaluator_path)
     elif pinned_evaluator:
         # A pinned hash without its build provenance cannot be diagnosed later,
         # so it is refused as a condition error rather than scored and rejected.
@@ -279,6 +301,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                                + '（clean_worktree は、固定値が .gitattributes の eol=lf のままの'
                                  'クリーンな作業ツリーで測られ、bin obj を消して作り直しても'
                                  '同じ値になったことを示す）')
+    if recovery_source_repo is not None and recovery_provenance is None:
+        raise ValueError('Saved recovery requires a frozen repaired measurement')
     evaluations = run_dir / 'evaluations'
     evaluations.mkdir(exist_ok=True)
     used = used_sequences(run_dir)
@@ -338,6 +362,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     browser_required = browser_cart.required(str(version))
     temporary = evaluations / (('{}-{}-{}'.format('attempt' if browser_required else '.tmp', sequence, uuid.uuid4().hex)))
     temporary.mkdir(parents=True)
+    if recovery_provenance is not None:
+        util.write_new_json(temporary/'scoring-recovery-provenance.json', recovery_provenance)
     http_out = temporary / 'http-only' if browser_required else temporary
     http_out.mkdir(exist_ok=True)
     command[command.index('--out') + 1] = str(http_out)

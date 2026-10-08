@@ -386,7 +386,9 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     with (evidence / 'scoring-{:03d}-stdout.log'.format(sequence)).open('xb') as out, \
             (evidence / 'scoring-{:03d}-stderr.log'.format(sequence)).open('xb') as err:
         try:
-            exit_code, timed_out = run_evaluator(command, repo, environment, out, err, timeout)
+            execution_command = (runtime.prepare_native_container(command, '/work', http_out/'native-work-init.json')
+                                 if isolated and native_work else command)
+            exit_code, timed_out = run_evaluator(execution_command, repo, environment, out, err, timeout)
         finally:
             if container_name:
                 stopped = finish_scoring_container(container_name, native_work, work_dir, http_out)

@@ -251,7 +251,12 @@ def complete_evaluation(repo, condition, frozen, baseline, published, assets, ou
                        *business, '--workdir', '/app',
                        '--env', 'ASPNETCORE_ENVIRONMENT=Production', '--env', 'ConnectionStrings__SchoolContext=Data Source=/data/school.sqlite',
                        condition['runtime_lock']['images']['evaluator'], 'dotnet', assembly, '--urls', 'http://0.0.0.0:8080']
-            intent['launch_command'] = command; created = True; runtime.command(command)
+            intent['launch_command'] = command; created = True
+            if native_state:
+                runtime.prepare_native_container(command, '/data', out/'native-browser-state-init.json')
+                runtime.docker('start', name)
+            else:
+                runtime.command(command)
             port = int(runtime.docker('port', name, '8080/tcp').stdout.strip().split(':')[-1]); base_url = 'http://127.0.0.1:'+str(port)
             if version == 'education-1.1.0':
                 ready = browser_product.wait_ready(base_url, out/'readiness-observation.json')

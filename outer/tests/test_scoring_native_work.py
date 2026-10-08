@@ -24,3 +24,17 @@ class NativeWorkTests(unittest.TestCase):
             self.assertEqual('stop',docker.call_args_list[0].args[0])
             self.assertEqual('cp',docker.call_args_list[1].args[0])
             self.assertEqual('rm',docker.call_args_list[2].args[0])
+
+    def test_native_initializer_only_mounts_owned_scratch_and_keeps_app_user(self):
+        import json
+        detail={'Mounts':[{'Destination':'/work','Type':'volume','Name':'owned-volume'}],
+                'Config':{'User':'1000:1000'},'Image':'sha256:test'}
+        replies=[SimpleNamespace(stdout=json.dumps([detail]),returncode=0),SimpleNamespace(returncode=0),SimpleNamespace(returncode=0)]
+        with tempfile.TemporaryDirectory() as d,patch.object(runtime,'command') as create,patch.object(runtime,'docker',side_effect=replies) as docker:
+            result=runtime.prepare_native_container(['docker','run','--name','owned','image','dotnet','app'], '/work',Path(d)/'receipt.json')
+            self.assertEqual(['docker','start','-a','owned'],result)
+            self.assertNotIn('--user',create.call_args.args[0])
+            init=docker.call_args_list[1].args
+            self.assertIn('type=volume,source=owned-volume,target=/owned',init)
+            self.assertEqual(('chmod','0777','/owned'),init[-3:])
+            self.assertEqual(('rm','-f','owned-volume-init'),docker.call_args_list[-1].args)

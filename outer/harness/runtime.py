@@ -652,6 +652,37 @@ def request_stop(root):
     return result
 
 
+def prepare_native_container(command_args, destination, receipt_path):
+    """Initialize only this container's empty scratch volume; evaluator remains non-root."""
+    if command_args[:2] != ['docker', 'run'] or destination not in ('/work', '/data'):
+        raise ValueError('Unsupported native scratch command')
+    args = list(command_args[2:])
+    if '-d' in args: args.remove('-d')
+    name = args[args.index('--name') + 1]
+    helper = name + '-volume-init'
+    command(['docker', 'create', *args])
+    detail = json.loads(docker('inspect', name).stdout)[0]
+    mounts = [m for m in detail['Mounts'] if m['Destination'] == destination]
+    if len(mounts) != 1 or mounts[0]['Type'] != 'volume':
+        raise ValueError('Native scratch volume missing or ambiguous')
+    volume = mounts[0]['Name']
+    receipt = dict(container=name, volume=volume, destination=destination,
+                   evaluator_user=detail['Config']['User'], helper=helper)
+    try:
+        result = docker('run', '--name', helper, '--network', 'none', '--user', '0:0',
+                        '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+                        '--mount', 'type=volume,source='+volume+',target=/owned',
+                        detail['Image'], 'chmod', '0777', '/owned', check=False, timeout=30)
+        receipt['exit_code'] = result.returncode
+        if result.returncode: raise RuntimeError('Native scratch initialization failed')
+    finally:
+        removed = docker('rm', '-f', helper, check=False)
+        receipt['helper_removed'] = removed.returncode == 0
+        util.write_new_json(receipt_path, receipt)
+        if removed.returncode: raise RuntimeError('Native scratch helper cleanup failed')
+    return ['docker', 'start', '-a', name]
+
+
 def scoring_command(condition, frozen, out, work, assets, version, sequence, *, native_work=False):
     name = 's2-score-' + uuid.uuid4().hex
     business = []

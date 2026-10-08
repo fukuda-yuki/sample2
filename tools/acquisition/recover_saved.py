@@ -3,6 +3,7 @@ import argparse
 import copy
 import ctypes
 import json
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -77,7 +78,7 @@ def main():
                     if not observation.get('recoverable'):continue
                     sequence=max(evaluate.used_sequences(source),default=0)+1
                     with catalog_environment.activated(browser,REPO):
-                        evaluate.score_run(REPO,batch,binding['run_id'],sequence=sequence,native_work=slot==75)
+                        evaluate.score_run(REPO,batch,binding['run_id'],sequence=sequence,native_work=slot==75, recovery_source_repo=old_repo)
                     observation=campaign_reassessment._observation(source,condition,binding['run_instance_id'])
                     event('run_evaluated',slot=slot,run_id=binding['run_id'],sequence=sequence,observation=observation)
                     if observation.get('recoverable'):raise RuntimeError('Saved observation remains incomplete')
@@ -96,6 +97,10 @@ def main():
                 event('repair_incomplete',slot=slot,error=str(exc),traceback=traceback.format_exc())
         pending,held=pipeline.pending_acquisition_slots(config,attempts,accepted)
         event('finished',accepted=sorted(accepted),pending=pending,held=sorted(held))
+    if pending and shutil.disk_usage(root).free < config['bounds']['disk_free_min_bytes']:
+        event('resume_deferred_disk_floor', free_bytes=shutil.disk_usage(root).free,
+              required_bytes=config['bounds']['disk_free_min_bytes'])
+        return
     if pending:
         repo=Path(config['repo']);w=REPO.parent
         launch=w/('pipeline-repair-resume-'+session+'.json')

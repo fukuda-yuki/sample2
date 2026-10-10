@@ -40,15 +40,44 @@ Release/proof gate除去は既実施の機能/実績であり、今回の新実�
 
 今回の追加記録は私有引渡し用。public allowlistやRelease admission条件は変更していない。
 
-misc `445c96e0956f77d8fcb3c0b43772e03578500a64` の受入契約との照合:
+misc `445c96e0956f77d8fcb3c0b43772e03578500a64` の親から共有された受入契約との照合:
 
-- 新cohort manifestの `source_repository` は上記remote、`source_commit == source_revision` はconfig/epochの取得コードcommit。producerは既に確定commitを持ち、unknownを生成しない。同値pinの重複はmisc manifestへの投影時に行う。
+このcommitは未pushで、こちらの環境にcheckoutがなく、GitHub APIも404だった。新validatorを
+実行したとは主張しない。以下のslot/attemptの意味は、参照可能なmain
+`2534ad56495859c6632e18e2dbda743f950b904a` の
+`sample2/analyses/AN004/upstream-column-definitions.json`で追加確認した。
+
+- 新cohort manifestの `source_repository` はremoteで確認した `fukuda-yuki/modernization-eval`、`source_commit == source_revision` はconfig/epochの取得コードcommit。producerは既に確定commitを持ち、unknownを生成しない。同値pinの重複はmisc manifestへの投影時に行う。
 - `conditions` は承認plan.assignments、`evaluator_revision` はRun.conditionのevaluation versionとbuild/hashを根拠とする。非空文字列検査だけでは評価器pinの証明にならず、evaluator SHA・assets・評価出力member hashまで必要。`reproduction` と受入用 `files`/`external_sources` は既存packによる最終bytesの封印後にmiscで組み立てる。今回cohort manifest/ZIPの新しい大形式は作っていない。
-- `attempt_key` はproducerの試行UUID `attempt`。数値のcase.attemptや繰返し可能なrun_idと混同しない。producer receiptのslotはpair番号、assignment.slotはpair内の腕位置。miscの `slot`/`pair_id` はこの意味を確認して投影する必要があり、無確認の改名は行っていない。
+- **前報訂正:** producerの `attempt` は元試行UUIDだが、misc既存の `attempt_key` はパケット内の試行一覧順序を固定したIDであり同義ではない。元UUIDは既存 `attempt_uuid` に保存し、Run/call/attemptを受入側の同じattempt_keyへ結ぶ。数値のcase.attemptや繰返し可能なrun_idを試行キーにしない。新campaignでUUIDをattempt_keyとして使う選択は受入側の明示契約がある場合だけで、旧パケットを改番しない。
+- producer receiptの `slot` とmiscの `slot` はペア割付枠。misc `pair_id` は `str(slot)`。producer `assignment.slot` はpair内の腕位置なので転記しない。例えばpair 1/preloadはreceipt.slot=1、assignment.slot=2、misc.slot=1/pair_id="1"となる。
 - `selected` は同じslot/attemptに結合する保存評価receiptのaccepted、`dispatched_by_started_at`/`started_at` はRun manifest由来。journal dispatchは別のintent/所有権証跡である。manifestがないRunの開始はnullを許し、dispatch未知を確定無sendと扱わない。
 - 非採用理由は取得receiptの `reason`/fault/error、保存評価classification、または `evaluation_pending`/`not_materialized`/未確定コードから作る。成功/採用後の最終除外理由はnull。今回追加したacquisition.reasonは返却された実際の技術状態名を保持し、例外時は `acquisition_interrupted` とerrorを残す。後段の判定を先取りして採否を原manifestへ書かない。
 - 原判定・再評価はRun UUID、condition/artifact/evaluator hash、評価member/sequenceへ結合。歴史的null evaluation_idを再生成しない。新しいcode ZIPは今回未作成なので、commit/ZIP comment一致の受入は未検証。
 - AN004の新100固有件数/条件、旧DS001のunknown pin、旧dataset_id/stagesは変更しない。producerの独立campaign入口はAN004を呼ばない。
+
+実際の拒否条件と最小対応（新validatorの実行確認とは分離）:
+
+| 論点 | 受入失敗になるか | 最小対応 |
+| --- | --- | --- |
+| attempt名 | 生producer receiptに `attempt_key` はなく、正規化後tableとして渡せば必須キー不足。既存recomputeも `run['attempt_key']` を直接読む。UUIDへ単純改名して既存packet keyと混在させればjoinを壊す。新validatorでの実行は未確認 | 既存取り込み時に元UUIDをattempt_uuidへ保持し、既存packet keyをRun/call/attemptへ一貫して付与。producerのUUID名変更や移行表追加は不要 |
+| slot/pair | receipt.slotを使えば意味は一致し、名前差自体で失敗しない。assignment.slotを使うと違う割付となり、対応/件数の検査で拒否されるべき。445での実拒否は未確認 | `slot=receipt.slot`, `pair_id=str(receipt.slot)`。assignment.slotは腕位置として保持 |
+| evaluator hash | 親が示したevaluator_revisionの非空検査だけならversionのみでも通り、binary pin不足を拒否できない。一方必須のevaluation member/condition/artifact hashの欠落・不一致は共有契約上の拒否条件 | version文字列をhash扱いしない。既存condition.evaluation.evaluator_sha256、evaluator_build、manifest.assets_sha256、評価recordのevaluator_sha256/reported/evaluation_sha256を最終archive memberへ結合する。producerには既に値があり追加同値fieldは不要 |
+| 取得checkpoint hash | sha256_at_acquisitionはmutable manifestの取得時点hash。後段更新済みの最終memberへそのまま適用すれば不一致になる | 最終packのmanifestでmember hashを確定し、checkpoint hashとは区別する |
+| 予約のみのRun | producer.runsは未materialize予約も含む。misc all-runsは実体Runの表なので、そのまま全件投入すると実体数を過大計上する | all-runsへはmaterialized=trueだけを投影。予約UUIDはattemptのrecorded_reserved_run_uuidsに保持し、欠測を捨てない |
+| dispatcherと開始 | journal dispatch nullは確定無sendではなく、started_atの有無と同値ではない | dispatched_by_started_atはmaterialized manifestのstarted_at由来。予約のみ/未知は別状態のまま保持 |
+
+合成出力全体は [campaign-handoff-synthetic-example.json](campaign-handoff-synthetic-example.json)。
+`acquisition_receipts`は既存CampaignTestsのmock acquisitionを通して実際に出力した2試行分。
+低品質0の採用2Runと、その前の技術失敗2Runを含み、最終資源は全4Run/4要求/20観測token。
+fixtureのRun manifestは最小の合成値であり、production profiles.create/所有process/scorerは
+起動していない。従ってこの例単体はmisc受入に必要な全資材を持つ完成packetではない。
+fixtureではjournal dispatchを書かないためnullだが、synthetic started_atは存在する。
+これはnullを無sendと即断しないための区別でもある。
+`separate_evaluator_example`は別Runに対する公開stand-in evaluatorの実行結果で、上のRunへ
+結合しない。私有評価器の証拠として使わない。例の/tmp元フォルダーはfixture終了時に
+通常cleanup済みで、JSONは生成時のsnapshotとして残す。
+
 
 
 ## 非モデル検証
@@ -84,3 +113,20 @@ misc `445c96e0956f77d8fcb3c0b43772e03578500a64` の受入契約との照合:
 | `/tmp/modernization-target-final.log` | `b01b9c761415b337748afeb371872056476ae5fc51c040818701f126cf103371` |
 | `/tmp/modernization-receipt-final.log` | `a7d85f54224891a0681a63853ceda5baa0c4fb00eb74662b89117ae1773ceea8` |
 | `/tmp/modernization-private-tests.log` | `859b5eeb7e3cfbfa8c4b6dde69401aa2914ff1da51fdf03a75dc89c7327794eb` |
+
+## 受渡し照合後の追加確認
+
+最後のreceipt.reason追加後の共有readerへの影響を確認するため、research側全体を再実行した。
+`630f081f10abb68ac83ee74e46b29dd7f07f1cbe` のproductionコードで943件・896成功・47 skip、
+error/failure 0。これにより、前回の最終小差分が全体走査後だったという検証範囲の差を解消した。
+その前の拡大対象62件も61成功・Windows1 skipだった。
+outerコードは最後のreceipt変更の影響範囲外のため全266件を再度走らせる必要はないと判断し、
+照合に直結する評価器hash/衝突保全/不正IDの3件を追加実行して全成功を確認した。
+新しい.NET校正・実データscorer・実モデル送信は実施していない。
+この追補の変更は契約文書の訂正と合成JSON例だけで、productionコードの追加変更はない。
+
+| 追加ログ | 結果 | SHA256 |
+| --- | --- | --- |
+| `/tmp/modernization-research-postreceipt.log` | 943件、896成功/47 skip | `a53f2970c2d1610f56ca426f13b82fc1360df5785d4c97a26f17fa52646aaceb` |
+| `/tmp/modernization-receipt-expanded.log` | 62件、61成功/1 skip | `f79079e1b5dd6f017aab4c70898a89fdbdd84488dc14c8c61385ef72e7fe2fb3` |
+| `/tmp/modernization-pin-contract-checks.log` | 3件成功 | `65cdc892ff4bc506f06760a79b2c701069be336055e926205d5fdaee5813cf32` |

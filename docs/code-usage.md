@@ -29,9 +29,13 @@ cd modernization-eval
 python -B -X utf8 -m research.acquisition_pipeline --help
 python -B -X utf8 -m research.catalog_cohort_bundle --help
 
+# 研究側の試験・集計用依存を隔離して導入
+python -m venv .venv-analysis
+.\.venv-analysis\Scripts\python -m pip install -r research/requirements-confirmatory.txt
+
 # モデル送信を伴わない回帰試験
 python -B -X utf8 -m unittest discover -s outer/tests -p 'test_*.py'
-python -B -X utf8 -m unittest discover -s research/tests -p 'test_*.py'
+.\.venv-analysis\Scripts\python -B -X utf8 -m unittest discover -s research/tests -p 'test_*.py'
 dotnet run --project inner/evaluator/MusicStore.Evaluator.Tests --configuration Release
 dotnet run --project inner/evaluator/Education.Evaluator.DiagnosticsChecks --configuration Release
 dotnet run --project inner/evaluator/LegacyScan.Tests --configuration Release
@@ -43,11 +47,9 @@ node --test inner/browser/education-identity.test.cjs
 `SAMPLE2_LIVE_BROWSER_FIXTURES=1` を指定すると実行できます。試験の成功は、
 元の研究データの再採点や新しいモデル取得の完了を意味しません。
 
-catalog集計の依存は既存の固定一覧を使います。
+catalog集計も同じ分析用環境を使います。
 
 ```powershell
-python -m venv .venv-analysis
-.\.venv-analysis\Scripts\python -m pip install -r research/requirements-confirmatory.txt
 .\.venv-analysis\Scripts\python -B -X utf8 -m research.catalog_cohort_analysis --help
 ```
 

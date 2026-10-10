@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class EducationTaskControls(unittest.TestCase):
     def test_input_adapter_never_returns_private_expectations(self):
         from outer.harness import migration_input
-        with tempfile.TemporaryDirectory(dir=ROOT / 'artifacts') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             fixture = Path(directory)
             repo = fixture / 'repo'
             contract = repo / 'research/tasks' / tasks.FAMILY
@@ -52,7 +52,7 @@ class EducationTaskControls(unittest.TestCase):
         self.assertEqual(c['manual_grade_expectations']['9003'], d['manual_grade_expectations']['9003'])
 
     def test_raw_schema_conversion_ids_and_null_grade(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / 'artifacts') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'raw.sqlite'
             tasks.database(ROOT, 'C', path, legacy=True)
             raw = tasks.rows(path, legacy=True)
@@ -62,7 +62,7 @@ class EducationTaskControls(unittest.TestCase):
             self.assertIsNone(raw['Enrollments']['rows'][2]['Grade'])
 
     def test_oracle_detects_lost_relationship_and_tolerates_extra_schema(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / 'artifacts') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'target.sqlite'
             tasks.database(ROOT, 'C', path)
             with closing(sqlite3.connect(path)) as connection, connection:
@@ -73,7 +73,7 @@ class EducationTaskControls(unittest.TestCase):
             self.assertEqual(tasks.compare_rows(path, tasks.expected_tables(ROOT, 'C'))[0]['id'], 9001)
 
     def test_source_parser_rejects_unhandled_explicit_enum(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / 'artifacts') as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'Enrollment.cs'
             path.write_text('public enum Grade { A=2, B }', encoding='utf-8')
             with self.assertRaises(ValueError):

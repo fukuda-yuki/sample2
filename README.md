@@ -1,5 +1,8 @@
 # modernization-eval
 
+このリポジトリは、承認済み計画の取得・評価・固定資材を検証する専用機です。
+研究計画・コホート・分析・論文の現在の正本は [misc](https://github.com/fukuda-yuki/misc) です。
+新 campaign の状態分離・承認・引渡しは [初期化契約](docs/campaign-initialization.md) を参照してください。
 新100ペアで使用した取得・評価コードは、このリポジトリのソースとして管理します。
 取得と評価を重ねる入口は `research.acquisition_pipeline`、保存済み生成物の評価は
 `outer/harness/evaluate.py` です。[コードの利用・検証手順](docs/code-usage.md)から
@@ -18,13 +21,15 @@
 
 実モデル対応CLIの操作は [検証機ガイド](docs/verification-machine.md)、実測結果・修正内容・確認範囲は [納品報告](docs/verification-delivery-20260918.md) にあります。`MS1-001` の3介入×2回が実モデルで完走し、全322呼び出しの原本照合と、復元後の再採点を確認しました。
 
-既存システムのモダナイズを題材に、**Context Engineering**（特にモデルが実際に受け取る Input コンテキスト）の効果を、品質と Run 全体の input/output token の両面から追う研究のための作業リポジトリ。
+既存システムのモダナイズを題材にした Context Engineering 研究の取得・測定を支えます。科学的な条件・件数・モデルの決定は承認済み計画から受け取ります。
 
 `sample1` は旧実験の保存・参照元として残し、旧実験の前提（条件名 `normal` / `anti`、AP-001、旧要件ID、固定分母 57、旧実行許可など）は本リポジトリへ持ち込まない。
 
 ## 作業の正本
 
-- 計画と判断: [docs/plan.md](docs/plan.md)、[docs/decision-log.md](docs/decision-log.md)
+- 現在の研究計画・判断・コホート・分析・論文: [misc](https://github.com/fukuda-yuki/misc)
+- 本検証機の実行契約: [初期化](docs/campaign-initialization.md)、[コード利用](docs/code-usage.md)
+- 過去の計画と判断（来歴）: [docs/plan.md](docs/plan.md)、[docs/decision-log.md](docs/decision-log.md)
 - 個別 Issue: [fukuda-yuki/modernization-eval Issues](https://github.com/fukuda-yuki/modernization-eval/issues)
 
 | Issue | 内容 | 成果物 |
@@ -42,7 +47,7 @@
 
 | パス | 区分 | 責務 |
 | --- | --- | --- |
-| `docs/` | 研究管理 | 計画・調査・選定・仕様・判断履歴 |
+| `docs/` | 検証機の文書 | 実行・評価・保存契約と過去の研究文書の来歴 |
 | `inner/` | 内側 | 品質評価仕様、評価器の実装、校正用 fixture、評価結果 |
 | `outer/` | 外側 | 開始状態の用意、実行・停止・回収、固定、採点呼び出し、記録・再集計 |
 | `runs/` | 実装作業領域 | 実装エージェントの作業場所と固定成果物。**追跡しない**（`.gitignore`） |

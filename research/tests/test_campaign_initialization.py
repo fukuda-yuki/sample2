@@ -1,0 +1,192 @@
+"""Synthetic campaign lifecycle; no model, private scorer, browser or Docker."""
+import copy
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+from outer.harness import profiles, run, util
+from research import acquisition_pipeline as pipeline, campaign_initialization as fresh, live_pilot
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+class CampaignTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        refs = {}
+        for name in ('monitor.py', 'wave_resource_probe.py', 'browser.json', 'lock.json'):
+            util.write_new_json(self.root/name, {})
+            refs[name] = live_pilot.reference(self.root/name)
+        self.plan = dict(kind=fresh.KIND, campaign_id='synthetic-a', output_root=str(self.root/'a'),
+            pair_count=1, pair_concurrency=1, task_revision='evaluators-20261006',
+            assignments=[dict(pair=1, cases=[dict(task='MS1-CONT-A', condition=arm, pair=1, slot=i,
+                attempt=1, run_id=run.run_id_for('MS1-CONT-A', arm, 1)) for i, arm in enumerate(('explore', 'preload'), 1)])],
+            runtime_by_task={'MS1-CONT-A': 'deepseek-music-repaired-v1'},
+            bounds=dict(live_pilot.BOUNDS, max_pairs=1, max_runs=2, max_pair_attempts=3,
+                        request_count=100, observed_tokens=100000, wall_seconds=9000),
+            settings=dict(model_id='deepseek-v4.1-flash', provider='opencode-go', use_balance=False, paid_fallback=False),
+            protected_roots=[str(self.root/'original')], resource_monitor=refs['monitor.py'],
+            resource_probe=refs['wave_resource_probe.py'], browser_pin=refs['browser.json'],
+            runtime_locks={'deepseek-music-repaired-v1': refs['lock.json']}, thresholds=live_pilot.DEFAULT_THRESHOLDS)
+        runtime = profiles.read(REPO, 'runtimes', 'deepseek-music-repaired-v1')
+        self.plan['bounds'].update(run_seconds=runtime['timeout_seconds'], provider_seconds=runtime['provider_timeout_seconds'])
+        task = profiles.task_profile(REPO, 'MS1-CONT-A', 'evaluators-20261006')
+        util.write_json_atomic(self.root/'lock.json', dict(task_profile_revision='evaluators-20261006',
+            runtime_profile_id='deepseek-music-repaired-v1', evaluator_version=task['evaluation']['evaluation_version'],
+            evaluator_project=task['evaluation']['project']))
+        self.plan['runtime_locks']['deepseek-music-repaired-v1'] = live_pilot.reference(self.root/'lock.json')
+        self.patch(fresh.profiles, 'runtime_root', return_value=self.root)
+        from research import repaired_runtime
+        self.patch(repaired_runtime, 'validate_repaired_runtime_binding')
+        actual = fresh.subprocess.check_output
+        self.patch(fresh.subprocess, 'check_output', side_effect=lambda args, **kw: '' if args == ['git', 'status', '--porcelain'] else actual(args, **kw))
+
+    def patch(self, target, name, **kw):
+        p = patch.object(target, name, **kw)
+        result = p.start(); self.addCleanup(p.stop)
+        return result
+
+    def initialize(self, name='a'):
+        plan = copy.deepcopy(self.plan)
+        plan.update(campaign_id='synthetic-'+name, output_root=str(self.root/name))
+        path = self.root/(name+'-plan.json'); util.write_new_json(path, plan)
+        approval = self.root/(name+'-approval.json')
+        util.write_new_json(approval, dict(authorized=True, approved_by='user', authorization_reference='synthetic-only',
+            campaign_id=plan['campaign_id'], plan_sha256=util.sha256_file(path)))
+        return fresh.initialize(REPO, path, approval)
+
+    def test_two_geneses_do_not_inherit_state_and_duplicate_root_refused(self):
+        a, b = self.initialize(), self.initialize('b')
+        self.assertNotEqual(a['pipeline_id'], b['pipeline_id'])
+        for config in (a, b):
+            self.assertEqual(config['usage']['requests'], 0)
+            self.assertEqual(config['accepted_slots'], [])
+            self.assertNotIn('previous_summary', config)
+            self.assertNotIn('authorization', config)
+            fresh.verify_config(config, REPO)
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            fresh.initialize(REPO, self.root/'a-plan.json', self.root/'a-approval.json')
+
+    def test_unapproved_or_changed_plan_and_inherited_fields_refused_before_output(self):
+        path = self.root/'draft.json'; approval = self.root/'approval.json'
+        util.write_new_json(path, self.plan); util.write_new_json(approval, dict(authorized=False))
+        with self.assertRaises(ValueError): fresh.initialize(REPO, path, approval)
+        self.assertFalse((self.root/'a').exists())
+        old = dict(self.plan, authorization='old permission')
+        with self.assertRaises(ValueError): fresh.validate(old, REPO)
+        config = self.initialize()
+        util.write_json_atomic(self.root/'a-plan.json', dict(self.plan, pair_count=100))
+        with self.assertRaises(ValueError): fresh.verify_config(config, REPO)
+
+    def test_budget_model_conditions_and_output_are_explicit(self):
+        for key, value in [('pair_count', 100), ('pair_concurrency', 3), ('output_root', str(REPO)),
+                           ('settings', dict(self.plan['settings'], model_id='unapproved'))]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                fresh.validate(dict(self.plan, **{key:value}), REPO)
+        config = self.initialize()
+        for key, value in [('pair_count', 100), ('accepted_slots', [1]), ('bounds', {}),
+                           ('started_at', '2099-01-01T00:00:00+00:00')]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                fresh.verify_config(dict(config, **{key:value}), REPO)
+
+    def setup_engine(self):
+        # The production epoch relocation uses the real prepared runtime path.
+        self.patch(pipeline, 'PairWatch', side_effect=lambda *a: Mock(fault=None, finish=Mock(return_value=True)))
+        # Fixture has no Docker resources; cleanup is tested by the owned-close suite.
+        self.patch(pipeline, 'confirm_owned_stopped')
+        self.uuids = []
+        self.calls = 0
+        def acquire(repo, epoch, phase_path, **kw):
+            phase = util.read_json(phase_path)
+            self.calls += 1
+            for case in phase['assignments'][0]['cases']:
+                self.uuids.append(case['run_instance_id'])
+                root = Path(phase['batch'])/case['run_id']
+                util.write_new_json(root/'manifest.json', dict(case, duration_seconds=2,
+                    started_at='2026-10-10T00:00:00+00:00', ended_at='2026-10-10T00:00:02+00:00'))
+                util.append_line(root/'usage/raw/started.jsonl', dict(request_id='r'))
+                util.append_line(root/'usage/raw/events.jsonl', dict(request_id='r', usage=dict(input_tokens=4, output_tokens=1)))
+            return dict(reason='technical_failure' if self.calls == 1 else 'evaluation_pending')
+        self.patch(pipeline.live_pilot, 'execute_owned_pair_scope', side_effect=acquire)
+        def score(repo, record):
+            attempt = util.read_json(record)
+            output = dict(accepted=True, slot=attempt['slot'], attempt=attempt['attempt'], quality={'explore':0,'preload':0})
+            util.write_new_json(Path(record).parent/'pipeline-evaluation.json', output)
+            return dict(output, batch=str(Path(record).parent))
+        # Relocation remains real in production. Only fixture's locked path is redirected.
+        original = pipeline.create_epoch
+        def epoch(repo, config, number):
+            with patch.object(live_pilot, 'reference', wraps=live_pilot.reference) as ref:
+                actual = ref._mock_wraps
+                ref.side_effect = lambda p: actual(self.root/'lock.json' if str(p).endswith('/runtime/'+self.root.name+'/lock.json') else p)
+                return original(repo, config, number)
+        self.patch(pipeline, 'create_epoch', side_effect=epoch)
+
+        return self.patch(pipeline, 'evaluation_process', side_effect=score)
+
+    def test_retry_fresh_uuid_all_resources_low_quality_resume_and_no_double_dispatch(self):
+        config = self.initialize()
+        self.setup_engine()
+        path = Path(config['root'])/'config.json'
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(len(set(self.uuids)), 4)
+        events = pipeline.pair_execution.events(Path(config['root'])/'events.jsonl')
+        complete = [e for e in events if e['kind']=='complete'][-1]
+        self.assertEqual(complete['usage']['requests'], 4)
+        self.assertEqual(complete['usage']['observed_tokens'], 20)
+        receipts = [util.read_json(Path(e['record']).parent/'pipeline-acquisition.json')
+                    for e in events if e['kind']=='reserved']
+        self.assertEqual([r['reason'] for r in receipts], ['technical_failure', 'evaluation_pending'])
+        self.assertTrue(all(len(r['runs']) == 2 for r in receipts))
+
+        self.assertEqual(len([e for e in events if e['kind']=='accepted']), 1)
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+        final = pipeline.pair_execution.events(Path(config['root'])/'events.jsonl')[-1]
+        self.assertEqual(final['usage'], complete['usage'])
+
+    def test_saved_evaluation_recovered_without_model_resend(self):
+        config = self.initialize(); scorer = self.setup_engine()
+        normal = scorer.side_effect
+        scorer.side_effect = RuntimeError('synthetic scoring outage')
+        path = Path(config['root'])/'config.json'
+        with self.assertRaisesRegex(RuntimeError, 'scoring outage'):
+            pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+        scorer.side_effect = normal
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+
+    def test_save_before_accept_event_recovers_and_duplicate_reservation_stops(self):
+        config = self.initialize(); scorer = self.setup_engine()
+        normal = scorer.side_effect
+        def save_then_interrupt(*args):
+            normal(*args)
+            raise RuntimeError('synthetic interruption after save')
+        scorer.side_effect = save_then_interrupt
+        path = Path(config['root'])/'config.json'
+        with self.assertRaisesRegex(RuntimeError, 'after save'):
+            pipeline.run_pipeline(REPO, path)
+        scorer.side_effect = AssertionError('Saved evaluation must not run twice')
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+        journal = Path(config['root'])/'events.jsonl'
+        reserved = next(e for e in pipeline.pair_execution.events(journal) if e['kind']=='reserved')
+        pipeline.pair_execution.append(journal, reserved)
+        with self.assertRaisesRegex(ValueError, 'Duplicate attempt'):
+            pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+
+    def test_budget_finish_is_idempotent_but_changed_usage_requires_reconcile(self):
+        config = self.initialize(); budget = pipeline.Budget(config)
+        usage = dict(requests=2, observed_tokens=10, accumulated_run_seconds=4, dispatched_runs=2, unknown_usage_requests=[])
+        budget.finish('attempt', usage); budget.finish('attempt', usage)
+        self.assertEqual(budget.total['requests'], 2)
+        with self.assertRaises(ValueError): budget.finish('attempt', dict(usage, requests=3))
+
+
+if __name__ == '__main__': unittest.main()

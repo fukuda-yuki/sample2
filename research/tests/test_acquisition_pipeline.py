@@ -79,6 +79,29 @@ class PipelineTests(unittest.TestCase):
             pending,held=pipeline.pending_acquisition_slots({'attempted_slots':[]},attempts,accepted)
             self.assertEqual(pending,[86,24]);self.assertEqual(held,{46,73})
 
+    def test_new_campaign_does_not_inherit_individual_exclusion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            util.write_new_json(root/'pipeline-acquisition.json', dict(acquired=True, attempt='old'))
+            util.write_new_json(root/'pipeline-evaluation.json', dict(accepted=False, slot=1, attempt='old',
+                classification='excluded_incomplete_evaluation_user_authorized_reacquisition', retry_requires_new_uuids=True))
+            pending, held = pipeline.pending_acquisition_slots(dict(campaign_plan={}, pair_count=1, attempted_slots=[]),
+                [dict(slot=1, record=str(root/'pipeline-attempt.json'))], set())
+            self.assertEqual(pending, []); self.assertEqual(held, {1})
+
+    def test_missing_usage_and_duration_stay_unknown_and_duplicate_run_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = dict(run_instance_id='one', started_at='2026-10-10T00:00:00+00:00', ended_at='2026-10-10T00:00:02+00:00')
+            util.write_new_json(root/'run/manifest.json', manifest)
+            util.append_line(root/'run/usage/raw/started.jsonl', dict(request_id='incomplete'))
+            result = pipeline.usage_for(root)
+            self.assertEqual(result['unknown_usage_requests'][0]['status'], 'missing_terminal_event')
+            self.assertEqual(result['missing_duration_runs'], ['one'])
+            self.assertEqual(result['observed_tokens'], 0)
+            util.write_new_json(root/'copy/manifest.json', manifest)
+            with self.assertRaisesRegex(ValueError, 'Duplicate Run UUID'): pipeline.usage_for(root)
+
     def test_static_pipeline_validation_cached_but_changed_plan_revalidated(self):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'plan.json'; repo=Path(directory)

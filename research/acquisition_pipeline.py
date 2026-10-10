@@ -50,20 +50,34 @@ def dispatch_pipeline(items, acquire, evaluate, acquired, evaluated, *, capacity
 
 def usage_for(batch):
     result = dict(requests=0, observed_tokens=0, accumulated_run_seconds=0.,
-                  dispatched_runs=0, unknown_usage_requests=[])
+                  dispatched_runs=0, unknown_usage_requests=[], missing_duration_runs=[])
+    identities = set()
     for path in Path(batch).glob('*/manifest.json'):
         manifest = util.read_json(path)
+        identity = manifest['run_instance_id']
+        if identity in identities: raise ValueError('Duplicate Run UUID in usage inventory')
+        identities.add(identity)
         if manifest.get('started_at'): result['dispatched_runs'] += 1
         duration = manifest.get('duration_seconds')
-        if isinstance(duration, (int, float)): result['accumulated_run_seconds'] += duration
+        if type(duration) in (int, float) and duration >= 0:
+            result['accumulated_run_seconds'] += duration
         else:
             if manifest.get('started_at') and not manifest.get('ended_at'):
                 result['accumulated_run_seconds'] += max(0, (datetime.now(timezone.utc)-
                     datetime.fromisoformat(manifest['started_at'])).total_seconds())
+            elif manifest.get('started_at'):
+                result['missing_duration_runs'].append(identity)
         starts, errors = live_usage.journal(path.parent/'usage/raw/started.jsonl')
         rows, more = live_usage.journal(path.parent/'usage/raw/events.jsonl')
         if errors or more: raise ValueError('Malformed usage journal; retain and reconcile')
+        started_ids = [r['request_id'] for r in starts]
+        ended_ids = [r['request_id'] for r in rows]
+        if len(set(started_ids)) != len(started_ids) or len(set(ended_ids)) != len(ended_ids):
+            raise ValueError('Duplicate usage request; reconcile without double counting')
         result['requests'] += len(starts)
+        for request_id in set(started_ids) - set(ended_ids):
+            result['unknown_usage_requests'].append(dict(run_instance_id=identity,
+                request_id=request_id, status='missing_terminal_event', observed_tokens=None))
         for row in rows:
             usage = row.get('usage')
             if isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0
@@ -80,6 +94,7 @@ class Budget:
         self.config = config
         self.lock = threading.RLock()
         self.active = {}
+        self.finished = {}
         self.total = copy.deepcopy(config['usage'])
 
     def check(self, identity, current):
@@ -96,11 +111,17 @@ class Budget:
 
     def finish(self, identity, usage):
         with self.lock:
+            if identity in self.finished:
+                if self.finished[identity] != usage:
+                    raise ValueError("Completed attempt usage changed; reconcile retained evidence")
+                return
+            self.finished[identity] = copy.deepcopy(usage)
             self.active.pop(identity, None)
             for key in ('requests','observed_tokens','accumulated_run_seconds','dispatched_runs'):
                 self.total[key] += usage[key]
             self.total.setdefault('unknown_usage_requests', []).extend(usage['unknown_usage_requests'])
             self.total['observed_tokens_are_lower_bound'] = bool(self.total['unknown_usage_requests'])
+            self.total.setdefault('missing_duration_runs', []).extend(usage.get('missing_duration_runs', []))
 
 
 class PairWatch(live_pilot.PilotWatch):
@@ -142,6 +163,8 @@ def create_epoch(repo, config, number):
     plan.pop('campaign_authority', None)
     plan.pop('reservation_only_until_wave_intent', None)
     plan['launch_supervisor'] = live_pilot.reference(repo/'research/live_pilot_launcher.py')
+    if 'campaign_plan' in config:
+        plan['campaign_config'] = live_pilot.reference(Path(config['root'])/'config.json')
     for rid, reference in plan['runtime_locks'].items():
         plan['runtime_locks'][rid] = live_pilot.reference(repo/'artifacts/runtime'/Path(reference['path']).parent.name/'lock.json')
     for pair in plan['assignments']:
@@ -251,6 +274,41 @@ def evaluate_pair(repo, attempt):
         return outcome
 
 
+def attempt_runs(batch, attempt):
+    """Small additive inventory in the existing acquisition receipt, including unsent slots.
+
+    Evaluation indices remain separate: reassessment never creates another Run
+    or another resource charge. Hash references describe this saved checkpoint.
+    """
+    phase = util.read_json(live_pilot.checked(attempt['phase']))
+    state = pair_execution.state(Path(batch)/'_control/pair-journal.jsonl')
+    rows = []
+    for pair in phase['assignments']:
+        for case in pair['cases']:
+            root = Path(batch)/case['run_id']
+            present = (root/'manifest.json').exists()
+            dispatch = state['dispatch'].get(case['run_id'])
+            rows.append(dict(run_instance_id=case['run_instance_id'], run_id=case['run_id'],
+                slot=attempt['slot'], task=case['task'], condition=case['condition'],
+                attempt=attempt['attempt'], materialized=present, dispatch=dispatch,
+                manifest=dict(path=str(root/'manifest.json'),
+                    sha256_at_acquisition=util.sha256_file(root/'manifest.json')) if present else None,
+                missing_reason=None if present else 'not_materialized',
+                usage=usage_for_run(root) if present else None))
+    return rows
+
+
+def usage_for_run(root):
+    # Preserve per-Run resource and original/reassessment lookup locations;
+    # raw usage remains in its existing hash-bound archive, never inline here.
+    manifest = util.read_json(Path(root)/'manifest.json')
+    return dict(duration_seconds=manifest.get('duration_seconds'),
+                raw=util.tree_hashes(Path(root)/'usage/raw'),
+                normalized=live_pilot.reference(Path(root)/'usage/normalized.json')
+                    if (Path(root)/'usage/normalized.json').exists() else None,
+                evaluations_index=str(Path(root)/'evaluations/index.jsonl'))
+
+
 def pending_acquisition_slots(config, attempts, accepted):
     """Keep saved successful acquisitions out of model retries unless explicitly excluded."""
     held = set()
@@ -261,20 +319,25 @@ def pending_acquisition_slots(config, attempts, accepted):
         if not saved['acquired']: continue
         output = batch/'pipeline-evaluation.json'
         decision = util.read_json(output) if output.exists() else {}
-        excluded = (decision.get('accepted') is False
+        excluded = ('campaign_plan' not in config and decision.get('accepted') is False
             and decision.get('classification') == 'excluded_incomplete_evaluation_user_authorized_reacquisition'
             and decision.get('retry_requires_new_uuids') is True
             and decision.get('slot') == attempt['slot']
             and decision.get('attempt') == saved['attempt'])
         if not excluded: held.add(attempt['slot'])
     historical = set(config['attempted_slots']) | {a['slot'] for a in attempts}
-    pending = [n for n in range(1,101) if n not in accepted and n not in held]
+    pending = [n for n in range(1, config.get('pair_count', 100)+1) if n not in accepted and n not in held]
     pending.sort(key=lambda n:(n in historical,n))
     return pending, held
 
 
 def run_pipeline(repo, config_path):
     config = util.read_json(config_path)
+    if 'campaign_plan' in config:
+        from research.campaign_initialization import verify_config
+        verify_config(config, repo)
+        if Path(config_path).resolve() != Path(config['root'])/'config.json':
+            raise ValueError('Foreign campaign config path')
     root = Path(config['root']); events_path = root/'events.jsonl'
     def event(kind, **fields):
         with event_lock:
@@ -285,6 +348,18 @@ def run_pipeline(repo, config_path):
         existing = pair_execution.events(events_path)
         accepted = set(config['accepted_slots']) | {e['slot'] for e in existing if e['kind']=='accepted'}
         attempts = [e for e in existing if e['kind']=='reserved']
+        if len({a['record'] for a in attempts}) != len(attempts):
+            raise ValueError('Duplicate attempt reservation; reconcile without dispatch')
+        selected = {}
+        for e in existing:
+            if e['kind'] == 'accepted':
+                if e['slot'] in selected:
+                    raise ValueError('Duplicate selected slot; reconcile without dispatch')
+                selected[e['slot']] = e
+        for a in attempts:
+            record = live_pilot.safe_path(a['record'])
+            if not record.is_relative_to(root/'epochs'):
+                raise ValueError('Foreign attempt output')
         if attempts:
             # Resume saved completed acquisitions before considering fresh UUIDs.
             for attempt in attempts:
@@ -325,7 +400,7 @@ def run_pipeline(repo, config_path):
                     result = evaluation_process(repo, a['record'])
                     if result['accepted']:
                         accepted.add(a['slot']); event('accepted', slot=a['slot'], record=live_pilot.reference(batch/'pipeline-evaluation.json'))
-            while len(accepted) < 100:
+            while len(accepted) < config.get('pair_count', 100):
                 number = 1 + len(list((root/'epochs').glob('*/plan.json')))
                 epoch = create_epoch(repo, config, number); plan = util.read_json(epoch)
                 pending, held = pending_acquisition_slots(config, attempts, accepted)
@@ -348,12 +423,13 @@ def run_pipeline(repo, config_path):
                         reserved_count += 1
                         attempts.append(dict(slot=slot, record=str(record)))
                     watch = PairWatch(plan, util.sha256_file(epoch), budget, str(record))
-                    error = None; acquired = False
+                    error = None; acquired = False; reason = 'acquisition_interrupted'
                     try:
                         watch.check(); watch.start()
                         result = live_pilot.execute_owned_pair_scope(repo, epoch, phase_path,
                             budget_watch=watch, defer_postprocess=True)
-                        acquired = result.get('reason') == 'evaluation_pending' and not watch.fault
+                        reason = result.get('reason') or 'acquisition_incomplete_unspecified'
+                        acquired = reason == 'evaluation_pending' and not watch.fault
                     except Exception as exc:
                         error = dict(type=type(exc).__name__, message=str(exc), traceback=traceback.format_exc())
                     finally:
@@ -363,7 +439,8 @@ def run_pipeline(repo, config_path):
                     usage = usage_for(batch)
                     budget.finish(str(record), usage)
                     value = dict(acquired=acquired, slot=slot, attempt=attempt['attempt'], record=str(record),
-                        usage=usage, fault=watch.fault, error=error, at=run.now())
+                        usage=usage, reason=reason, runs=attempt_runs(batch, attempt),
+                        fault=watch.fault, error=error, at=run.now())
                     util.write_new_json(batch/'pipeline-acquisition.json', value)
                     return value
                 def acquired(slot, result):
@@ -382,7 +459,8 @@ def run_pipeline(repo, config_path):
                 def score(slot, result):
                     event('evaluation_started', slot=slot, record=result['record'])
                     return evaluation_process(repo,result['record'])
-                dispatch_pipeline(pending, acquire, score, acquired, evaluated)
+                dispatch_pipeline(pending, acquire, score, acquired, evaluated,
+                    capacity=config['policy']['active_model_pairs'])
                 # Persistent evaluation faults require saved-result repair, not a new model attempt.
                 if any(a['slot'] not in accepted and util.read_json(Path(a['record']).parent/'pipeline-acquisition.json')['acquired']
                        for a in attempts):
@@ -441,9 +519,14 @@ def confirm_owned_stopped(batch):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['run','evaluate']); parser.add_argument('path',type=Path)
+    parser.add_argument('action',choices=['init','run','evaluate']); parser.add_argument('path',type=Path)
+    parser.add_argument('--approval', type=Path)
     parser.add_argument('--repo',type=Path,required=True); args=parser.parse_args()
-    if args.action=='evaluate': evaluate_pair(args.repo,util.read_json(args.path))
+    if args.action=='init':
+        if args.approval is None: parser.error('init requires --approval bound to the exact plan hash')
+        from research.campaign_initialization import initialize as initialize_campaign
+        initialize_campaign(args.repo, args.path, args.approval)
+    elif args.action=='evaluate': evaluate_pair(args.repo,util.read_json(args.path))
     else: run_pipeline(args.repo,args.path)
 
 

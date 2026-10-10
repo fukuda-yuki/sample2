@@ -1,0 +1,214 @@
+{
+  "synthetic_only": true,
+  "model_calls": 0,
+  "acquisition_receipts": [
+    {
+      "acquired": false,
+      "slot": 1,
+      "attempt": "39e429a6f662410fb3ded9e4fbca41e5",
+      "record": "/tmp/tmpkgs2d92x/a/epochs/001/data/pair-1/pipeline-attempt.json",
+      "usage": {
+        "requests": 2,
+        "observed_tokens": 10,
+        "accumulated_run_seconds": 4.0,
+        "dispatched_runs": 2,
+        "unknown_usage_requests": [],
+        "missing_duration_runs": []
+      },
+      "reason": "technical_failure",
+      "runs": [
+        {
+          "run_instance_id": "b2b432262af543b08f2d0d990a9116ca",
+          "run_id": "MS1-CONT-A-explore-001",
+          "slot": 1,
+          "task": "MS1-CONT-A",
+          "condition": "explore",
+          "attempt": "39e429a6f662410fb3ded9e4fbca41e5",
+          "materialized": true,
+          "dispatch": null,
+          "manifest": {
+            "path": "/tmp/tmpkgs2d92x/a/epochs/001/data/pair-1/MS1-CONT-A-explore-001/manifest.json",
+            "sha256_at_acquisition": "4dbc7b297712b30b11ac3cc08a381a3c41d8edd7df277b485753d0ea22a781bf"
+          },
+          "missing_reason": null,
+          "usage": {
+            "duration_seconds": 2,
+            "raw": {
+              "events.jsonl": {
+                "sha256": "292fb069a041b2b5a51dbf35c223f2f06555bdd76b1f09b36cf77fd6b2368151",
+                "bytes": 70
+              },
+              "started.jsonl": {
+                "sha256": "9b920bfb975193e2ed476cbcd7dc4a2d3b0d285095efdeb2c893619dcb9afc6f",
+                "bytes": 20
+              }
+            },
+            "normalized": null,
+            "evaluations_index": "/tmp/tmpkgs2d92x/a/epochs/001/data/pair-1/MS1-CONT-A-explore-001/evaluations/index.jsonl"
+          }
+        },
+        {
+          "run_instance_id": "d514818901bc4f94b89af53ee56c9f18",
+          "run_id": "MS1-CONT-A-preload-001",
+          "slot": 1,
+          "task": "MS1-CONT-A",
+          "condition": "preload",
+          "attempt": "39e429a6f662410fb3ded9e4fbca41e5",
+          "materialized": true,
+          "dispatch": null,
+          "manifest": {
+            "path": "/tmp/tmpkgs2d92x/a/epochs/001/data/pair-1/MS1-CONT-A-preload-001/manifest.json",
+            "sha256_at_acquisition": "5cf740c71c09a66f9da3dbc67afb2d645fb333e7b8d00136cc416a7daf23a039"
+          },
+          "missing_reason": null,
+          "usage": {
+            "duration_seconds": 2,
+            "raw": {
+              "events.jsonl": {
+                "sha256": "292fb069a041b2b5a51dbf35c223f2f06555bdd76b1f09b36cf77fd6b2368151",
+                "bytes": 70
+              },
+              "started.jsonl": {
+                "sha256": "9b920bfb975193e2ed476cbcd7dc4a2d3b0d285095efdeb2c893619dcb9afc6f",
+                "bytes": 20
+              }
+            },
+            "normalized": null,
+            "evaluations_index": "/tmp/tmpkgs2d92x/a/epochs/001/data/pair-1/MS1-CONT-A-preload-001/evaluations/index.jsonl"
+          }
+        }
+      ],
+      "fault": null,
+      "error": null,
+      "at": "2026-10-10T18:11:41.089977+00:00"
+    },
+    {
+      "acquired": true,
+      "slot": 1,
+      "attempt": "ad7f7bc3c5cc48648ef01e8b9dff03ff",
+      "record": "/tmp/tmpkgs2d92x/a/epochs/002/data/pair-1/pipeline-attempt.json",
+      "usage": {
+        "requests": 2,
+        "observed_tokens": 10,
+        "accumulated_run_seconds": 4.0,
+        "dispatched_runs": 2,
+        "unknown_usage_requests": [],
+        "missing_duration_runs": []
+      },
+      "reason": "evaluation_pending",
+      "runs": [
+        {
+          "run_instance_id": "7fd7b6b60f5941c99328619e4949de26",
+          "run_id": "MS1-CONT-A-explore-001",
+          "slot": 1,
+          "task": "MS1-CONT-A",
+          "condition": "explore",
+          "attempt": "ad7f7bc3c5cc48648ef01e8b9dff03ff",
+          "materialized": true,
+          "dispatch": null,
+          "manifest": {
+            "path": "/tmp/tmpkgs2d92x/a/epochs/002/data/pair-1/MS1-CONT-A-explore-001/manifest.json",
+            "sha256_at_acquisition": "e7b1f0ee451c0c516f659c13614a57a841e2215f618d7fcf878950e2d504754d"
+          },
+          "missing_reason": null,
+          "usage": {
+            "duration_seconds": 2,
+            "raw": {
+              "events.jsonl": {
+                "sha256": "292fb069a041b2b5a51dbf35c223f2f06555bdd76b1f09b36cf77fd6b2368151",
+                "bytes": 70
+              },
+              "started.jsonl": {
+                "sha256": "9b920bfb975193e2ed476cbcd7dc4a2d3b0d285095efdeb2c893619dcb9afc6f",
+                "bytes": 20
+              }
+            },
+            "normalized": null,
+            "evaluations_index": "/tmp/tmpkgs2d92x/a/epochs/002/data/pair-1/MS1-CONT-A-explore-001/evaluations/index.jsonl"
+          }
+        },
+        {
+          "run_instance_id": "8901bc40e9f042f78847bc0cea9cfeb0",
+          "run_id": "MS1-CONT-A-preload-001",
+          "slot": 1,
+          "task": "MS1-CONT-A",
+          "condition": "preload",
+          "attempt": "ad7f7bc3c5cc48648ef01e8b9dff03ff",
+          "materialized": true,
+          "dispatch": null,
+          "manifest": {
+            "path": "/tmp/tmpkgs2d92x/a/epochs/002/data/pair-1/MS1-CONT-A-preload-001/manifest.json",
+            "sha256_at_acquisition": "31645023f476cc2cc0dcf86273f714c2c190190f23eeb5845975a4f978b8f15a"
+          },
+          "missing_reason": null,
+          "usage": {
+            "duration_seconds": 2,
+            "raw": {
+              "events.jsonl": {
+                "sha256": "292fb069a041b2b5a51dbf35c223f2f06555bdd76b1f09b36cf77fd6b2368151",
+                "bytes": 70
+              },
+              "started.jsonl": {
+                "sha256": "9b920bfb975193e2ed476cbcd7dc4a2d3b0d285095efdeb2c893619dcb9afc6f",
+                "bytes": 20
+              }
+            },
+            "normalized": null,
+            "evaluations_index": "/tmp/tmpkgs2d92x/a/epochs/002/data/pair-1/MS1-CONT-A-preload-001/evaluations/index.jsonl"
+          }
+        }
+      ],
+      "fault": null,
+      "error": null,
+      "at": "2026-10-10T18:11:41.111452+00:00"
+    }
+  ],
+  "final_evaluation": {
+    "accepted": true,
+    "slot": 1,
+    "attempt": "ad7f7bc3c5cc48648ef01e8b9dff03ff",
+    "quality": {
+      "explore": 0,
+      "preload": 0
+    }
+  },
+  "preload_fixture_manifest": {
+    "task": "MS1-CONT-A",
+    "condition": "preload",
+    "pair": 1,
+    "slot": 2,
+    "attempt": 1,
+    "run_id": "MS1-CONT-A-preload-001",
+    "run_instance_id": "8901bc40e9f042f78847bc0cea9cfeb0",
+    "duration_seconds": 2,
+    "started_at": "2026-10-10T00:00:00+00:00",
+    "ended_at": "2026-10-10T00:00:02+00:00"
+  },
+  "final_usage": {
+    "requests": 4,
+    "observed_tokens": 20,
+    "accumulated_run_seconds": 8.0,
+    "dispatched_runs": 4,
+    "unknown_usage_requests": [],
+    "observed_tokens_are_lower_bound": false,
+    "missing_duration_runs": []
+  },
+  "separate_evaluator_example": {
+    "synthetic_only": true,
+    "stand_in_evaluator": true,
+    "record": {
+      "evaluation_id": "TEST-001-edfe4c3c0b27-1.0.0-001",
+      "evaluation_version": "1.0.0",
+      "scoring_state": "scored",
+      "adopted": true,
+      "evaluator_sha256": "a8d5d374acfefa75f7e040aa0b2f7990685460a7c6b83e20c0faaa2ece69aad8",
+      "evaluator_sha256_reported": "a8d5d374acfefa75f7e040aa0b2f7990685460a7c6b83e20c0faaa2ece69aad8",
+      "evaluation_sha256": "aa0f83fad4b8112a3b6b26672410fc011afbe396fb825bd36a948430c7d7b558",
+      "artifact_sha256_outer": "edfe4c3c0b270f42e1d95b5be2b58bc51ef3ca6d22ef15ccad6196f5d129d967",
+      "artifact_sha256_reported": "edfe4c3c0b270f42e1d95b5be2b58bc51ef3ca6d22ef15ccad6196f5d129d967",
+      "spec_sha256": "009dccd151625257405ee3696bf18a06342536672f6b472d0beeadcef247cd63"
+    },
+    "stand_in_evaluator_calls": 1
+  },
+  "pipeline_evaluator_calls": 0
+}

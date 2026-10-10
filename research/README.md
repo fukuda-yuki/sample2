@@ -1,5 +1,10 @@
 # MS1 exploratory analysis
 
+For the new100 acquisition/evaluation pipeline and restored cohort utilities,
+start with the [current code usage guide](../docs/code-usage.md).
+The 320-pair instructions below describe the historical catalog workflow;
+they are not the entry point for the later new100 pipeline.
+
 This directory contains research code, not an alternative agent/evaluator.
 For interpretation of acquired results and evidence-based next-stage decisions,
 follow [AGENTS.md](../AGENTS.md) and the
@@ -46,6 +51,32 @@ eighteen model executions plus the preserved pre-model failure. The final
 analysis contains 955 new calls; the historical six retain exactly 322 calls.
 
 ## Programs
+
+- `catalog_cohort_snapshot`: copy a fixed prefix of sealed catalog Runs into a
+  new offline snapshot, retain original hashes, append-only evaluation recovery
+  history and all allocations, without changing acquisition. Unlike the pair
+  sharing slice, it includes full legacy inputs and saved HTTP/browser databases.
+  An explicitly selected, confirmed stopped Run can be retained without a seal;
+  its capture-time stability is checked and its missing historical seal is kept
+  distinct from the ordinarily sealed Runs.
+- `catalog_cohort_extract`: regenerate whole-cohort Run, request, requirement,
+  evaluation-attempt and action tables with the Python standard library; reconcile
+  saved SSE, normalized usage, SQLite/OTLP and evaluation identities read-only.
+- `catalog_cohort_analysis`: calculate cohort distributions, paired uncertainty,
+  missingness and sensitivity summaries from an explicit snapshot. Incomplete
+  token observations never become zero or an all-acquired complete-case estimate.
+- `catalog_cohort_evidence`: inspect saved browser/HTTP evidence without running
+  the browser or evaluator again.
+- `catalog_cohort_bundle`: seal, verify, package and restore one cohort ZIP with
+  a per-file SHA-256 manifest. The local report and factual data guide were separate
+  deliverables in `artifacts/catalog-cohort-20261003/` (100 acquired pairs);
+  the earlier 33-pair edition used `artifacts/catalog-cohort-20260926/`.
+  These historical paths are not included in a fresh checkout; use the storage
+  references in the [code usage guide](../docs/code-usage.md) to locate archives.
+  Research interpretation is not placed in the raw-data ZIP. Archive integrity
+  and reproducible extraction are separate from source consistency: the new
+  edition preserves seven diagnosed source discrepancies and the extractor's
+  corresponding nonzero exit status. These local artifacts are not Git publication.
 
 - `catalog_execution`: freeze the 320-pair plan, check current pins/storage,
   require separate start approval, durably dispatch the ordinary CLI, recover

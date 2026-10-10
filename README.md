@@ -1,4 +1,9 @@
-# sample2
+# modernization-eval
+
+新100ペアで使用した取得・評価コードは、このリポジトリのソースとして管理します。
+取得と評価を重ねる入口は `research.acquisition_pipeline`、保存済み生成物の評価は
+`outer/harness/evaluate.py` です。[コードの利用・検証手順](docs/code-usage.md)から
+実行入口、固定資材、過去の回収専用ツールの区別を確認できます。
 
 取得実験、分析追補、修正版での別保存再評価は、[実験一覧と読み方](docs/experiments.md)から報告書・データ・コード・再現手順へ進めます。原100ペア・旧評価版・公開済み成果物を保持し、評価器の修正結果を過去の採点へ上書きしません。
 
@@ -20,7 +25,7 @@
 ## 作業の正本
 
 - 計画と判断: [docs/plan.md](docs/plan.md)、[docs/decision-log.md](docs/decision-log.md)
-- 個別 Issue: [fukuda-yuki/sample2 Issues](https://github.com/fukuda-yuki/sample2/issues)
+- 個別 Issue: [fukuda-yuki/modernization-eval Issues](https://github.com/fukuda-yuki/modernization-eval/issues)
 
 | Issue | 内容 | 成果物 |
 | --- | --- | --- |

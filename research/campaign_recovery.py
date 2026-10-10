@@ -149,16 +149,19 @@ def _capture_controller(acquisition_plan):
         raise ValueError('Clean committed recovery controller checkout required')
     commit = repaired_runtime._git(repo, 'rev-parse', 'HEAD')
     names = _controller_names(repo, acquisition_plan) | set(campaign.EXTRA_PINS)
-    pins = {name: util.sha256_file(repo/name) for name in sorted(names)}
     # A mixed sys.path must not label old imported helpers as new controller code.
+    # Capture nested local helpers too, without changing the minimum inventory
+    # used to validate historical receipts that never imported those helpers.
     for name, module in list(sys.modules.items()):
         if not (name.startswith('research.') or name.startswith('outer.harness.')):
             continue
         source = getattr(module, '__file__', None)
         if source and Path(source).suffix == '.py' and '.tests.' not in name:
             source = Path(source).resolve()
-            if not source.is_relative_to(repo) or source.relative_to(repo).as_posix() not in pins:
+            if not source.is_relative_to(repo):
                 raise ValueError('Recovery controller imports a different source checkout')
+            names.add(source.relative_to(repo).as_posix())
+    pins = {name: util.sha256_file(repo/name) for name in sorted(names)}
     value = dict(kind=CONTROLLER_KIND, source_repo=str(repo), source_commit=commit,
         source_pins=pins, pins_sha256=_pins_digest(pins),
         entrypoint='research/campaign_recovery.py', clean_committed_at_creation=True)

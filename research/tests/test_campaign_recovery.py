@@ -535,5 +535,13 @@ class ControllerProvenanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'different source checkout'):
                 subject._capture_controller({'source_pins':{}})
 
+    def test_capture_pins_imported_nested_reader_without_changing_historical_minimum(self):
+        from research.public_readers import evaluator_publication_schema1 as reader
+        actual=Path(subject.__file__).resolve().parents[1]
+        name=Path(reader.__file__).resolve().relative_to(actual).as_posix()
+        self.assertNotIn(name,subject._controller_names(actual,{'source_pins':{}}))
+        value=subject._capture_controller({'source_pins':{}})
+        self.assertEqual(value['source_pins'][name],util.sha256_file(actual/name))
+
 
 if __name__=='__main__':unittest.main()

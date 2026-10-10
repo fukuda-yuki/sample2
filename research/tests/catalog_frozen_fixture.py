@@ -80,12 +80,9 @@ def materialize_r3_fixture(destination, *, saved_proposal=False):
 
 
 def child_python_environment():
-    """Pass the existing local scientific dependencies explicitly to CLI tests."""
-    dependencies = REPO.parent / "sample2-v5/artifacts/v5-test-dependencies"
-    if not dependencies.is_dir():
-        raise FileNotFoundError("Known local scientific test dependencies missing")
+    """Keep the repo importable; CLI tests use the parent's Python environment."""
     env = os.environ.copy()
-    entries = [str(REPO), str(dependencies)]
+    entries = [str(REPO)]
     if env.get("PYTHONPATH"):
         entries.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(entries)

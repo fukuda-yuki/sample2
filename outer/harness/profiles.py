@@ -43,7 +43,8 @@ def task_profile(repo, name, task_revision=None):
     return read(repo, 'tasks', name, task_revision=task_revision)
 
 
-def resolve(repo, task_id, intervention_id, runtime_id='deepseek', *, task_revision=None):
+def resolve(repo, task_id, intervention_id, runtime_id='deepseek', *, task_revision=None,
+            approved_model_id=None):
     task = task_profile(repo, task_id, task_revision)
     intervention = read(repo, 'interventions', intervention_id)
     runtime = read(repo, 'runtimes', runtime_id)
@@ -56,7 +57,12 @@ def resolve(repo, task_id, intervention_id, runtime_id='deepseek', *, task_revis
                 or runtime.get('input_mount') != '/inputs'
                 or runtime.get('prompt_transport') != 'stdin'):
             raise ValueError('Catalog conditions require the versioned catalog runtime')
-    if (runtime['model_id'] != 'deepseek-v4.1-flash'
+    # Historical callers retain their fixed model. A fresh campaign supplies
+    # the model explicitly bound by its approved plan; no provider abstraction.
+    expected_model = approved_model_id if approved_model_id is not None else 'deepseek-v4.1-flash'
+    if not isinstance(expected_model, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}', expected_model):
+        raise ValueError('Explicit supported model identifier required')
+    if (runtime['model_id'] != expected_model
             or runtime['endpoint'] != 'https://opencode.ai/zen/go/v1/chat/completions'
             or runtime['concurrency'] != 1 or runtime['subagents'] is not False
             or type(runtime['timeout_seconds']) is not int or runtime['timeout_seconds'] <= 0):
@@ -137,10 +143,12 @@ def prepare_prompt(condition, source, catalog=None):
 
 
 def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek', *,
-           run_instance_id=None, assignment=None, task_revision=None):
+           run_instance_id=None, assignment=None, task_revision=None, approved_model_id=None):
     repo = Path(repo).resolve()
-    condition = (resolve(repo, task_id, intervention, runtime_id) if task_revision is None
-                 else resolve(repo, task_id, intervention, runtime_id, task_revision=task_revision))
+    options = {}
+    if task_revision is not None: options['task_revision'] = task_revision
+    if approved_model_id is not None: options['approved_model_id'] = approved_model_id
+    condition = resolve(repo, task_id, intervention, runtime_id, **options)
     prepared_root = runtime_root(repo, task_id, condition['runtime'])
     lock = util.read_json(prepared_root / 'lock.json')
     if 'repaired_runtime_binding' in lock:

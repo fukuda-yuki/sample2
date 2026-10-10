@@ -8,6 +8,7 @@
 
 | 用途 | 入口 | 必要なもの |
 | --- | --- | --- |
+| 新 campaign の初期化（送信なし） | `python -m research.acquisition_pipeline init <plan.json> --approval <approval.json> --repo <checkout>` | [明示計画と承認](campaign-initialization.md)、検証済み固定資材 |
 | 取得と評価の並行処理 | `python -m research.acquisition_pipeline` | 承認された固定計画、`config.json`、入力・評価・ブラウザーの固定資材、実行環境 |
 | 保存済みペアの評価・保存 | 同モジュールの `evaluate` | 当該試行の記録、生成物、元の固定コントローラーと評価資材 |
 | 個別Runの採点 | `outer/harness/evaluate.py` の `score_run` | Runの固定入力・生成物・評価資材、所有資源と停止の証跡 |
@@ -74,3 +75,5 @@ catalog集計も同じ分析用環境を使います。
 取得時の固定コードは `afd5f083c93d2df832ed86e855cfc006f0ad726f`、最終保存評価の
 復旧コードは `6693733c8a37a966cb360cd57afc0508a1cc9230` です。後者は前者を
 履歴に含みます。過去文書の `sample2`、日付付きパス、固定版の記述は当時の来歴です。
+
+PR #26 の私有証拠依存は [test ID 別の未実行台帳](private-evidence-test-dependencies.md) を参照してください。

@@ -105,6 +105,9 @@ def verify_pipeline_phase(path, repo):
     if value.get('operational_pipeline') is not True:
         raise ValueError('Explicit acquisition/evaluation pipeline required')
     live_pilot.verify_pins(repo, value['source_pins'])
+    if 'campaign_config' in value:
+        from research.campaign_initialization import verify_epoch
+        return verify_epoch(path, repo)
     key = (str(path), str(repo), util.sha256_file(path))
     if key not in _PIPELINE_PHASES:
         _PIPELINE_PHASES[key] = _verify_main_phase_static(path, repo)
@@ -128,6 +131,9 @@ def _verify_main_phase_static(path,repo):
     """Strict read-only validation used by the independent live observer."""
     path=live_pilot.safe_path(path); repo=live_pilot.safe_path(repo)
     p=util.read_json(path)
+    if 'campaign_config' in p:
+        from research.campaign_initialization import verify_epoch
+        return verify_epoch(path, repo)
     if (p.get('kind')!=KIND or type(p.get('schema_version')) is not int or p['schema_version']!=1
             or p.get('task_revision')!=REVISION or p.get('require_fixed_instances') is not True
             or type(p.get('pair_concurrency')) is not int or p['pair_concurrency']!=2

@@ -66,6 +66,25 @@ class TaskProfileRevisionControls(unittest.TestCase):
                 boundary.assert_not_called()
         self.assertFalse(self.runs.exists())
 
+    def test_explicit_campaign_model_must_match_profile_and_keeps_provider_limits(self):
+        rid = runtime_id('MS1-CONT-A')
+        path = self.repo/'outer/profiles/runtimes'/(rid+'.json')
+        runtime = util.read_json(path)
+        runtime['model_id'] = 'synthetic-approved-model'
+        util.write_json_atomic(path, runtime)
+        with self.assertRaises(ValueError): self.condition('MS1-CONT-A')
+        condition = profiles.resolve(self.repo, 'MS1-CONT-A', 'explore', rid,
+            task_revision=REVISION, approved_model_id='synthetic-approved-model')
+        self.assertEqual(condition['agent']['model_id'], 'synthetic-approved-model')
+        with self.assertRaises(ValueError):
+            profiles.resolve(self.repo, 'MS1-CONT-A', 'explore', rid,
+                task_revision=REVISION, approved_model_id='different-model')
+        runtime['endpoint'] = 'https://example.invalid/paid'
+        util.write_json_atomic(path, runtime)
+        with self.assertRaises(ValueError):
+            profiles.resolve(self.repo, 'MS1-CONT-A', 'explore', rid,
+                task_revision=REVISION, approved_model_id='synthetic-approved-model')
+
     def test_default_lookup_and_resolution_keep_original_task_versions(self):
         for task_id in TASKS:
             with self.subTest(task=task_id):

@@ -467,13 +467,21 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
         target = temporary
     elif state == 'scored':
         evaluation_id = output.get('evaluationId')
-        if not evaluation_id:
-            raise RuntimeError('評価結果に evaluationId がありません')
-        target = evaluations / evaluation_id
-        if target.exists():
-            shutil.rmtree(temporary, ignore_errors=True)
-            raise FileExistsError('同じ評価 ID を 2 つ作らない: ' + str(target))
-        temporary.rename(target)
+        # Evaluator-controlled IDs are labels, never authority over paths.
+        valid_id = (isinstance(evaluation_id, str) and bool(evaluation_id)
+                    and len(evaluation_id) <= 128 and evaluation_id not in ('.', '..')
+                    and all(c.isascii() and (c.isalnum() or c in '-_.') for c in evaluation_id))
+        target = evaluations / evaluation_id if valid_id else temporary
+        if not valid_id or target.exists():
+            record.update(scoring_state='rejected_mismatch', adopted=False, quality=None,
+                          operation_status='evaluation_incomplete',
+                          reason='evaluation_id_collision' if valid_id else 'unsafe_evaluation_id')
+            record['mismatches'].append({'check': record['reason']})
+            # Keep stdout, raw output, browser ownership and work evidence at
+            # the already owned unique directory, including on interrupted retry.
+            target = temporary
+        else:
+            temporary.rename(target)
     else:
         target = evaluations / ('{}-{:03d}-{}'.format(state, sequence, uuid.uuid4().hex))
         temporary.rename(target)

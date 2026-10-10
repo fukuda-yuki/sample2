@@ -1,10 +1,14 @@
-# sample2で作業するエージェントへ
+# modernization-evalで作業するエージェントへ
 
 ## 研究管理側と測定対象を分ける
 
-このリポジトリはContext Engineeringの研究管理側である。研究目的・合意は
-`docs/plan.md`、判断履歴は`docs/decision-log.md`、各取得条件は対象の固定済み
-protocol / execution planを確認する。古い計画やレポートを現在の事実と取り違えない。
+このリポジトリは承認済み計画に従う取得・評価・固定資材の検証機である。
+研究計画・コホート・分析・論文の現在の正本は `fukuda-yuki/misc` に置く。
+ここでは実行コード、評価仕様、固定資材の検証と producer 側の証跡契約を管理する。
+`docs/plan.md`、`docs/decision-log.md`、既存 protocol / execution plan は過去の
+来歴として保持し、新 campaign の承認に流用しない。歴史上の `sample2` 表記や
+`SAMPLE2_*` 環境変数を一括置換しない。新規開始は [campaign入口](docs/campaign-initialization.md)
+の plan hash に結び付く明示承認を必要とする。古い計画やレポートを現在の事実と取り違えない。
 主な評価は要求品質とRun全体のinput/output token。早期終了や品質低下による
 token減少を改善と呼ばない。金銭的費用を研究目的へ置き換えない。
 

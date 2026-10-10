@@ -594,9 +594,18 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
     def prepare(binding):
         verify_pins(repo,plan['source_pins'])
         binding={**binding,'phase_sha256':util.sha256_file(phase_path)}
+        model_options = ({'approved_model_id': plan['settings']['model_id']}
+                         if 'campaign_config' in plan else {})
         manifest=profiles.create(repo,batch,binding['task'],binding['condition'],binding['attempt'],
             phase['runtime'],run_instance_id=binding['run_instance_id'],assignment=binding,
-            task_revision=plan['task_revision'])
+            task_revision=plan['task_revision'], **model_options)
+        attempt_path = batch/'pipeline-attempt.json'
+        if attempt_path.is_file():
+            attempt = util.read_json(attempt_path)
+            manifest['acquisition'] = dict(slot=attempt['slot'], attempt=attempt['attempt'],
+                attempt_record=reference(attempt_path), epoch=reference(owner_plan_path),
+                campaign_config=plan.get('campaign_config'))
+            run.save_manifest(batch, binding['run_id'], manifest)
         full={**binding,'input_sha256':manifest['prompt_sha256'],'condition_sha256':manifest['condition_sha256']}
         bindings.append(full); budget_watch.register(batch,full)
         return manifest

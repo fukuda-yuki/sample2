@@ -62,6 +62,39 @@ class RunFixture:
 
 class ScoreTestCase(RunFixture, unittest.TestCase):
 
+    def test_collision_retains_both_outputs_and_rejects_second(self):
+        first = self.score()
+        before = util.tree_hashes(self.run_dir/first['directory'])
+        from unittest.mock import patch
+        original = util.read_json
+        def collide(path):
+            value = original(path)
+            if Path(path).name == 'evaluation.json':
+                value['evaluationId'] = first['evaluation_id']
+            return value
+        with patch.object(util, 'read_json', side_effect=collide):
+            second = self.score(sequence=2)
+        self.assertFalse(second['adopted'])
+        self.assertEqual(second['reason'], 'evaluation_id_collision')
+        self.assertEqual(before, util.tree_hashes(self.run_dir/first['directory']))
+        self.assertTrue((self.run_dir/second['directory']/'evaluation.json').is_file())
+        self.assertEqual(len(util.read_lines(self.run_dir/'evaluations/index.jsonl')), 2)
+
+    def test_evaluator_output_id_cannot_escape_owned_directory(self):
+        from unittest.mock import patch
+        original = util.read_json
+        for sequence, unsafe in enumerate(('../outside', '/tmp/outside', 'C:\\outside', '..', ''), 1):
+            def change(path):
+                value = original(path)
+                if Path(path).name == 'evaluation.json': value['evaluationId'] = unsafe
+                return value
+            with patch.object(util, 'read_json', side_effect=change):
+                record = self.score(sequence=sequence)
+            self.assertEqual(record['reason'], 'unsafe_evaluation_id')
+            self.assertFalse(record['adopted'])
+            self.assertTrue((self.run_dir/record['directory']/'evaluation.json').is_file())
+
+
     def test_http_observer_fault_retains_bound_known_failure_without_numeric_quality(self):
         record = self.score('fault-after-critical', evaluation_version='1.3.0')
         self.assertEqual('evaluator_fault', record['scoring_state'])
@@ -182,7 +215,7 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
         for path, digest in before.items():
             self.assertEqual(digest, after[path], path)
         # 以前の採点の対応が維持されている。
-        self.assertEqual(1, len(evaluate.read_index(self.run_dir)))
+        self.assertEqual(1, len(util.read_lines(self.run_dir/'evaluations/index.jsonl')))
         self.assertEqual(first['evaluation_id'],
                          evaluate.last_scoring(self.run_dir)['evaluation_id'])
         self.assertEqual(first['evaluation_id'],
@@ -254,7 +287,7 @@ class ScoreTestCase(RunFixture, unittest.TestCase):
                           'scoring-002-stderr.log', 'scoring-002-stdout.log'],
                          sorted(p.name for p in (self.run_dir / 'evidence').iterdir()
                                 if p.name.startswith('scoring-')))
-        self.assertEqual(2, len(evaluate.read_index(self.run_dir)))
+        self.assertEqual(2, len(util.read_lines(self.run_dir/'evaluations/index.jsonl')))
         self.assertEqual([], evaluate.read_duplicate_refusals(self.run_dir))
 
     def test_rescoring_keeps_verdict_and_quality_and_only_the_sequence_differs(self):
@@ -514,6 +547,13 @@ class ScoringTimeoutTests(RunFixture, unittest.TestCase):
 
 
 def _is_alive(pid):
+    if os.name != 'nt':
+        stat = Path('/proc')/str(pid)/'stat'
+        if stat.exists():
+            return stat.read_text().rsplit(')', 1)[1].split()[0] != 'Z'
+        try: os.kill(pid, 0)
+        except ProcessLookupError: return False
+        return True
     # The Windows "no tasks" message uses the native locale, independently of
     # Python's UTF-8 mode. PID fields in CSV are ASCII; avoid decoding names or
     # localized absence messages. An observation failure cannot prove absence.
@@ -525,6 +565,11 @@ def _is_alive(pid):
 
 
 def _force_kill(pid):
+    if os.name != 'nt':
+        if _is_alive(pid):
+            try: os.kill(pid, 9)
+            except ProcessLookupError: pass
+        return
     subprocess.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True)
 
 

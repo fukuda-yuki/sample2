@@ -2,7 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from . import support
+try:
+    from . import support
+except ImportError:
+    import support
 from harness import evaluate, runtime, util
 
 

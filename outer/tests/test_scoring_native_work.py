@@ -3,7 +3,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from . import support
+try:
+    from . import support
+except ImportError:
+    import support
 from harness import evaluate, runtime
 
 class NativeWorkTests(unittest.TestCase):

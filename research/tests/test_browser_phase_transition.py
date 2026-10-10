@@ -253,8 +253,11 @@ class BrowserPhaseTransitionTests(unittest.TestCase):
             util.write_new_json(out/'browser-cleanup.json',{'confirmed':True,'run_instance_id':instance})
             return 2
         name='s2-score-'+'2'*32
+        def scoring_command(c,f,o,w,a,v,s,*,native_work=False):
+            self.assertFalse(native_work)
+            return name,['docker','run','--out',str(o)]
         with patch.object(profiles,'validate_run'),\
-             patch.object(runtime,'scoring_command',side_effect=lambda c,f,o,w,a,v,s:(name,['docker','run','--out',str(o)])),\
+             patch.object(runtime,'scoring_command',side_effect=scoring_command),\
              patch.object(runtime,'docker',return_value=SimpleNamespace(returncode=0)),\
              patch.object(evaluate,'run_evaluator',side_effect=run),\
              patch.object(evaluate.browser_cart,'complete_evaluation',side_effect=compose) as browser:

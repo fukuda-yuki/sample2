@@ -15,6 +15,7 @@ import random
 import shutil
 import subprocess
 import sys
+import uuid
 
 from outer.harness import profiles, runtime, util
 from outer.harness.security import child_environment
@@ -24,6 +25,10 @@ REPO = Path(__file__).resolve().parents[1]
 V3_PLAN = 'research/protocols/source-information-two-families-20261003-v3.json'
 PLAN = 'research/protocols/source-information-two-families-20261003-v4.json'
 V4_ID = 'source-information-two-families-20261003-v4'
+V5_ID = 'source-information-two-families-20261003-v5-100p2'
+V5_PLAN = 'research/protocols/' + V5_ID + '.json'
+V5_SCIENTIFIC_SHA256 = '9676730e56dbcbfc066cb59d5a5362fa14958b3b5efaebaa6a9428480070ad3a'
+V4_PLAN_SHA256 = 'e09d9c1c317d02688e5420a60fa4caad1b44cb920c33380811817d0762d2701d'
 LEAD_REVIEW_POLICY = 'delegated-research-lead-v1'
 AI_ACTORS = ('ai', 'codex')
 USER_DELEGATION_INSTRUCTION = 'あなたが研究責任者として、責任をもって研究を開始できる状態にしなさい。'
@@ -56,22 +61,35 @@ def inside(repo, value, prefix=None):
 
 def validate_plan(plan):
     old = plan.get('plan_id') == 'continuity-initial-information-20261003-v1'
+    v5 = plan.get('plan_id') == V5_ID
     tasks = ['MS1-CONT-A', 'MS1-CONT-B'] if old else ['MS1-CONT-A', 'MS1-CONT-B', 'CU1-ENR-C', 'CU1-ENR-D']
     if (plan.get('plan_id') not in ('continuity-initial-information-20261003-v1',
-            'source-information-two-families-20261003-v2', 'source-information-two-families-20261003-v3', V4_ID)
+            'source-information-two-families-20261003-v2', 'source-information-two-families-20261003-v3', V4_ID, V5_ID)
             or plan.get('task_ids') != tasks
             or plan.get('arms') != ['explore', 'preload']
             or plan.get('variant_weights') != ([0.5, 0.5] if old else [0.25] * 4)
-            or plan.get('allocation', {}).get('pairs') != 64
-            or plan['allocation'].get('runs') != 128
-            or plan['allocation'].get('repetitions_per_variant') != (32 if old else 16)
-            or plan.get('regime', {}).get('pair_concurrency') != 1
-            or (plan.get('plan_id') in ('source-information-two-families-20261003-v3', V4_ID)
+            or plan.get('allocation', {}).get('pairs') != (100 if v5 else 64)
+            or plan['allocation'].get('runs') != (200 if v5 else 128)
+            or plan['allocation'].get('repetitions_per_variant') != (25 if v5 else 32 if old else 16)
+            or plan.get('regime', {}).get('pair_concurrency') != (2 if v5 else 1)
+            or (plan.get('plan_id') in ('source-information-two-families-20261003-v3', V4_ID, V5_ID)
                 and plan.get('settings', {}).get('collection_policy') != 'workspace-static-db-v2')
             or plan.get('quality_loss_margin') is not None
             or plan.get('research_start_authorized') is not False):
         raise ValueError('Unsupported or changed scientific protocol; create a reviewed amendment')
-    if plan.get('plan_id') == V4_ID:
+    if v5:
+        scientific = {key: value for key, value in plan.items() if key not in ADMINISTRATIVE_FIELDS}
+        digest = hashlib.sha256(json.dumps(scientific, sort_keys=True, separators=(',', ':'),
+            ensure_ascii=False).encode('utf-8')).hexdigest()
+        if (digest != V5_SCIENTIFIC_SHA256 or plan.get('acceptance_review_policy') != LEAD_REVIEW_POLICY
+                or plan.get('supersedes') != PLAN
+                or plan.get('acceptance_amendment') != {
+                    'superseded_plan_sha256': V4_PLAN_SHA256,
+                    'research_dispatches_before_amendment': 0,
+                    'legacy_human_acceptance_relabelled': False,
+                    'user_fixed_pairs': 100, 'technical_dispatch_cap': 4}):
+            raise ValueError('Unsupported review policy or changed v5 scientific parameters')
+    elif plan.get('plan_id') == V4_ID:
         scientific = {key: value for key, value in plan.items() if key not in ADMINISTRATIVE_FIELDS}
         digest = hashlib.sha256(json.dumps(scientific, sort_keys=True, separators=(',', ':'),
             ensure_ascii=False).encode('utf-8')).hexdigest()
@@ -89,6 +107,23 @@ def validate_plan(plan):
     return plan
 
 
+def protocol_path(plan):
+    historical = {
+        'continuity-initial-information-20261003-v1': 'research/protocols/continuity-initial-information-20261003-v1.json',
+        'source-information-two-families-20261003-v2': 'research/protocols/source-information-two-families-20261003-v2.json',
+        'source-information-two-families-20261003-v3': V3_PLAN,
+        V4_ID: PLAN, V5_ID: V5_PLAN}
+    return historical[plan['plan_id']]
+
+
+def cohort_path(plan):
+    return 'runs/source-info-v5-100p2' if plan['plan_id'] == V5_ID else 'runs/source-info-v4'
+
+
+def delegated_policy(plan):
+    return plan['plan_id'] in (V4_ID, V5_ID)
+
+
 def evaluation_version(plan, task):
     return plan['settings'].get('evaluator_version_by_task', {}).get(task,
         plan['settings'].get('evaluator_version'))
@@ -98,9 +133,11 @@ def assignments(plan):
     validate_plan(plan)
     rng = random.Random(plan['allocation']['randomization_seed'])
     ordered = []
-    for task in plan['task_ids']:
+    for task_index, task in enumerate(plan['task_ids']):
         half = plan['allocation']['repetitions_per_variant'] // 2
-        orders = [['explore', 'preload']] * half + [['preload', 'explore']] * half
+        extra = plan['allocation']['repetitions_per_variant'] % 2
+        orders = ([['explore', 'preload']] * (half + extra * (task_index % 2 == 0))
+            + [['preload', 'explore']] * (half + extra * (task_index % 2 == 1)))
         rng.shuffle(orders)
         ordered.extend((task, order) for order in orders)
     rng.shuffle(ordered)
@@ -111,10 +148,16 @@ def assignments(plan):
         cases = [{'slot': index * 2 + position, 'block': pair, 'pair': pair,
             'position': position, 'task': task, 'condition': arm, 'attempt': attempt,
             'run_id': f'{task}-{arm}-{attempt:03d}'} for position, arm in enumerate(order, 1)]
+        if plan['plan_id'] == V5_ID:
+            for case in cases:
+                case['run_instance_id'] = uuid.uuid5(uuid.NAMESPACE_URL,
+                    V5_SCIENTIFIC_SHA256 + '/' + case['run_id']).hex
         result.append({'pair': pair, 'task': task,
             'source_family': plan.get('task_hierarchy', {}).get(task, {}).get('family'),
             'task_membership': plan.get('task_hierarchy', {}).get(task, {}).get('membership'),
             'analysis_session': index // 4 + 1, 'cases': cases})
+    if len(result) != plan['allocation']['pairs']:
+        raise ValueError('Assignment count differs from frozen allocation')
     return result
 
 
@@ -150,7 +193,8 @@ def acceptance_scopes(pins, plan=None):
             'research/next_phase_analysis.py', 'research/catalog_delivery.py',
             'research/catalog_share.py', 'research/catalog_allocation_review.py')}
     execution.update({name: digest for name, digest in pins.items() if name in
-        ('research/catalog_environment.py', 'research/next_phase_design.py')})
+        ('research/catalog_environment.py', 'research/next_phase_design.py',
+         'research/paired_acceptance.py', 'research/technical_pair_comparison.py')})
     serializer = {name: digest for name, digest in pins.items() if
         name.startswith(('outer/runtime/', 'outer/profiles/interventions/'))
         or name in ('outer/harness/profiles.py', 'outer/harness/migration_input.py',
@@ -162,9 +206,9 @@ def acceptance_scopes(pins, plan=None):
         'independent_task_set': {**task_files, **task_assets},
         'execution_evidence': execution, 'serialized_intervention': {**serializer, **task_files, **task_assets},
         'human_review': {**task_files, **task_assets, **{n: h for n, h in evaluation.items() if n.startswith('inner/spec/')}}}
-    if plan is not None and validate_plan(plan)['plan_id'] == V4_ID:
+    if plan is not None and delegated_policy(validate_plan(plan)):
         scopes['research_lead_review'] = {**scopes['human_review'],
-            **{name: digest for name, digest in pins.items() if name == PLAN}}
+            **{name: digest for name, digest in pins.items() if name == protocol_path(plan)}}
     return scopes
 
 
@@ -203,7 +247,7 @@ def lead_review_reasons(ledger, plan, scopes):
             or not named_reviewer(lead.get('reviewer')) or not utc_timestamp(lead.get('reviewed_at_utc'))):
         reasons.append('research_lead_review:unbound_or_invalid_actor')
     expected = (scopes or {}).get('research_lead_review', {})
-    plan_sha256 = expected.get(PLAN)
+    plan_sha256 = expected.get(protocol_path(plan))
     if not expected or not plan_sha256 or lead.get('asset_hashes') != expected:
         reasons.append('research_lead_review:reviewed_asset_scope_mismatch')
     evidence = lead.get('evidence', [])
@@ -231,7 +275,9 @@ def lead_review_reasons(ledger, plan, scopes):
             if (data.get('kind') != 'research_lead_user_delegation' or data.get('actor') != 'human'
                     or data.get('status') != 'delegated'
                     or data.get('authorization_scope') != 'research_preparation_and_lead_acceptance'
-                    or data.get('user_instruction') != USER_DELEGATION_INSTRUCTION
+                    or (plan['plan_id'] == V4_ID and data.get('user_instruction') != USER_DELEGATION_INSTRUCTION)
+                    or (plan['plan_id'] == V5_ID and (not named_reviewer(data.get('user_instruction'))
+                        or not data.get('authorization_reference')))
                     or data.get('research_start_authorized') is not False
                     or not utc_timestamp(data.get('recorded_at_utc'))):
                 reasons.append(label + ':invalid_delegation')
@@ -286,8 +332,11 @@ def ledger_reasons(ledger, chain=None, scopes=None, plan=None):
             try:
                 if not verify_reference(record): reasons.append(key + ':evidence_changed')
             except (OSError, KeyError, TypeError): reasons.append(key + ':evidence_unavailable')
-    if plan is not None and validate_plan(plan)['plan_id'] == V4_ID:
+    if plan is not None and delegated_policy(validate_plan(plan)):
         reasons.extend(lead_review_reasons(ledger, plan, scopes))
+        if plan['plan_id'] == V5_ID:
+            from research import paired_acceptance
+            reasons.extend(paired_acceptance.ledger_reasons(ledger, plan, scopes))
     else:
         human = ledger.get('human_review', {})
         if human.get('status') != 'passed':
@@ -316,14 +365,15 @@ def ledger_reasons(ledger, chain=None, scopes=None, plan=None):
     return reasons
 
 
-def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
+def prepare(repo, destination, ledger_path, runtime_id, browser_path=None, plan_path=None):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
     if not destination.is_relative_to(repo / 'artifacts'):
         raise ValueError('Preparation must use a new local artifacts directory')
     destination.mkdir(parents=True, exist_ok=False)
-    plan = validate_plan(util.read_json(repo / PLAN))
-    if plan['plan_id'] != V4_ID:
-        raise ValueError('Preparation requires the current prospective v4 protocol')
+    selected_plan = inside(repo, plan_path or PLAN)
+    plan = validate_plan(util.read_json(selected_plan))
+    if not delegated_policy(plan) or selected_plan != repo / protocol_path(plan):
+        raise ValueError('Preparation requires an explicit supported prospective protocol')
     ledger = util.read_json(ledger_path)
     pins = {}
     for name in git(repo, 'ls-files').splitlines():
@@ -374,15 +424,15 @@ def prepare(repo, destination, ledger_path, runtime_id, browser_path=None):
         failures.append('browser_environment_not_bound')
     bundle = {'schema_version': 1, 'kind': 'continuity_prospective_bundle', 'prepared_at': now(),
         'source_commit': git(repo, 'rev-parse', 'HEAD'), 'source_clean': not bool(git(repo, 'status', '--porcelain')),
-        'repo': str(repo), 'plan': plan, 'plan_reference': reference(repo / PLAN),
+        'repo': str(repo), 'plan': plan, 'plan_reference': reference(selected_plan),
         'assignments': assignments(plan), 'runtime_id': runtime_id,
-        'cohort': 'runs/source-info-v4', 'pinned_files': pins,
+        'cohort': cohort_path(plan), 'pinned_files': pins,
         'runtime_locks': chain, 'acceptance_ledger': ledger, 'acceptance_scopes': acceptance_scopes(pins, plan),
         'acceptance_ledger_reference': reference(ledger_path), 'browser': browser,
         'python': {'path': str(Path(sys.executable).resolve()), 'sha256': util.sha256_file(sys.executable),
         'version': platform.python_version()}, 'precision': next_phase_design.calculate(
             plan['allocation']['pairs'], len(plan['task_ids']), plan['allocation']['repetitions_per_variant'],
-            plan['independent_source_family_count']),
+            plan['independent_source_family_count'],plan['regime']['pair_concurrency']),
         'preparation_failures': failures, 'model_called': False, 'credential_read': False}
     util.write_new_json(destination / 'bundle.json', bundle)
     result = check(repo, destination / 'bundle.json', environment=False)
@@ -417,8 +467,9 @@ def check(repo, bundle_path, *, environment=True):
         reasons.append('embedded_plan_changed')
     if util.read_json(bundle['acceptance_ledger_reference']['path']) != bundle['acceptance_ledger']:
         reasons.append('embedded_acceptance_ledger_changed')
-    if bundle['plan']['plan_id'] == V4_ID and bundle['cohort'] != 'runs/source-info-v4':
-        reasons.append('v4_requires_distinct_prospective_cohort')
+    if delegated_policy(bundle['plan']) and bundle['cohort'] != cohort_path(bundle['plan']):
+        reasons.append('v4_requires_distinct_prospective_cohort' if bundle['plan']['plan_id'] == V4_ID
+            else 'v5_requires_distinct_prospective_cohort')
     scopes = acceptance_scopes(bundle['pinned_files'], bundle['plan'])
     if scopes != bundle['acceptance_scopes']: reasons.append('acceptance_scope_changed')
     reasons.extend(ledger_reasons(bundle['acceptance_ledger'], bundle['runtime_locks'], scopes, bundle['plan']))
@@ -444,6 +495,11 @@ def check(repo, bundle_path, *, environment=True):
         from research import pair_execution
         from research.next_phase_execution import provider_metadata
         current = pair_execution.state(cohort / '_control/pair-journal.jsonl')
+        if bundle['plan']['plan_id'] == V5_ID:
+            expected = {c['run_id']: c for p in bundle['assignments'] for c in p['cases']}
+            for rid, binding in current['reserved'].items():
+                if rid not in expected or binding['run_instance_id'] != expected[rid]['run_instance_id']:
+                    reasons.append('reserved_instance_differs_from_frozen_assignment:' + rid)
         for rid, binding in current['dispatch'].items():
             if binding['plan_sha256'] != util.sha256_file(bundle_path) or binding['cohort'] != bundle['cohort']:
                 reasons.append('existing_dispatch_plan_identity_mismatch:' + rid)
@@ -519,10 +575,11 @@ def main():
     parser.add_argument('--runtime')
     parser.add_argument('--browser', type=Path)
     parser.add_argument('--approval', type=Path)
+    parser.add_argument('--plan', help='Explicit prospective protocol path relative to repo')
     args = parser.parse_args()
     if args.mode == 'prepare':
         if not all((args.out, args.ledger, args.runtime)): parser.error('prepare requires --out --ledger --runtime')
-        result = prepare(args.repo, args.out, args.ledger, args.runtime, args.browser)
+        result = prepare(args.repo, args.out, args.ledger, args.runtime, args.browser, args.plan)
     elif not args.bundle:
         parser.error('--bundle required')
     elif args.mode == 'check':

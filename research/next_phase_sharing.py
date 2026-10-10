@@ -31,28 +31,62 @@ def pair_context(repo, bundle_path, number):
     return bundle, batch, current, pair, bindings
 
 
-def release_prefix(bundle_path, bundle):
+def release_prefix(bundle_path, bundle, phase=None):
     """Keep distinct frozen bundles and technical fixtures off each other's tags."""
+    if bundle.get('kind') == 'source_info_repaired_v6_main':
+        from research import acquisition_sharing
+        return acquisition_sharing.release_prefix(bundle_path, bundle, phase)
     technical = bundle.get('kind') == 'continuity_sharing_technical_fixture'
     if technical and not bundle['cohort'].startswith('runs/_technical-sharing-'):
         raise ValueError('Technical sharing fixture must remain outside research cohorts')
     if not technical and bundle.get('kind') != 'continuity_prospective_bundle':
         raise ValueError('Sharing requires a frozen research bundle or explicit technical fixture')
-    prefix = 'technical-continuity' if technical else 'source-info-v2'
-    return prefix + '-' + util.sha256_file(bundle_path)[:12] + '-pair-'
+    prefix = ('technical-continuity' if technical else
+        'source-info-v5-100p2' if bundle.get('plan', {}).get('plan_id') == next_phase.V5_ID else 'source-info-v2')
+    digest = phase['phase_sha256'] if phase else util.sha256_file(bundle_path)
+    if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
+        raise ValueError('Exact phase/bundle SHA-256 required for publication tag')
+    return prefix + '-' + digest[:12] + '-pair-'
 
 
-def clocked(workspace, bundle_path, number, bundle, bindings, stage_name, operation):
+def phase_remote_identity(remote, tag, phase):
+    """Resolve actual remote tag objects before reusing a new-phase release."""
+    if (not remote or remote.get('draft') or remote.get('tag_name') != tag
+            or remote.get('target_commitish') != phase['source_commit']):
+        raise ValueError('Remote phase release source identity differs')
+    obj = json.loads(catalog_delivery.gh('api',
+        f'repos/{catalog_delivery.REPOSITORY}/git/ref/tags/{tag}'))['object']
+    for _ in range(5):
+        if obj.get('type') == 'commit':
+            if obj.get('sha') != phase['source_commit']:
+                raise ValueError('Actual remote tag points to a different phase commit')
+            return {'target_commitish': remote['target_commitish'], 'tag_commit': obj['sha']}
+        if obj.get('type') != 'tag': break
+        obj = json.loads(catalog_delivery.gh('api',
+            f'repos/{catalog_delivery.REPOSITORY}/git/tags/{obj["sha"]}'))['object']
+    raise ValueError('Remote phase tag cannot be resolved to its exact commit')
+
+
+def clocked(workspace, bundle_path, number, bundle, bindings, stage_name, operation, *, phase=None):
+    phases = {b.get('phase_sha256') for b in bindings}
+    if phase:
+        phases.add(phase['phase_sha256'])
+    if len(phases) != 1:
+        raise ValueError('Mixed execution phases in public operation')
+    phase_digest = next(iter(phases))
     return machine.timed_stage(Path(workspace) / 'public-gate-timing.jsonl', stage_name, operation,
         binding={'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
             'cohort': bundle['cohort'],
-            'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings}})
+            'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
+            **({'phase_sha256': phase_digest} if phase_digest else {})})
 
 
-def stage(repo, bundle_path, number, destination):
+def stage(repo, bundle_path, number, destination, *, context=None, phase=None):
     repo, destination = Path(repo).resolve(), Path(destination).resolve()
-    bundle, batch, current, pair, bindings = pair_context(repo, bundle_path, number)
-    release_prefix(bundle_path, bundle)
+    if phase and not callable(context):
+        raise ValueError('Phase staging requires the authoritative central context')
+    bundle, batch, current, pair, bindings = (context or pair_context)(repo, bundle_path, number)
+    release_prefix(bundle_path, bundle, phase)
     if destination.exists() or not destination.is_relative_to(repo / 'artifacts'):
         raise ValueError('Use a new owned artifacts staging directory')
     public = destination / 'public'
@@ -64,7 +98,8 @@ def stage(repo, bundle_path, number, destination):
         'selected_runs': names, 'assigned_slots': pair['cases'],
         'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
         'original_inventory': originals, 'files': [], 'excluded': [], 'model_called': False,
-        'evaluator_called': False, 'complete_research_corpus': False}
+        'evaluator_called': False, 'complete_research_corpus': False,
+        **({'execution_phase': phase} if phase else {})}
     def copy(source, name, original_hash=None):
         catalog_share.safe_member(name)
         output = catalog_share.native(public / name)
@@ -88,14 +123,53 @@ def stage(repo, bundle_path, number, destination):
                 manifest['excluded'].append({'path': name, **originals[rid][relative], 'reason': reason})
             else:
                 copy(source, name, originals[rid][relative]['sha256'])
-    task_profile = profiles.read(repo, 'tasks', pair['task'])
+    repaired_main = bundle.get('kind') == 'source_info_repaired_v6_main'
+    task_profile = (profiles.task_profile(repo, pair['task'], bundle['task_revision'])
+                    if repaired_main else profiles.read(repo, 'tasks', pair['task']))
     family = bundle['plan'].get('task_hierarchy', {}).get(pair['task'], {}).get('family', 'music-store-continuity')
     public_request = 'research/tasks/' + family + '/public-request.txt'
     for name in ('research/__init__.py', 'research/catalog_allocation_review.py', 'research/catalog_share.py',
-            'research/sql/catalog_otel_requests.sql', next_phase.PLAN,
-            'research/tasks/candidate-register.json', public_request, task_profile['evaluation']['spec_path']):
+            'research/sql/catalog_otel_requests.sql', next_phase.protocol_path(bundle['plan']),
+            'research/tasks/candidate-register.json', task_profile['evaluation']['spec_path']):
         copy(repo / name, name)
+    if repaired_main:
+        value = task_profile['migration_request'].encode('utf-8')
+        target = public / public_request
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(value)
+        ledger = repo / 'outer/profiles/task-revisions' / bundle['task_revision'] / (pair['task'] + '.json')
+        manifest['files'].append({'path': public_request, 'source_sha256': util.sha256_file(ledger),
+            'sha256': util.sha256_file(target), 'bytes': len(value),
+            'transformation': 'exact_public_request_from_revised_task_profile'})
+    else:
+        copy(repo / public_request, public_request)
     copy(repo / 'research/sharing/CONTINUITY-README.md', 'README.md')
+    if repaired_main:
+        from research import acquisition_sharing
+        readme = public / 'README.md'
+        readme.write_text(acquisition_sharing.public_readme(bundle, phase), encoding='utf-8')
+        entry = next(e for e in manifest['files'] if e['path'] == 'README.md')
+        entry.update(sha256=util.sha256_file(readme), bytes=readme.stat().st_size,
+                     transformation='explicit_repaired_main_cohort_readme')
+    elif phase:
+        # This is a new reviewed public copy; the historical private plan and
+        # original five pairs are not edited or reinterpreted.
+        readme = public / 'README.md'
+        readme.write_text(readme.read_text(encoding='utf-8') +
+            '\n## Prospectively amended execution phase\n\n'
+            'The original v5 allocation and its first five pairs remain historical records. '
+            'This pair belongs to the separately approved central fixed-wave phase for '
+            + ('original pairs ' + str(max(phase['completed_earlier_pairs']) + 1) + '–100: two pairs/four Runs under unchanged operational health criteria. '
+               if phase.get('maximum_pairs') == 2 else
+               'original pairs 6–100: initially two pairs/four Runs, optionally four pairs/eight Runs under predeclared operational health criteria. ')
+            + 'Internal Run concurrency '
+            'remains one. All wave implementations stop before serial evaluation and '
+            'publication gates. No additional samples or regenerated earlier Runs are included. '
+            'STUDY.json and MANIFEST.json identify the execution phase and evaluator '
+            'implementation separately from the original allocation.\n', encoding='utf-8')
+        entry = next(e for e in manifest['files'] if e['path'] == 'README.md')
+        entry.update(sha256=util.sha256_file(readme), bytes=readme.stat().st_size,
+                     transformation='historical_readme_with_explicit_prospective_phase_addendum')
     copy(repo / 'research/sharing/THIRD-PARTY-NOTICES.md', 'THIRD-PARTY-NOTICES.md')
     for name in ('MS-PL.txt', 'OpenCode-MIT.txt'):
         copy(repo / 'research/sharing/LICENSES' / name, 'LICENSES/' + name)
@@ -107,6 +181,10 @@ def stage(repo, bundle_path, number, destination):
     portable = public / 'STUDY.json'
     util.write_new_json(portable, {'plan': bundle['plan'], 'assignments': bundle['assignments'],
         'source_commit': bundle['source_commit'], 'original_bundle_sha256': util.sha256_file(bundle_path),
+        **({'kind': bundle['kind'], 'task_revision': bundle['task_revision'],
+            'settings': bundle['settings'], 'bounds': bundle['bounds'],
+            'plan_role': 'administrative_baseline_design_not_execution_authority'} if repaired_main else {}),
+        **({'execution_phase': phase} if phase else {}),
         'public_subset_limitations': 'Private oracle, runtime, native state and evaluation databases remain local; this public slice supports saved evidence extraction, not a full evaluator replay.'})
     manifest['files'].append({'path': 'STUDY.json', 'sha256': util.sha256_file(portable),
         'source_sha256': None, 'bytes': portable.stat().st_size, 'transformation': 'explicit_portable_study_metadata'})
@@ -124,19 +202,36 @@ def stage(repo, bundle_path, number, destination):
         'model_called': False, 'next_pair_gate_complete': False}
 
 
-def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=catalog_delivery.download):
+def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=catalog_delivery.download,
+          context=None, phase=None, record_gate=None, preservation_contract=None, app_failure_contract=None):
     repo, workspace = Path(repo).resolve(), Path(workspace).resolve()
+    if phase and (not callable(context) or not callable(record_gate)):
+        raise ValueError('Phase sharing requires central context and gate recorder')
+    preservation = {}
+    if app_failure_contract is not None:
+        from research import app_failure_preservation as app
+        if preservation_contract is not None or not phase or phase.get('app_failure_preservation_disposition') != app.public_disclosure(app_failure_contract):
+            raise ValueError('Exact app-failure preservation disclosure required')
+        preservation = app.gate_fields(app_failure_contract)
+    if preservation_contract is not None:
+        from research import preservation_gate
+        preservation = preservation_gate.gate_fields(preservation_contract)
+        if number != 53 or not phase or phase.get('preservation_disposition') != preservation_gate.public_disclosure(preservation_contract):
+            raise ValueError('Explicit reviewed public preservation disclosure required')
     allowed = repo / 'artifacts/continuity-sharing-v1'
     if workspace == allowed or not workspace.is_relative_to(allowed):
         raise ValueError('Use the designated owned continuity sharing workspace')
-    bundle, batch, current, pair, bindings = pair_context(repo, bundle_path, number)
+    bundle, batch, current, pair, bindings = (context or pair_context)(repo, bundle_path, number)
     if number in current['gates']: return {'status': 'gate_already_complete', 'model_called': False}
     finalization = workspace / 'finalization.json'
     if finalization.exists():
-        return finish(repo, bundle_path, number, workspace, review, finalization)
+        return finish(repo, bundle_path, number, workspace, review, finalization,
+                      context=context, phase=phase, record_gate=record_gate, preservation_contract=preservation_contract, app_failure_contract=app_failure_contract)
     manifest = catalog_share.verify_public(workspace / 'public', exact=True)
     if manifest['plan_sha256'] != util.sha256_file(bundle_path) or manifest['pair'] != number:
         raise ValueError('Public bytes belong to another plan/pair')
+    if manifest.get('execution_phase') != phase:
+        raise ValueError('Public bytes belong to another execution phase')
     for rid, original in manifest['original_inventory'].items():
         if catalog_share.inventory(batch / rid) != original: raise ValueError('Original pair changed after review')
     asset = clocked(workspace, bundle_path, number, bundle, bindings, 'package_including_compression',
@@ -145,13 +240,37 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     if not original_extraction.exists():
         clocked(workspace, bundle_path, number, bundle, bindings, 'before_upload_offline_extract',
             lambda: catalog_delivery.offline_extract(workspace / 'public', original_extraction))
-    prefix = release_prefix(bundle_path, bundle)
+    prefix = release_prefix(bundle_path, bundle, phase)
+    actual_transport = transfer is None and fetch is catalog_delivery.download
     if transfer is None:
-        transfer = lambda package, tag, commit: catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
+        def transfer(package, tag, commit):
+            if phase:
+                existing = catalog_delivery.release(tag)
+                if existing: phase_remote_identity(existing, tag, phase)
+            return catalog_delivery.publish(package, tag, commit, tag_prefix=prefix)
     urls = clocked(workspace, bundle_path, number, bundle, bindings, 'publication_and_remote_hash_check',
-        lambda: transfer(workspace / 'package', prefix + f'{number:03d}', bundle['source_commit']))
+        lambda: transfer(workspace / 'package', prefix + f'{number:03d}',
+                         phase['source_commit'] if phase else bundle['source_commit']))
     publication = {'remote_assets_verified': True, 'urls': urls, 'package_sha256': asset['sha256'],
-        'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number}
+        'asset_manifest': asset, 'plan_sha256': util.sha256_file(bundle_path), 'pair': number,
+        **({'phase_sha256': phase['phase_sha256']} if phase else {})}
+    if bundle['plan']['plan_id'] == next_phase.V5_ID or bundle.get('kind') == 'source_info_repaired_v6_main':
+        # v5 live acceptance cannot use the injectable local rehearsal path.
+        publication['transport_mode'] = ('github-release-anonymous-download-v1'
+            if actual_transport else 'injected-transport')
+        if actual_transport:
+            remote_path = workspace / 'actual-remote-readback.json'
+            if not remote_path.exists():
+                remote = catalog_delivery.release(prefix + f'{number:03d}')
+                if not remote or remote.get('draft'):
+                    raise ValueError('Actual research release readback missing')
+                identity = phase_remote_identity(remote, prefix + f'{number:03d}', phase) if phase else {}
+                util.write_new_json(remote_path, {'tag_name': remote['tag_name'],
+                    'release_id': remote['id'], 'html_url': remote['html_url'],
+                    **identity,
+                    'assets': [{k: row[k] for k in ('id', 'name', 'size', 'digest', 'browser_download_url')}
+                        for row in remote['assets']]})
+            publication['actual_remote_readback'] = next_phase.reference(remote_path)
     publication_path = workspace / 'publication-receipt.json'
     if publication_path.exists():
         if util.read_json(publication_path) != publication: raise ValueError('Retained remote receipt differs')
@@ -171,24 +290,43 @@ def share(repo, bundle_path, number, workspace, review, *, transfer=None, fetch=
     # Save the verified identities and retained evidence before deleting any
     # public/transfer copy. A crash after cleanup must not require these copies
     # or another upload, download, evaluator, or model dispatch.
+    evidence_paths = [publication_path, roundtrip_path, original_extraction, trip_root / 'extraction.json']
+    if publication.get('actual_remote_readback'):
+        evidence_paths.append(Path(publication['actual_remote_readback']['path']))
     util.write_new_json(finalization, {'pair': number,
         'plan_sha256': util.sha256_file(bundle_path), 'cohort': bundle['cohort'],
         'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
+        **({'phase_sha256': phase['phase_sha256']} if phase else {}),
         'review_sha256': util.sha256_file(review), 'attempt': attempt,
         'original_inventory': manifest['original_inventory'],
         'package_sha256': asset['sha256'], 'roundtrip_receipt': str(roundtrip_path),
-        'evidence_files': {str(p): util.sha256_file(p) for p in
-            (publication_path, roundtrip_path, original_extraction, trip_root / 'extraction.json')}})
-    return finish(repo, bundle_path, number, workspace, review, finalization)
+        'evidence_files': {str(p): util.sha256_file(p) for p in evidence_paths}, **preservation})
+    return finish(repo, bundle_path, number, workspace, review, finalization,
+                  context=context, phase=phase, record_gate=record_gate, preservation_contract=preservation_contract, app_failure_contract=app_failure_contract)
 
 
-def finish(repo, bundle_path, number, workspace, review, finalization):
+def finish(repo, bundle_path, number, workspace, review, finalization, *, context=None,
+           phase=None, record_gate=None, preservation_contract=None, app_failure_contract=None):
     """Complete only the saved verified roundtrip, including after owned cleanup."""
-    bundle, batch, current, pair, bindings = pair_context(repo, bundle_path, number)
+    bundle, batch, current, pair, bindings = (context or pair_context)(repo, bundle_path, number)
     saved = util.read_json(finalization)
+    preservation = {}
+    if app_failure_contract is not None:
+        from research import app_failure_preservation as app
+        if preservation_contract is not None or not phase or phase.get('app_failure_preservation_disposition') != app.public_disclosure(app_failure_contract):
+            raise ValueError('Exact app-failure finalization disclosure required')
+        preservation = app.gate_fields(app_failure_contract)
+    if preservation_contract is not None:
+        from research import preservation_gate
+        preservation = preservation_gate.gate_fields(preservation_contract)
+        if number != 53 or not phase or phase.get('preservation_disposition') != preservation_gate.public_disclosure(preservation_contract):
+            raise ValueError('Preservation finalization needs the same explicit disclosure')
+    elif app_failure_contract is None and (saved.get('preservation_contract') is not None or saved.get('gate_kind') is not None):
+        raise ValueError('Retained preservation finalization requires its exact contract')
     expected = {'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
         'cohort': bundle['cohort'], 'review_sha256': util.sha256_file(review),
-        'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings}}
+        'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
+        **({'phase_sha256': phase['phase_sha256']} if phase else {}), **preservation}
     if any(saved.get(k) != v for k, v in expected.items()):
         raise ValueError('Retained finalization belongs to another pair, instance or review')
     for name, digest in saved['evidence_files'].items():
@@ -216,14 +354,23 @@ def finish(repo, bundle_path, number, workspace, review, finalization):
     gate_path = workspace / f'gate-{attempt:03d}.json'
     refs = {**saved['evidence_files'], str(cleanup_path): util.sha256_file(cleanup_path),
             str(finalization): util.sha256_file(finalization)}
+    if preservation_contract is not None:
+        refs[preservation_contract['path']] = preservation_contract['sha256']
+    if app_failure_contract is not None:
+        refs[app_failure_contract['path']] = app_failure_contract['sha256']
     gate = {'pair': number, 'plan_sha256': util.sha256_file(bundle_path),
         'cohort': bundle['cohort'], 'run_instances': {b['run_id']: b['run_instance_id'] for b in bindings},
         'evidence_files': refs, 'publication_receipt': str(workspace / 'publication-receipt.json'),
-        'roundtrip_receipt': saved['roundtrip_receipt'], 'cleanup_receipt': str(cleanup_path)}
+        'roundtrip_receipt': saved['roundtrip_receipt'], 'cleanup_receipt': str(cleanup_path),
+        **({'phase_sha256': phase['phase_sha256']} if phase else {}), **preservation}
     if gate_path.exists():
         if util.read_json(gate_path) != gate: raise ValueError('Retained gate differs')
     else: util.write_new_json(gate_path, gate)
-    pair_execution.record_pair_gate(batch, number, gate_path)
+    if record_gate is None:
+        if phase: raise ValueError('Phase gate requires the authoritative central recorder')
+        pair_execution.record_pair_gate(batch, number, gate_path)
+    else:
+        record_gate(batch, number, gate_path)
     return {'status': 'shared_downloaded_restored_extracted_cleaned', 'pair': number,
         'gate': str(gate_path), 'model_called': False, 'originals_unchanged': True}
 

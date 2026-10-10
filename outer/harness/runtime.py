@@ -68,15 +68,21 @@ def source(repo, task):
     return dest
 
 
-def prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
+def prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek', task_revision=None):
     repo = Path(repo).resolve()
     profiles.identifier(task_id)
     preset = profiles.read(repo, 'runtimes', runtime_id)
     attempt = profiles.runtime_root(repo, task_id, preset) / 'preparation' / uuid.uuid4().hex
     attempt.mkdir(parents=True)
-    util.write_new_json(attempt / 'request.json', {'task':task_id, 'rebuild':rebuild, 'started_at':run.now()})
+    request = {'task':task_id, 'rebuild':rebuild, 'started_at':run.now()}
+    if task_revision is not None:
+        request['task_profile_revision'] = task_revision
+    util.write_new_json(attempt / 'request.json', request)
     try:
-        result = _prepare(repo, task_id=task_id, rebuild=rebuild, runtime_id=runtime_id)
+        options = {'task_id': task_id, 'rebuild': rebuild, 'runtime_id': runtime_id}
+        if task_revision is not None:
+            options['task_revision'] = task_revision
+        result = _prepare(repo, **options)
         util.write_new_json(attempt / 'result.json', result)
         return result
     except Exception as exc:
@@ -85,16 +91,22 @@ def prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
         raise RuntimeError('Preparation failed; retained record: ' + str(attempt / 'failure.json')) from exc
 
 
-def _prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
+def _prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek', task_revision=None):
     repo = Path(repo).resolve()
     docker('info', '--format', '{{.OSType}}', timeout=30)
-    task = profiles.read(repo, 'tasks', task_id)
+    task = profiles.task_profile(repo, task_id, task_revision)
     source(repo, task)
     profile = profiles.read(repo, 'runtimes', runtime_id)
     root = profiles.runtime_root(repo, task_id, profile)
     root.mkdir(parents=True, exist_ok=True)
     if (root / 'lock.json').exists() and not rebuild:
         lock = util.read_json(root / 'lock.json')
+        if task_revision is not None or 'task_profile_revision' in lock:
+            if (lock.get('task_profile_revision') != task_revision
+                    or lock.get('evaluator_version') != task['evaluation']['evaluation_version']
+                    or lock.get('evaluator_project') != task['evaluation']['project']
+                    or lock.get('controller_files') != controller_files(repo)):
+                raise ValueError('Retained runtime revision/controller differs; prepare a new binding')
         for digest in lock['images'].values():
             image_id(digest)
         return lock
@@ -142,6 +154,10 @@ def _prepare(repo, *, task_id='MS1-001', rebuild=False, runtime_id='deepseek'):
                                 'clean_worktree': not bool(command(['git', 'status', '--porcelain'], cwd=repo).stdout),
                                 'source_commit': command(['git', 'rev-parse', 'HEAD'], cwd=repo).stdout.strip()},
             'created_at': run.now()}
+    if task_revision is not None:
+        lock.update(task_profile_revision=task_revision,
+                    evaluator_version=task['evaluation']['evaluation_version'],
+                    evaluator_project=task['evaluation']['project'])
     util.write_new_json(build_root / 'lock.json', lock)
     util.write_json_atomic(root / 'lock.json', lock)
     return lock
@@ -228,26 +244,102 @@ def inspect_container(name):
     return json.loads(result.stdout)[0]
 
 
+class ContainerOwnershipError(RuntimeError):
+    pass
+
+
+def _owned_container(state, role):
+    item = inspect_container(state[role])
+    if item:
+        labels = item['Config'].get('Labels') or {}
+        if (labels.get('sample2.run') != state['run_id'] or
+                state.get('run_instance_id') and labels.get('sample2.instance') != state['run_instance_id']):
+            raise ContainerOwnershipError('Container ownership mismatch')
+    return item
+
+
+def _stop_owned_role(state, role):
+    name = state[role]
+    item = _owned_container(state, role)
+    if item:
+        docker('stop', '--time', '10', name, timeout=40, check=False)
+        item = _owned_container(state, role)
+        return bool(item and not item['State']['Running'])
+    listed = docker('ps', '-a', '--format', '{{.Names}}', timeout=30, check=False)
+    return listed.returncode == 0 and name not in listed.stdout.splitlines()
+
+
+def fence_owned(root):
+    """Close one owned gateway's dispatch boundary before worker grace waits.
+
+    ACK loss/timeouts fall back to stopping this gateway only. They never prove
+    an ACK, absent usage, or provider completion. No credentials enter control.
+    """
+    root = Path(root)
+    state = util.read_json(root / 'runtime.json')
+    item = _owned_container(state, 'gateway')
+    receipt = {'run_id': state['run_id'], 'run_instance_id': state.get('run_instance_id'),
+               'requested_at': run.now(), 'confirmed': False, 'method': 'unconfirmed'}
+    if item and item['State']['Running']:
+        script = """import json,sys,urllib.request
+body=json.dumps({'run_id':sys.argv[1],'session_id':sys.argv[2]}).encode()
+req=urllib.request.Request('http://127.0.0.1:8080/control/stop-admission',data=body,
+    headers={'Content-Type':'application/json'})
+with urllib.request.urlopen(req,timeout=5) as response:
+ print(response.read(4096).decode())
+"""
+        try:
+            result = docker('exec', state['gateway'], 'python3', '-c', script,
+                           state['run_id'], state.get('run_instance_id', state['run_id']),
+                           timeout=10, check=False)
+            ack = json.loads(result.stdout) if result.returncode == 0 else None
+            if (not isinstance(ack, dict) or ack.get('run_id') != state['run_id']
+                    or ack.get('session_id') != state.get('run_instance_id', state['run_id'])
+                    or ack.get('admission_closed') is not True or not ack.get('closed_at')):
+                raise ValueError('Invalid admission acknowledgement')
+            receipt.update(confirmed=True, method='gateway_ack', acknowledgement=ack)
+        except (ValueError, OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            receipt['control_error_type'] = type(exc).__name__
+    if not receipt['confirmed']:
+        receipt.update(confirmed=_stop_owned_role(state, 'gateway'), method='gateway_stop')
+    receipt['observed_at'] = run.now()
+    try:
+        util.write_new_json(root / 'evidence/admission-stop' / (uuid.uuid4().hex + '.json'), receipt)
+        receipt['evidence_persisted'] = True
+    except OSError:
+        # Evidence loss is explicit; it cannot prevent physical owned shutdown.
+        receipt['evidence_persisted'] = False
+        receipt['evidence_error_type'] = 'OSError'
+    return receipt
+
+
 def stop_owned(root):
     root = Path(root)
     state = util.read_json(root / 'runtime.json')
-    confirmations = []
-    for role in ('worker', 'gateway'):
-        name = state[role]
-        item = inspect_container(name)
-        if item:
-            labels = item['Config'].get('Labels') or {}
-            if (labels.get('sample2.run') != state['run_id'] or
-                    state.get('run_instance_id') and labels.get('sample2.instance') != state['run_instance_id']):
-                raise RuntimeError('Container ownership mismatch')
-            docker('stop', '--time', '10', name, timeout=40, check=False)
-            item = inspect_container(name)
-            confirmations.append(bool(item and not item['State']['Running']))
-        else:
-            # A failed inspect alone cannot distinguish a missing container from
-            # an unavailable daemon. Verify absence through a successful listing.
-            listed = docker('ps', '-a', '--format', '{{.Names}}', timeout=30, check=False)
-            confirmations.append(listed.returncode == 0 and name not in listed.stdout.splitlines())
+    ownership_errors = []
+    try:
+        fence = fence_owned(root)
+        confirmations = [fence['confirmed']]
+    except ContainerOwnershipError as exc:
+        ownership_errors.append(exc)
+        confirmations = [False]
+    except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError):
+        confirmations = [False]
+    # Normally admission closes without cancelling in-flight streams. The
+    # worker can finish its grace period; final gateway shutdown retains partial
+    # stream evidence. Control failure stops gateway before any worker wait.
+    roles = ('worker', 'gateway') if confirmations[0] else ('gateway', 'worker')
+    for role in roles:
+        try:
+            confirmations.append(_stop_owned_role(state, role))
+        except ContainerOwnershipError as exc:
+            ownership_errors.append(exc)
+            confirmations.append(False)
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError):
+            confirmations.append(False)
+    if ownership_errors:
+        # Foreign roles are untouched; independently owned peers were attempted.
+        raise ownership_errors[0]
     return all(confirmations)
 
 
@@ -510,7 +602,25 @@ def request_stop(root):
             receipt = manifest.get('network_cleanup', {'confirmed': False, 'status': 'pending'})
         return {'run_id': root.name, 'stop_confirmed': True, 'already_stopped': True,
                 'network_cleanup': receipt}
-    util.write_json_atomic(root / 'stop-request.json', {'requested_at': run.now()})
+    try:
+        util.write_json_atomic(root / 'stop-request.json', {'requested_at': run.now()})
+    except OSError:
+        # The controller cannot observe a missing marker. Physical shutdown is
+        # still necessary, even while it owns its lease; never call this saved.
+        stop_owned(root)
+        raise RuntimeError('Stop-request evidence unavailable; owned shutdown attempted')
+    # The running controller may hold its lease throughout worker grace. Close
+    # provider admission now, before waiting for that lease/controller exit.
+    try:
+        fence_owned(root)
+    except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError):
+        # Early control failure cannot skip the independently owned peer. Keep
+        # the original fault, including ownership mismatch, after best effort.
+        try:
+            stop_owned(root)
+        except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError):
+            pass
+        raise
     try:
         with ownership.lease(root):
             # No controller is alive. Reclaim only containers bound to this Run.
@@ -542,7 +652,38 @@ def request_stop(root):
     return result
 
 
-def scoring_command(condition, frozen, out, work, assets, version, sequence):
+def prepare_native_container(command_args, destination, receipt_path):
+    """Initialize only this container's empty scratch volume; evaluator remains non-root."""
+    if command_args[:2] != ['docker', 'run'] or destination not in ('/work', '/data'):
+        raise ValueError('Unsupported native scratch command')
+    args = list(command_args[2:])
+    if '-d' in args: args.remove('-d')
+    name = args[args.index('--name') + 1]
+    helper = name + '-volume-init'
+    command(['docker', 'create', *args])
+    detail = json.loads(docker('inspect', name).stdout)[0]
+    mounts = [m for m in detail['Mounts'] if m['Destination'] == destination]
+    if len(mounts) != 1 or mounts[0]['Type'] != 'volume':
+        raise ValueError('Native scratch volume missing or ambiguous')
+    volume = mounts[0]['Name']
+    receipt = dict(container=name, volume=volume, destination=destination,
+                   evaluator_user=detail['Config']['User'], helper=helper)
+    try:
+        result = docker('run', '--name', helper, '--network', 'none', '--user', '0:0',
+                        '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+                        '--mount', 'type=volume,source='+volume+',target=/owned',
+                        detail['Image'], 'chmod', '0777', '/owned', check=False, timeout=30)
+        receipt['exit_code'] = result.returncode
+        if result.returncode: raise RuntimeError('Native scratch initialization failed')
+    finally:
+        removed = docker('rm', '-f', helper, check=False)
+        receipt['helper_removed'] = removed.returncode == 0
+        util.write_new_json(receipt_path, receipt)
+        if removed.returncode: raise RuntimeError('Native scratch helper cleanup failed')
+    return ['docker', 'start', '-a', name]
+
+
+def scoring_command(condition, frozen, out, work, assets, version, sequence, *, native_work=False):
     name = 's2-score-' + uuid.uuid4().hex
     business = []
     migration = condition['evaluation'].get('migration_contract')
@@ -556,7 +697,9 @@ def scoring_command(condition, frozen, out, work, assets, version, sequence):
         business = mount(initial, '/inputs/existing-business/' + import_input, True)
     cmd = ['docker', 'run', '--name', name, '--network', 'none', *sandbox_args(),
            *mount(frozen, '/artifact', True), *mount(assets, '/assets', True),
-           *business, *mount(out, '/result'), *mount(work, '/work'), condition['runtime_lock']['images']['evaluator'],
+           *business, *mount(out, '/result'),
+           *(['--mount', 'type=volume,destination=/work'] if native_work else mount(work, '/work')),
+           condition['runtime_lock']['images']['evaluator'],
            'dotnet', '/assets/evaluator/' + condition['evaluation']['assembly'], '--artifact', '/artifact',
            '--out', '/result', '--work', '/work', '--spec', '/assets/requirements.json',
            '--catalog', '/assets/catalog.json', '--evaluation-version', version, '--sequence', str(sequence)]

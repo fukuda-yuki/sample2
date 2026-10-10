@@ -18,6 +18,7 @@ from research.catalog_confirmatory import (
     validate_plan, write_new,
 )
 from research.catalog_design import binary_cells, mc_summary, quality_power_exact, token_power
+from research.tests.catalog_frozen_fixture import child_python_environment, materialize_r3_fixture
 
 
 def plan_digest(plan):
@@ -83,18 +84,32 @@ class ConfirmatoryTests(unittest.TestCase):
     def test_plan_and_pins_match_accepted_implementation(self):
         plan = read_json(DEFAULT_PLAN)
         validate_plan(plan)
-        root = Path(__file__).resolve().parents[2]
-        # Historical plans remain byte-identical. Current changed code is bound
-        # by the explicit post-start amendment, never written into the old plan.
+        # Check the accepted historical implementation in its own snapshot.
+        # Later evaluator repairs must not rewrite old plans or widen r3 scope.
         from research.catalog_date_revision import CHANGED_CODE, NEW_PATH, validate_proposal
-        revised, original, _ = validate_proposal(root / NEW_PATH, root)
-        for name, digest in plan["pinned_files"].items():
-            if name in CHANGED_CODE:
-                self.assertEqual(original['execution']['code_hashes'][name], digest, name)
-                self.assertEqual(sha256(root / name), revised['execution']['code_hashes'][name], name)
-            else:
-                self.assertEqual(sha256(root / name), digest, name)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            materialize_r3_fixture(root, saved_proposal=True)
+            revised, original, _ = validate_proposal(root / NEW_PATH, root)
+            for name, digest in plan["pinned_files"].items():
+                if name in CHANGED_CODE:
+                    self.assertEqual(original['execution']['code_hashes'][name], digest, name)
+                    self.assertEqual(sha256(root / name), revised['execution']['code_hashes'][name], name)
+                else:
+                    self.assertEqual(sha256(root / name), digest, name)
+            source = root / "outer/harness/aggregate.py"
+            source.write_bytes(source.read_bytes() + b"\n# synthetic tampering\n")
+            with self.assertRaisesRegex(ValueError, "Revised code hash mismatch"):
+                validate_proposal(root / NEW_PATH, root)
         self.assertEqual(plan["runs_per_condition"], plan["pairs"])
+
+    def test_historical_fixture_rejects_corrupt_git_blob_before_writing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch("research.tests.catalog_frozen_fixture._blob", return_value=b"corrupt fixture"):
+                with self.assertRaisesRegex(ValueError, "Historical fixture SHA mismatch"):
+                    materialize_r3_fixture(root)
+            self.assertEqual(list(root.iterdir()), [])
 
     def test_schedule_is_reproducible_both_orders_and_no_duplicate_slots(self):
         plan = read_json(HISTORICAL_PLAN)
@@ -427,7 +442,8 @@ class ConfirmatoryTests(unittest.TestCase):
                         "--observations", str(root / "observations.json"), "--out", str(root / "out.json")]
                     if not embedded:
                         command += ["--launch-receipt", str(root / "receipt.json")]
-                    process = subprocess.run(command, cwd=REPO, capture_output=True, text=True)
+                    process = subprocess.run(command, cwd=REPO, capture_output=True, text=True,
+                                             env=child_python_environment())
                     self.assertEqual(process.returncode == 0, valid, process.stderr)
                     self.assertEqual((root / "out.json").exists(), valid)
                     if valid:

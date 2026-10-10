@@ -5,9 +5,10 @@ import math
 from pathlib import Path
 
 
-def calculate(pairs=64, variants=2, repetitions=32, families=1):
+def calculate(pairs=64, variants=2, repetitions=32, families=1, pair_concurrency=1):
     if pairs != variants * repetitions or min(pairs, variants, repetitions) <= 0:
         raise ValueError('Pair count must equal variants times repetitions')
+    if pair_concurrency not in (1,2): raise ValueError('Pair concurrency must be 1 or 2')
     rows = []
     for missing in (0.0, 0.1, 0.25):
         observed = max(1, math.floor(pairs * (1 - missing)))
@@ -46,6 +47,8 @@ def calculate(pairs=64, variants=2, repetitions=32, families=1):
             'The selected fixed families and nested variants do not justify population inference across unselected applications.',
             'There is no noninferiority/equivalence margin or maintenance claim.'],
         'feasibility': {'implementation_wall_clock_cap_hours_serial': 2 * pairs * 1800 / 3600,
+            'pair_concurrency': pair_concurrency,
+            'implementation_wall_clock_cap_hours_frozen_regime': 2 * pairs * 1800 / 3600 / pair_concurrency,
             'historical_twelve_minute_reference_hours_serial': 2 * pairs * 12 / 60,
             'retained_bytes_scenario_per_run_including_archive': 600_000_000,
             'retained_bytes_scenario_all_assigned': 2 * pairs * 600_000_000,

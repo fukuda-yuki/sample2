@@ -12,7 +12,7 @@ import time
 import uuid
 import urllib.request
 
-from . import runtime, util, browser_cleanup, ownership, browser_prerequisite
+from . import runtime, util, browser_cleanup, ownership, browser_prerequisite, browser_product
 from .security import child_environment
 
 OBSERVED = 'agent_observed_C-015_C-016'
@@ -21,7 +21,7 @@ OBSERVED = 'agent_observed_C-015_C-016'
 def required(version):
     # Explicit contract versions: a new task must never inherit HTTP-only
     # acceptance accidentally. Keep the historical 1.1.0 interpretation.
-    return version in ('1.2.0', '1.3.0')
+    return version in ('1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0')
 
 
 def coverage_complete(output):
@@ -51,6 +51,7 @@ def stored_coverage_complete(directory, instance, artifact_hash, spec_hash, *, a
                 or output.get('artifactSha256') != artifact_hash or output.get('specSha256') != spec_hash
                 or util.sha256_file(receipt_path) != output['browserCartEvidenceSha256']): return False
         receipt = util.read_json(receipt_path)
+        if output.get('evaluationVersion') in ('1.4.0', '1.5.0', '1.6.0') and not receipt.get('removals'): return False
         if (receipt.get('runInstanceId') != instance or receipt.get('artifactSha256') != artifact_hash
                 or receipt.get('specSha256') != spec_hash or receipt.get('actor') != 'agent'
                 or (not allow_partial and sorted(r['checkId'] for r in receipt['removals']) != ['C-015', 'C-016'])): return False
@@ -90,10 +91,25 @@ def stored_failure(directory, instance, artifact_hash, spec_hash, evaluation_has
             return None
         observed = stored_coverage_complete(directory, instance, artifact_hash, spec_hash, allow_partial=True)
         source = output if observed else http
+        partial_product = False
+        allowed = None
+        if not observed and output.get('evaluationVersion') in ('1.4.0', '1.5.0', '1.6.0'):
+            try: receipt = util.read_json(directory/'browser-cart/receipt.json')
+            except (OSError, ValueError): receipt = {}
+            checks = browser_product.validated_checks(directory/'browser-cart', receipt, instance, artifact_hash, spec_hash)
+            if checks:
+                source = output; partial_product = True
+                mapping = {'C-012': 'R-011', 'C-015': 'R-014', 'C-016': 'R-015'}
+                allowed = {mapping[check] for check in checks if check in mapping} | {
+                    r['id'] for r in http.get('requirements', []) if r['judgement'] == 'fail'}
         failed = [r['id'] for r in source.get('requirements', []) if r['judgement'] == 'fail']
+        if allowed is not None: failed = [identifier for identifier in failed if identifier in allowed]
+        baseline_failed = {r['id'] for r in http.get('requirements', []) if r['judgement'] == 'fail'}
+        failed += sorted(baseline_failed-set(failed))
         if failed:
-            return {'verdict': 'fail_critical' if source.get('criticalFailed') else 'fail',
-                    'requirements': failed, 'source': 'composed' if observed else 'http-only'}
+            critical = (set(source.get('criticalFailed', [])) | set(http.get('criticalFailed', []))) & set(failed)
+            return {'verdict': 'fail_critical' if critical else 'fail',
+                    'requirements': failed, 'source': 'composed' if observed else 'composed-product-http' if partial_product else 'http-only'}
     except (OSError, ValueError, KeyError, TypeError):
         pass
     return None
@@ -148,6 +164,8 @@ def _compose_evaluation(condition, frozen, baseline, assets, out, instance, sequ
 
 def complete_evaluation(repo, condition, frozen, baseline, published, assets, out,
                         instance, sequence):
+    if (Path(out)/'evaluation.json').exists() or (Path(out)/'browser-cart').exists():
+        raise FileExistsError('Browser completion already attempted: '+str(out))
     Path(out).mkdir(parents=True, exist_ok=True)
     with ownership.lease(out):
         return _complete_evaluation(repo, condition, frozen, baseline, published, assets, out, instance, sequence)
@@ -187,7 +205,7 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
                 or condition['evaluation']['spec_sha256'] != spec_hash):
             raise ValueError('Browser target/baseline identity mismatch')
         baseline_bound = True
-        if version == '1.3.0' and browser_prerequisite.save_if_unpublished(
+        if version in ('1.3.0', '1.4.0', '1.5.0', '1.6.0') and browser_prerequisite.save_if_unpublished(
                 condition, frozen, baseline, published, assets, out, instance,
                 version=version, requirement_id='R-001', build_check='C-001',
                 coverage_field='browserCartCoverage'):
@@ -229,22 +247,27 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
         port = runtime.docker('port', name, '8080/tcp').stdout.strip().split(':')[-1]
         base_url = 'http://127.0.0.1:' + str(int(port))
         intent['base_url'] = base_url
-        deadline = time.monotonic() + 60
-        ready = False
-        while time.monotonic() < deadline:
-            try:
-                with urllib.request.urlopen(base_url + '/', timeout=2) as response:
-                    ready = response.status == 200
-                if ready: break
-            except (OSError, TimeoutError): pass
-            time.sleep(.25)
+        if version in ('1.4.0', '1.5.0', '1.6.0'):
+            ready = browser_product.wait_ready(base_url, out/'readiness-observation.json')
+            intent['readiness_observation_sha256'] = util.sha256_file(out/'readiness-observation.json')
+        else:
+            deadline = time.monotonic() + 60
+            ready = False
+            while time.monotonic() < deadline:
+                try:
+                    with urllib.request.urlopen(base_url + '/', timeout=2) as response:
+                        ready = response.status == 200
+                    if ready: break
+                except (OSError, TimeoutError): pass
+                time.sleep(.25)
         if not ready: raise RuntimeError('Browser application did not become ready within 60 seconds')
         catalog = util.read_json(assets/'catalog.json')
         album = next(a for a in catalog['albums'] if a['albumId'] == 1)
         request = {'runInstanceId': instance, 'artifactSha256': artifact_hash, 'specSha256': spec_hash,
+                   'evaluationVersion': version,
                    'baseUrl': base_url, 'albumId': album['albumId'], 'price': album['price'],
-                   'requireCartStatus': version == '1.3.0',
-                   'structuralPrecondition': version == '1.3.0'}
+                   'requireCartStatus': version in ('1.3.0', '1.4.0', '1.5.0', '1.6.0'),
+                   'structuralPrecondition': version in ('1.3.0', '1.4.0', '1.5.0', '1.6.0')}
         util.write_new_json(review/'request.json', request)
         collector = repo/'inner/browser/cart-review.cjs'
         environment = child_environment({k: os.environ[k] for k in
@@ -257,11 +280,12 @@ def _complete_evaluation(repo, condition, frozen, baseline, published, assets, o
             # Same process-group cleanup used by the ordinary evaluator; no orphaned browser on timeout.
             from .evaluate import run_evaluator
             exit_code, timed_out = run_evaluator(browser_command, repo, environment, stdout, stderr, 150)
-        if exit_code != 0 or timed_out or not (review/'receipt.json').is_file():
+        if timed_out or not (review/'receipt.json').is_file() or (version not in ('1.4.0', '1.5.0', '1.6.0') and exit_code != 0):
             raise RuntimeError('Browser collection incomplete; inspect browser-cart logs and collector-result.json')
         if util.tree_hashes(published) != published_hashes or util.artifact_hash(frozen) != artifact_hash:
             raise ValueError('Application or frozen artifact changed during browser observation')
         code = compose_evaluation(condition, frozen, baseline, assets, out, instance, sequence, defer_cleanup=True)
+        if exit_code != 0: code = 2
     except Exception as exc:
         util.write_new_json(out/'browser-fault.json', {'type': type(exc).__name__, 'message': str(exc), 'scoring_state': 'evaluator_fault'})
         # The composer retains verified HTTP failures even when the browser is

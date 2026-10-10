@@ -514,12 +514,14 @@ class ScoringTimeoutTests(RunFixture, unittest.TestCase):
 
 
 def _is_alive(pid):
-    try:
-        completed = subprocess.run(['tasklist', '/FI', 'PID eq {}'.format(pid), '/NH'],
-                                   capture_output=True, text=True)
-    except OSError:
-        return None
-    return str(pid) in completed.stdout
+    # The Windows "no tasks" message uses the native locale, independently of
+    # Python's UTF-8 mode. PID fields in CSV are ASCII; avoid decoding names or
+    # localized absence messages. An observation failure cannot prove absence.
+    completed = subprocess.run(['tasklist', '/FI', 'PID eq {}'.format(pid),
+                                '/FO', 'CSV', '/NH'], capture_output=True)
+    if completed.returncode != 0:
+        raise RuntimeError('tasklist process observation failed')
+    return b'","' + str(pid).encode('ascii') + b'","' in completed.stdout
 
 
 def _force_kill(pid):

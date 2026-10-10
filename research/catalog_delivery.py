@@ -192,7 +192,7 @@ def release(tag):
 def publish(package_dir, tag, target_commit, *, tag_prefix='catalog-comparison-v2-pair-'):
     """Explicitly invoked after exact public review; never clobber remote assets."""
     package_dir = Path(package_dir).resolve()
-    scoped_prefix = re.fullmatch(r'(?:source-info-v2|technical-continuity)-[0-9a-f]{12}-pair-', tag_prefix)
+    scoped_prefix = re.fullmatch(r'(?:source-info-v2|source-info-v5-100p2|source-info-repaired-v6|technical-continuity)-[0-9a-f]{12}-pair-', tag_prefix)
     if (tag_prefix not in ('catalog-comparison-v2-pair-', 'continuity-v1-pair-') and not scoped_prefix
             or not tag.startswith(tag_prefix) or not tag[len(tag_prefix):].isdigit()):
         raise ValueError('Expected the fixed cohort/pair release tag')

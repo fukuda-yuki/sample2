@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 
 namespace MusicStore.Evaluator;
 
@@ -36,8 +38,6 @@ public static class LegacyScan
     /// </summary>
     private static readonly Regex[] Signals =
     {
-        new Regex(@"MvcMusicStore\.(?:exe|dll|pdb|csproj|sln)\b", RegexOptions.IgnoreCase),
-        new Regex(@"\bMVC-Music-Store\b", RegexOptions.IgnoreCase),
         // IIS Express also hosts ASP.NET Core. Its standard launch profile alone
         // is not evidence of a legacy application; require an explicit old path.
         new Regex(@"\biisexpress(?:\.exe)?\b[^\r\n]*?/path\s*:[^\r\n]*?\bMvcMusicStore(?=[\\/\s""']|$)", RegexOptions.IgnoreCase),
@@ -53,13 +53,13 @@ public static class LegacyScan
     /// ファイル名は、内容の言及ではなく成果物に残った実体である。
     /// </summary>
     private static readonly Regex LegacyFileName = new Regex(
-        @"^(?:MvcMusicStore\.(?:exe|dll|pdb|csproj|sln)|Global\.asax|packages\.config)$",
+        @"^(?:Global\.asax|packages\.config)$",
         RegexOptions.IgnoreCase);
 
     public static Result Scan(string artifactPath)
     {
         var result = new Result();
-        foreach (var file in Directory.EnumerateFiles(artifactPath, "*", SearchOption.AllDirectories))
+        foreach (var file in SafeFiles(artifactPath, result))
         {
             var relative = Path.GetRelativePath(artifactPath, file);
             var parts = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -82,6 +82,12 @@ public static class LegacyScan
                 continue;
             }
 
+            if (Regex.IsMatch(Path.GetFileName(file), @"^MvcMusicStore\.(?:exe|dll|pdb)$", RegexOptions.IgnoreCase))
+            {
+                InspectAssembly(artifactPath, file, result);
+                continue;
+            }
+
             var extension = Path.GetExtension(file);
             if (!ScannedExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
             {
@@ -93,12 +99,20 @@ public static class LegacyScan
             {
                 text = File.ReadAllText(file);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // A skipped input is an observation gap, never evidence of absence.
+                result.Unresolved.Add(relative + " :: source read: " + ex.GetType().Name);
                 continue;
             }
 
             var (code, comments) = SplitComments(text, extension);
+            // A data directory or a modern assembly can retain the historical
+            // name. Names are diagnostic mentions; actual dependencies below
+            // require resolved project/assembly or explicit old framework evidence.
+            foreach (Match name in Regex.Matches(text, @"\b(?:MVC-Music-Store|MvcMusicStore\.(?:exe|dll|pdb|csproj|sln))\b", RegexOptions.IgnoreCase))
+                result.Mentions.Add(relative + " :: " + name.Value + "（名称のみ）");
+            ScanNamedLaunch(artifactPath, file, code, result);
             if (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase))
             {
                 // Resolve project references before the generic name signals.
@@ -106,6 +120,14 @@ public static class LegacyScan
                 try
                 {
                     var document = XDocument.Parse(code);
+                    ResolveProject(artifactPath, file, Path.GetFileName(file), result, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                    foreach (var reference in document.Descendants().Where(e => e.Name.LocalName == "Reference"
+                        && ((e.Attribute("Include")?.Value ?? "").Split(',')[0].Equals("MvcMusicStore", StringComparison.OrdinalIgnoreCase)
+                            || e.Elements().Any(h => h.Name.LocalName == "HintPath" && Regex.IsMatch(h.Value, @"MvcMusicStore\.(?:dll|exe)\b", RegexOptions.IgnoreCase)))))
+                    {
+                        var hint = reference.Elements().FirstOrDefault(e => e.Name.LocalName == "HintPath")?.Value;
+                        InspectAssembly(artifactPath, file, hint, result);
+                    }
                     foreach (var reference in document.Descendants().Where(e => e.Name.LocalName == "ProjectReference").ToArray())
                     {
                         ResolveProject(artifactPath, file, reference.Attribute("Include")?.Value, result, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
@@ -126,6 +148,114 @@ public static class LegacyScan
         result.Mentions.Sort(StringComparer.Ordinal);
         result.Unresolved.Sort(StringComparer.Ordinal);
         return result;
+    }
+
+    private static IEnumerable<string> SafeFiles(string root, Result result)
+    {
+        var pending = new Stack<string>(); pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            string[] entries;
+            try
+            {
+                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                    throw new IOException("Linked artifact directory");
+                entries = Directory.GetFileSystemEntries(directory);
+            }
+            catch (Exception ex) { result.Unresolved.Add(Path.GetRelativePath(root, directory) + " :: directory read: " + ex.GetType().Name); continue; }
+            foreach (var entry in entries)
+            {
+                FileAttributes attributes;
+                try { attributes = File.GetAttributes(entry); }
+                catch (Exception ex) { result.Unresolved.Add(Path.GetRelativePath(root, entry) + " :: attributes: " + ex.GetType().Name); continue; }
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                { result.Unresolved.Add(Path.GetRelativePath(root, entry) + " :: linked artifact input"); continue; }
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    if (new[] { "bin", "obj", "wwwroot" }.Contains(Path.GetFileName(entry), StringComparer.OrdinalIgnoreCase)) continue;
+                    pending.Push(entry);
+                }
+                else yield return entry;
+            }
+        }
+    }
+
+    private static void ScanNamedLaunch(string root, string file, string code, Result result)
+    {
+        // Finite static evidence only: do not infer a launch from arbitrary text.
+        // Indirect/dynamic launch paths remain outside this heuristic's coverage.
+        foreach (Match launch in Regex.Matches(code, @"(?:Process\.Start|ProcessStartInfo|Assembly\.LoadFrom|Assembly\.LoadFile)\s*\(\s*""(?<path>[^""]*(?:MvcMusicStore\.(?:exe|dll)|MVC-Music-Store)[^""]*)""", RegexOptions.IgnoreCase))
+            InspectAssembly(root, file, launch.Groups["path"].Value.Replace("\\\\", "\\"), result);
+        foreach (Match launch in Regex.Matches(code, @"Process\.Start\s*\(\s*""dotnet""\s*,\s*""(?<path>[^""]*MvcMusicStore\.dll)""", RegexOptions.IgnoreCase))
+            InspectAssembly(root, file, launch.Groups["path"].Value.Replace("\\\\", "\\"), result);
+        foreach (Match launch in Regex.Matches(code, @"Assembly\.Load\s*\(\s*""MvcMusicStore(?:,[^""]*)?""", RegexOptions.IgnoreCase))
+            InspectAssembly(root, file, "MvcMusicStore.dll", result);
+        if (Path.GetExtension(file).Equals(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var json = System.Text.Json.JsonDocument.Parse(code, new System.Text.Json.JsonDocumentOptions
+                    { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true });
+                void Visit(System.Text.Json.JsonElement element)
+                {
+                    if (element.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        foreach (var property in element.EnumerateObject())
+                        {
+                            if (property.Name.Equals("executablePath", StringComparison.OrdinalIgnoreCase)
+                                && property.Value.ValueKind == System.Text.Json.JsonValueKind.String
+                                && Regex.IsMatch(property.Value.GetString() ?? "", @"(?:MvcMusicStore\.(?:dll|exe)|MVC-Music-Store)", RegexOptions.IgnoreCase))
+                                InspectAssembly(root, file, property.Value.GetString(), result);
+                            Visit(property.Value);
+                        }
+                    else if (element.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        foreach (var child in element.EnumerateArray()) Visit(child);
+                }
+                Visit(json.RootElement);
+            }
+            catch (System.Text.Json.JsonException) { result.Unresolved.Add(Path.GetRelativePath(root, file) + " :: launch configuration JSON invalid"); }
+        }
+    }
+
+    private static void InspectAssembly(string root, string file, Result result) => InspectAssembly(root, file, Path.GetFileName(file), result);
+
+    private static void InspectAssembly(string root, string owner, string reference, Result result)
+    {
+        var origin = Path.GetRelativePath(root, owner);
+        try
+        {
+            if (string.IsNullOrWhiteSpace(reference)) throw new FormatException("Assembly path unresolved");
+            var path = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(owner)!, reference.Replace('\\', Path.DirectorySeparatorChar)));
+            var relative = Path.GetRelativePath(Path.GetFullPath(root), path);
+            if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                throw new IOException("Assembly outside artifact");
+            if (Path.GetExtension(path).Equals(".pdb", StringComparison.OrdinalIgnoreCase)) path = Path.ChangeExtension(path, ".dll");
+            for (var part = new FileInfo(path) as FileSystemInfo; part != null && part.FullName != Path.GetFullPath(root); part = part is FileInfo f ? f.Directory : ((DirectoryInfo)part).Parent)
+                if ((part.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Linked assembly path");
+            using var stream = File.OpenRead(path);
+            using var pe = new PEReader(stream);
+            if (!pe.HasMetadata) throw new BadImageFormatException("Managed assembly metadata missing");
+            var metadata = pe.GetMetadataReader();
+            var frameworks = new List<string>();
+            foreach (var handle in metadata.GetAssemblyDefinition().GetCustomAttributes())
+            {
+                var attribute = metadata.GetCustomAttribute(handle);
+                if (attribute.Constructor.Kind != HandleKind.MemberReference) continue;
+                var constructor = metadata.GetMemberReference((MemberReferenceHandle)attribute.Constructor);
+                if (constructor.Parent.Kind != HandleKind.TypeReference) continue;
+                var type = metadata.GetTypeReference((TypeReferenceHandle)constructor.Parent);
+                if (metadata.GetString(type.Namespace) != "System.Runtime.Versioning" || metadata.GetString(type.Name) != "TargetFrameworkAttribute") continue;
+                var blob = metadata.GetBlobReader(attribute.Value);
+                if (blob.ReadUInt16() != 1) throw new BadImageFormatException("Invalid framework attribute");
+                frameworks.Add(blob.ReadSerializedString());
+            }
+            var oldReference = metadata.AssemblyReferences.Any(h => metadata.GetString(metadata.GetAssemblyReference(h).Name).StartsWith("System.Web", StringComparison.OrdinalIgnoreCase));
+            if (oldReference || frameworks.Any(f => f?.StartsWith(".NETFramework,", StringComparison.Ordinal) == true))
+                result.References.Add(origin + " :: " + reference + "（旧アセンブリのメタデータ）");
+            else if (frameworks.Count != 1 || !Regex.IsMatch(frameworks[0] ?? "", @"^\.NETCoreApp,Version=v(?:[89]|[1-9][0-9]+)\.\d+$"))
+                throw new FormatException("Assembly framework unresolved");
+        }
+        catch (Exception ex) { result.Unresolved.Add(origin + " :: " + reference + " :: assembly: " + ex.GetType().Name); }
     }
 
     private static void ScanSolution(string root, string solution, Result result)

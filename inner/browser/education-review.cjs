@@ -3,19 +3,25 @@
 // directly or force navigation after Save to manufacture the saved state.
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const { chromium } = require('playwright');
+const { workflowStudentId } = require('./education-identity.cjs');
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')), out = process.argv[3];
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
 const ref = name => ({ path: name, sha256: sha(fs.readFileSync(path.join(out, name))) });
 const write = (name, value) => fs.writeFileSync(path.join(out, name), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
-const receipt = { schemaVersion: 1, actor: 'agent', runInstanceId: input.runInstanceId,
+const repaired = input.evaluationVersion === 'education-1.1.0';
+const recorder = repaired ? require('./product-response.cjs').recorder : null;
+const receipt = { schemaVersion: repaired ? 2 : 1, actor: 'agent', runInstanceId: input.runInstanceId,
   artifactSha256: input.artifactSha256, specSha256: input.specSha256,
   action: 'not-run-unsupported', faults: [], conditions: {
-    collectorVersion: 'education-1.0.0', collectorSha256: sha(fs.readFileSync(__filename)),
+    collectorVersion: repaired ? 'education-1.1.0' : 'education-1.0.0', collectorSha256: sha(fs.readFileSync(__filename)),
     nodeVersion: process.version, playwrightVersion: require('playwright/package.json').version,
     viewport: { width: 1280, height: 900 }, locale: 'en-US', timezoneId: 'UTC',
     observation: 'Actual Create then Edit/Save with normal application navigation; no forced post-Save navigation',
     actionTimeoutMs: 5000, updateTimeoutMs: 10000,
   } };
+if (repaired) Object.assign(receipt, { baseUrl: input.baseUrl, evaluationVersion: input.evaluationVersion,
+  requestSha256: sha(fs.readFileSync(process.argv[2])), productFailures: [] });
+if (repaired) receipt.conditions.productResponseHelperSha256 = sha(fs.readFileSync(path.join(__dirname, 'product-response.cjs')));
 async function capture(page, name, tabId) {
   const state = await page.evaluate(() => {
     const marker = id => {
@@ -42,7 +48,7 @@ async function fill(page, fields) {
   for (const [name, value] of Object.entries(fields)) await page.locator('[name="' + name + '"]:visible').fill(value);
 }
 (async () => {
-  let browser, context;
+  let browser, context, responses;
   const events = [], tabId = crypto.randomUUID(), resourceReads = [], externalScriptFaults = [];
   try {
     const executablePath = process.env.SAMPLE2_BROWSER_EXECUTABLE || chromium.executablePath();
@@ -53,15 +59,36 @@ async function fill(page, fields) {
     context = await browser.newContext({ viewport: receipt.conditions.viewport,
       locale: 'en-US', timezoneId: 'UTC', serviceWorkers: 'block', acceptDownloads: false });
     const page = await context.newPage();
+    if (repaired) responses = recorder(page, input, receipt, write, ref, sha);
+    let activeCase = 'browser-launch'; const requestCases = new WeakMap();
+    function operation(caseId, method, route, clicked = false) {
+      activeCase = caseId;
+      if (responses) responses.set({ caseId, checkId: 'E-012', operation: 'school-' + caseId,
+        method, path: route, clickConfirmed: clicked });
+    }
+    async function navigate(caseId, route) {
+      operation(caseId, 'GET', route);
+      try { await page.goto(input.baseUrl + route, { waitUntil: 'load' }); }
+      catch (error) {
+        if (responses) await responses.flush();
+        if (!(responses?.failed(caseId) && String(error).includes('net::ERR_HTTP_RESPONSE_CODE_FAILURE'))) throw error;
+      }
+      if (responses) await responses.flush();
+      if (responses?.failed(caseId)) { receipt.action = 'product-http-failed'; return false; }
+      return true;
+    }
     page.setDefaultTimeout(5000); page.setDefaultNavigationTimeout(15000);
-    page.on('request', r => events.push({ at: new Date().toISOString(), kind: 'request', method: r.method(), url: r.url() }));
+    page.on('request', r => {
+      requestCases.set(r, activeCase);
+      events.push({ at: new Date().toISOString(), kind: 'request', caseId: activeCase, method: r.method(), url: r.url(), requestPayload: r.postData() });
+    });
     page.on('requestfailed', r => {
       events.push({ at: new Date().toISOString(), kind: 'requestfailed', url: r.url(), error: r.failure() });
       if (r.resourceType() === 'script' && new URL(r.url()).origin !== new URL(input.baseUrl).origin)
         externalScriptFaults.push({ url: r.url(), error: r.failure() });
     });
     page.on('response', r => {
-      events.push({ at: new Date().toISOString(), kind: 'response', status: r.status(), url: r.url() });
+      events.push({ at: new Date().toISOString(), kind: 'response', caseId: requestCases.get(r.request()), method: r.request().method(), status: r.status(), url: r.url() });
       if (r.request().resourceType() === 'script' && new URL(r.url()).origin !== new URL(input.baseUrl).origin)
         resourceReads.push((async () => {
           try {
@@ -73,33 +100,46 @@ async function fill(page, fields) {
     });
     page.on('pageerror', e => events.push({ at: new Date().toISOString(), kind: 'pageerror', message: String(e) }));
     await context.tracing.start({ screenshots: true, snapshots: true });
-    await page.goto(input.baseUrl + '/Student/Create', { waitUntil: 'load' });
+    if (!await navigate('create-form', '/Student/Create')) return;
     await capture(page, 'before', tabId);
     receipt.before = ref('before.json'); receipt.beforeScreenshot = ref('before.png');
     if (!await formSupported(page, 'Create')) { receipt.reason = 'ordinary_create_form_unsupported'; return; }
     await fill(page, input.createFields);
+    operation('create-submit', 'POST', '/Student/Create');
     await page.getByRole('button', { name: 'Create', exact: true }).click({ noWaitAfter: true });
+    responses?.confirm('create-submit');
     events.push({ at: new Date().toISOString(), kind: 'ui-click-create' });
     try { await page.waitForURL(/\/Student\/Details\/\d+\/?$/, { timeout: 10000, waitUntil: 'load' }); } catch (_) {}
+    if (responses) await responses.flush();
+    if (responses?.failed('create-submit')) { receipt.action = 'product-http-failed'; return; }
     const created = await capture(page, 'created', tabId); receipt.created = ref('created.json');
-    if (!/^\d+$/.test(created.studentId || '')) {
+    const identity = workflowStudentId(created.studentId, created.url, input.baseUrl);
+    const createdId = identity.id;
+    receipt.studentIdentifierSource = identity.source;
+    receipt.conditions.identityHelperSha256 = sha(fs.readFileSync(path.join(__dirname, 'education-identity.cjs')));
+    if (!createdId) {
       receipt.action = 'create-not-completed'; receipt.reason = 'details_identifier_not_observed_after_create';
       await capture(page, 'after', tabId); receipt.after = ref('after.json'); receipt.afterScreenshot = ref('after.png'); return;
     }
-    receipt.studentId = created.studentId;
+    receipt.studentId = createdId;
     // Setup navigation before the measured Save action is explicit in evidence.
-    await page.goto(input.baseUrl + '/Student/Edit/' + created.studentId, { waitUntil: 'load' });
+    if (!await navigate('edit-form', '/Student/Edit/' + createdId)) return;
     await capture(page, 'edit', tabId); receipt.edit = ref('edit.json');
     if (!await formSupported(page, 'Save')) { receipt.reason = 'ordinary_save_form_unsupported'; return; }
     await fill(page, input.editFields);
+    operation('edit-submit', 'POST', '/Student/Edit/' + createdId);
     await page.getByRole('button', { name: 'Save', exact: true }).click({ noWaitAfter: true });
-    events.push({ at: new Date().toISOString(), kind: 'ui-click-save', studentId: created.studentId });
+    responses?.confirm('edit-submit');
+    events.push({ at: new Date().toISOString(), kind: 'ui-click-save', studentId: createdId });
     receipt.action = 'create-edit-save';
-    try { await page.waitForURL(url => url.pathname.replace(/\/$/, '') === '/Student/Details/' + created.studentId,
+    try { await page.waitForURL(url => url.pathname.replace(/\/$/, '') === '/Student/Details/' + createdId,
       { timeout: 10000, waitUntil: 'load' }); } catch (_) {}
+    if (responses) await responses.flush();
+    if (responses?.failed('edit-submit')) { receipt.action = 'product-http-failed'; return; }
     await capture(page, 'after', tabId); receipt.after = ref('after.json'); receipt.afterScreenshot = ref('after.png');
   } catch (e) { receipt.faults.push(String(e.stack || e)); process.exitCode = 2; }
   finally {
+    if (responses) { try { await responses.flush(); } catch (e) { receipt.faults.push(String(e)); } }
     await Promise.all(resourceReads);
     if (externalScriptFaults.length) {
       receipt.faults.push('External script observation incomplete: ' + JSON.stringify(externalScriptFaults));
@@ -107,6 +147,7 @@ async function fill(page, fields) {
     }
     if (context) { try { await context.tracing.stop({ path: path.join(out, 'trace.zip') }); } catch (e) { receipt.faults.push(String(e)); } }
     if (browser) { try { await browser.close(); } catch (e) { receipt.faults.push(String(e)); } }
+    if (receipt.faults.length) process.exitCode = 2;
     write('events.json', events); write('collector-receipt.json', receipt);
   }
 })();

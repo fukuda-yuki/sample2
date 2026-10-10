@@ -6,7 +6,10 @@ Both arms, failures, partial usage and unassessed outcomes remain included.
 Music Store and ContosoUniversity are two distinct source families; the two
 semantic variants within each family are not independent applications.
 `STUDY.json` retains the plan, assignments, source commit and original local
-bundle hash. A research bundle contains 128 assignments. A technical fixture
+bundle hash. The v4 research bundle contains 128 assignments; the explicitly
+versioned v5 bundle contains 200 assignments in 100 pairs, with 25 pairs per
+variant and at most the two arms of the current pair executing together.
+A technical fixture
 is separately labeled and does not count toward research acquisition.
 This slice is not the complete research corpus or proof of quality maintenance.
 

@@ -171,6 +171,37 @@ public static class Html
         return lines;
     }
 
+    public sealed record CartObservation(List<CartLine> Lines, List<string> ContractFailures,List<string> UnknownObservations)
+    {
+        public List<string> Violations=>ContractFailures.Concat(UnknownObservations).ToList();
+    }
+    public static CartObservation ObserveCart16(string html)
+    {
+        var document=Document(html);var lines=new List<CartLine>();var failures=new List<string>();var unknown=new List<string>();
+        var rows=document.QuerySelectorAll("[id^='row-']");var seen=new HashSet<int>();
+        foreach(var row in rows)
+        {
+            var record=Number(row.Id.Substring(4));
+            var albums=row.QuerySelectorAll("a[href]").Select(link=>
+            {
+                if(!Uri.TryCreate(new Uri("http://localhost"),link.GetAttribute("href"),out var uri))return null;
+                var match=Regex.Match(uri.AbsolutePath,@"^/Store/Details/(?<id>[0-9]+)/?$",RegexOptions.IgnoreCase);
+                return match.Success?Number(match.Groups["id"].Value):null;
+            }).Where(x=>x.HasValue).Select(x=>x.Value).Distinct().ToArray();
+            var controls=record.HasValue?row.QuerySelectorAll("[id^='item-count-']").Where(e=>Number(e.Id.Substring(11))==record).ToArray():Array.Empty<AngleSharp.Dom.IElement>();
+            var count=controls.Length==1?Number(controls[0].TextContent.Trim()):null;
+            if(record.HasValue && controls.Length==0)failures.Add("Declared cart row lacks its required item-count-ID marker: "+row.Id);
+            if(!record.HasValue || albums.Length!=1 || !count.HasValue || !seen.Add(record.Value))
+                unknown.Add("Marked cart row identity, album or quantity could not be read unambiguously: "+row.Id);
+            else lines.Add(new() {RecordId=record.Value,AlbumId=albums[0],Count=count.Value});
+        }
+        foreach(var control in document.QuerySelectorAll("[id^='item-count-']"))
+            if(!rows.Any(row=>row.Contains(control))){failures.Add("Declared quantity marker lacks a containing row-ID element: "+control.Id);unknown.Add("Orphan cart quantity cannot establish an empty cart.");}
+        return new(lines,failures,unknown);
+    }
+    public static List<CartLine> CartLines(string html,string evaluationVersion) =>
+        evaluationVersion=="1.6.0"?ObserveCart16(html).Lines:CartLines(html);
+
     public static List<int> AlbumIds(string html) => Document(html).QuerySelectorAll("a[href]")
         .Select(Album).Where(x => x.HasValue).Select(x => x.Value).ToList();
 

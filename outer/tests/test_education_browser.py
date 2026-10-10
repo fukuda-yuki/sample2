@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 try:
     from . import support
 except ImportError:
@@ -44,6 +45,77 @@ class SchoolEvidenceTests(unittest.TestCase):
         self.assertFalse(school.stored_coverage_complete(self.root, 'other', 'artifact', 'spec'))
         self.receipt['after']['path'] = '../evaluation.json'; self.write()
         self.assertFalse(self.covered())
+
+    def new_contract_fixture(self):
+        self.output['evaluationVersion'] = 'education-1.1.0'
+        self.receipt.update(schemaVersion=2, evaluationVersion='education-1.1.0',
+                            baseUrl='http://127.0.0.1:1234', faults=[], productFailures=[])
+        request = {key:self.receipt[key] for key in
+                   ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+        util.write_new_json(self.review/'request.json', request)
+        self.receipt['requestSha256'] = util.sha256_file(self.review/'request.json')
+        self.write()
+
+    def test_new_complete_contract_adopts_schema_two_with_bound_request(self):
+        self.new_contract_fixture()
+        self.assertTrue(school.required('education-1.1.0'))
+        self.assertTrue(self.covered())
+
+    def test_legacy_and_new_schema_cannot_be_relabelled_between_contracts(self):
+        self.assertTrue(self.covered())
+        self.output['evaluationVersion'] = 'education-1.1.0'; self.write()
+        self.assertFalse(self.covered())
+        self.new_contract_fixture()
+        self.output['evaluationVersion'] = school.VERSION; self.write()
+        self.assertFalse(self.covered())
+        self.output['evaluationVersion'] = 'education-9.9.9'; self.write()
+        self.assertFalse(school.stored_coverage_complete(self.root, 'instance', 'artifact', 'spec'))
+
+    def test_new_schema_missing_or_changed_request_is_not_adopted(self):
+        self.new_contract_fixture()
+        (self.review/'request.json').write_text('changed request bytes')
+        self.assertFalse(self.covered())
+        (self.review/'request.json').unlink()
+        self.assertFalse(self.covered())
+
+    def test_new_schema_requires_an_integer_schema_number(self):
+        self.new_contract_fixture()
+        for malformed in (2.0, '2', None, True):
+            with self.subTest(schema=malformed):
+                self.receipt['schemaVersion']=malformed; self.write()
+                self.assertFalse(self.covered())
+
+    def test_legacy_schema_requires_integer_one_without_accepting_bool_float_or_string(self):
+        self.assertTrue(self.covered())
+        for malformed in (True, 1.0, '1', None):
+            with self.subTest(schema=malformed):
+                self.receipt['schemaVersion']=malformed; self.write()
+                self.assertFalse(self.covered())
+        self.receipt['schemaVersion']=1; self.write()
+        self.assertTrue(self.covered())
+
+    def test_new_schema_requires_matching_version_identity_and_owned_origin(self):
+        self.new_contract_fixture()
+        for key, value in [('evaluationVersion',school.VERSION),('runInstanceId','other'),
+                           ('artifactSha256','other'),('specSha256','other'),
+                           ('baseUrl','http://127.0.0.1:9999')]:
+            with self.subTest(key=key):
+                request={key_:self.receipt[key_] for key_ in
+                    ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+                request[key] = value
+                util.write_json_atomic(self.review/'request.json',request)
+                self.receipt['requestSha256']=util.sha256_file(self.review/'request.json'); self.write()
+                self.assertFalse(self.covered())
+        self.receipt['baseUrl']='http://foreign.example:1234'
+        request={key:self.receipt[key] for key in ('runInstanceId','artifactSha256','specSha256','evaluationVersion','baseUrl')}
+        util.write_json_atomic(self.review/'request.json',request)
+        self.receipt['requestSha256']=util.sha256_file(self.review/'request.json'); self.write()
+        self.assertFalse(self.covered())
+
+    def test_new_observer_fault_cannot_claim_complete_but_bound_partial_evidence_is_retained(self):
+        self.new_contract_fixture(); self.receipt['faults']=['trace close failed']; self.write()
+        self.assertFalse(self.covered())
+        self.assertTrue(school.stored_coverage_complete(self.root,'instance','artifact','spec',allow_partial=True))
 
     def failure_fixture(self, known_http=False):
         baseline = self.root/'http-only'; baseline.mkdir()
@@ -95,6 +167,60 @@ class SchoolEvidenceTests(unittest.TestCase):
         connection = sqlite3.connect(path); connection.execute("UPDATE Students SET LastName='Lost' WHERE ID=1")
         connection.commit(); connection.close()
         self.assertFalse(school._database_observation(path, 2, oracle)['original_rows_preserved'])
+
+    def test_wal_committed_rows_are_read_in_one_snapshot_without_rewriting_database(self):
+        path = self.root/'wal.sqlite'; writer = sqlite3.connect(path)
+        self.addCleanup(writer.close)
+        writer.execute('PRAGMA journal_mode=WAL'); writer.execute('PRAGMA wal_autocheckpoint=0')
+        writer.execute('CREATE TABLE Students(ID INTEGER,LastName TEXT,FirstMidName TEXT,EnrollmentDate TEXT)')
+        writer.execute("INSERT INTO Students VALUES(1,'Old','Ada','2020-01-02 00:00:00.000')")
+        writer.execute("INSERT INTO Students VALUES(2,'Review','Morgan','2026-02-03')")
+        writer.commit()
+        oracle = {'tables': {'Students': {'key':'ID','rows':[{'ID':1,'LastName':'Old','FirstMidName':'Ada','EnrollmentDate':'2020-01-02'}]}}}
+        for table in ('Departments','Courses','Enrollments'): oracle['tables'][table]={'key':'ID','rows':[]}
+        before = {p.name:util.sha256_file(p) for p in (path,Path(str(path)+'-wal'))}
+        observed = school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertTrue(observed['original_rows_preserved']); self.assertEqual('Morgan',observed['student']['FirstMidName'])
+        self.assertEqual(before,{p.name:util.sha256_file(p) for p in (path,Path(str(path)+'-wal'))})
+        real_connect = sqlite3.connect
+        class InterleavedReader:
+            def __init__(self,*args,**kwargs): self.connection=real_connect(*args,**kwargs)
+            def __enter__(self): self.connection.__enter__(); return self
+            def __exit__(self,*args): return self.connection.__exit__(*args)
+            @property
+            def row_factory(self): return self.connection.row_factory
+            @row_factory.setter
+            def row_factory(self,value): self.connection.row_factory=value
+            def execute(self,sql,*args):
+                if sql.startswith('SELECT *'):
+                    writer.execute("UPDATE Students SET LastName='Changed between reads' WHERE ID=1"); writer.commit()
+                return self.connection.execute(sql,*args)
+            def close(self): self.connection.close()
+        with patch.object(school.sqlite3,'connect',InterleavedReader):
+            snapshot = school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertTrue(snapshot['original_rows_preserved'])
+        self.assertEqual('Changed between reads',writer.execute('SELECT LastName FROM Students WHERE ID=1').fetchone()[0])
+
+    def test_duplicate_id_cannot_hide_changed_original_row(self):
+        path=self.root/'duplicates.sqlite'; connection=sqlite3.connect(path)
+        connection.execute('CREATE TABLE Students(ID INTEGER,LastName TEXT,FirstMidName TEXT,EnrollmentDate TEXT)')
+        connection.executemany('INSERT INTO Students VALUES(?,?,?,?)',[
+            (1,'Old','Ada','2020-01-02'),(1,'Lost','Ada','2020-01-02'),(2,'Review','Morgan','2026-02-03')])
+        connection.commit(); connection.close()
+        oracle={'tables':{'Students':{'key':'ID','rows':[{'ID':1,'LastName':'Old'}]}}}
+        for table in ('Departments','Courses','Enrollments'): oracle['tables'][table]={'key':'ID','rows':[]}
+        observed=school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertFalse(observed['original_rows_preserved'])
+        self.assertEqual(2,observed['differences'][0]['matchedRows'])
+
+    def test_sqlite_identifier_case_does_not_change_student_evidence_field_names(self):
+        path=self.root/'lowercase.sqlite'; connection=sqlite3.connect(path)
+        connection.execute('CREATE TABLE students(id INTEGER,lastname TEXT,firstmidname TEXT,enrollmentdate TEXT)')
+        connection.execute("INSERT INTO students VALUES(2,'Review','Morgan','2026-02-03')")
+        connection.commit(); connection.close()
+        oracle={'tables':{t:{'key':'ID','rows':[]} for t in ('Students','Departments','Courses','Enrollments')}}
+        observed=school._database_observation(path,2,oracle,version='education-1.1.0')
+        self.assertEqual({'ID':2,'LastName':'Review','FirstMidName':'Morgan','EnrollmentDate':'2026-02-03'},observed['student'])
 
 
 if __name__ == '__main__': unittest.main()

@@ -7,12 +7,14 @@ const crypto = require('node:crypto');
 const { chromium } = require('playwright');
 const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const out = process.argv[3];
+const repaired = ['1.4.0', '1.5.0', '1.6.0'].includes(input.evaluationVersion);
+const recorder = repaired ? require('./product-response.cjs').recorder : null;
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const write = (name, value) => fs.writeFileSync(path.join(out, name), JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
 const ref = name => ({ path: name, sha256: sha(fs.readFileSync(path.join(out, name))) });
 const conditions = {
-  collectorVersion: '1.2.1', collectorSha256: sha(fs.readFileSync(__filename)),
+  collectorVersion: repaired ? input.evaluationVersion : '1.2.1', collectorSha256: sha(fs.readFileSync(__filename)),
   playwrightVersion: require('playwright/package.json').version, nodeVersion: process.version,
   browser: 'chromium', headless: true, viewport: { width: 1280, height: 900 },
   locale: 'en-US', timezoneId: 'UTC', actionTimeoutMs: 5000, navigationTimeoutMs: 15000,
@@ -22,20 +24,63 @@ const conditions = {
   observation: 'visible cart DOM and PNG in the clicked page; no post-click navigation or reload',
   preconditionPolicy: input.structuralPrecondition ? 'known album/quantity and readable total; prices judged after action' : 'expected cart total',
 };
+if (repaired) conditions.productResponseHelperSha256 = sha(fs.readFileSync(path.join(__dirname, 'product-response.cjs')));
 
 // Read-only projection excludes rows hidden by the application's own UI updates.
 async function observe(page) {
-  return page.evaluate(() => {
+  return page.evaluate(genericRows => {
     const visible = e => !!(e.getClientRects().length) && getComputedStyle(e).visibility !== 'hidden';
-    const rows = [...document.querySelectorAll('tr[id^="row-"]')].filter(visible);
+    const rows = [...document.querySelectorAll(genericRows ? '[id^="row-"]' : 'tr[id^="row-"]')].filter(visible);
     const totals = [...document.querySelectorAll('[id="cart-total"]')].filter(visible);
     const status = [...document.querySelectorAll('[id="cart-status"]')].filter(visible);
-    return {
+    const reasons = [], seen = new Set();
+    const integer = text => typeof text === 'string' && /^[0-9]+$/.test(text)
+      && Number(text) <= 2147483647 ? Number(text) : null;
+    const projected = rows.map(e => {
+      if (!genericRows) return { id: e.id, count: e.querySelector('[id="item-count-' + e.id.slice(4) + '"]')?.textContent.trim(),
+        album: [...e.querySelectorAll('a[href]')].map(a => new URL(a.href).pathname).find(p => /^\/Store\/Details\/\d+\/?$/i.test(p)) };
+      const record = integer(e.id.slice(4));
+      const counters = record === null ? [] : [...e.querySelectorAll('[id^="item-count-"]')]
+        .filter(counter => integer(counter.id.slice(11)) === record);
+      const count = counters.length === 1 ? integer(counters[0].textContent.trim()) : null;
+      const albums = [...new Set([...e.querySelectorAll('a[href]')].map(a => {
+        const match = /^\/Store\/Details\/([0-9]+)\/?$/i.exec(new URL(a.href).pathname);
+        return match ? integer(match[1]) : null;
+      }).filter(id => id !== null))];
+      if (record === null || seen.has(record) || count === null || albums.length !== 1)
+        reasons.push({ rowId: e.id, reason: 'invalid_or_ambiguous_row_identity_quantity_or_album' });
+      if (record !== null) seen.add(record);
+      // Keep every marker, including undecodable rows. Never drop malformed
+      // rows and then infer an empty cart from an empty decoded list.
+      return { id: e.id, count: count === null ? null : String(count),
+        album: albums.length === 1 ? '/Store/Details/' + albums[0] : null };
+    });
+    const orphans = genericRows ? [...document.querySelectorAll('[id^="item-count-"]')]
+      .filter(e => visible(e) && !rows.some(row => row.contains(e))) : [];
+    if (orphans.length) reasons.push({ reason: 'quantity_marker_without_declared_row', count: orphans.length });
+    function projectedMarkup(e) {
+      // HTML parsers discard standalone table cells. Preserve the observed
+      // element bytes inside valid table ancestry, without changing live DOM.
+      switch (e.tagName) {
+        case 'TD': case 'TH': return '<table><tbody><tr>' + e.outerHTML + '</tr></tbody></table>';
+        case 'TR': return '<table><tbody>' + e.outerHTML + '</tbody></table>';
+        case 'THEAD': case 'TBODY': case 'TFOOT': case 'CAPTION': case 'COLGROUP':
+          return '<table>' + e.outerHTML + '</table>';
+        case 'COL': return '<table><colgroup>' + e.outerHTML + '</colgroup></table>';
+        default: return e.outerHTML;
+      }
+    }
+    const selected = genericRows ? [...new Set([...rows, ...totals, ...status, ...orphans])] : [];
+    // Deduplicate projected DOM identities/containment, never marker IDs.
+    // A marker already inside a row is retained once; genuine duplicates stay.
+    const roots = selected.filter(e => !selected.some(parent => parent !== e && parent.contains?.(e)));
+    const state = {
       html: document.documentElement.outerHTML, url: location.href,
-      visibleCartHtml: '<table>' + rows.map(e => e.outerHTML).join('') + '<tr>' + totals.map(e => e.outerHTML).join('') + '</tr></table>' + status.map(e => e.outerHTML).join(''),
+      visibleCartHtml: genericRows
+        ? '<section>' + roots.map(projectedMarkup).join('') + '</section>'
+        : '<table>' + rows.map(e => e.outerHTML).join('') + '<tr>' + totals.map(e => e.outerHTML).join('') + '</tr></table>' + status.map(e => e.outerHTML).join(''),
       cartStatus: status.map(e => e.textContent.trim()),
-      rows: rows.map(e => ({ id: e.id, count: e.querySelector('[id="item-count-' + e.id.slice(4) + '"]')?.textContent.trim(),
-        album: [...e.querySelectorAll('a[href]')].map(a => new URL(a.href).pathname).find(p => /^\/Store\/Details\/\d+\/?$/i.test(p)) })),
+      rows: projected,
       totals: totals.map(e => e.textContent.trim()),
       // Keep potential alternate controls as evidence. A selector miss alone is
       // not proof of an absent feature (custom widgets remain unsupported).
@@ -43,21 +88,49 @@ async function observe(page) {
         .filter(e => !(e.matches('a[href]') && /^\/(Store(\/(Index|Browse|Details\/\d+))?|ShoppingCart|Checkout\/AddressAndPayment)?\/?$/i.test(new URL(e.href).pathname)))
         .map(e => e.outerHTML),
     };
-  });
+    if (genericRows) state.rowMarkerObservation = { kind: reasons.length ? 'unknown' : 'known', visibleMarkerCount: rows.length, reasons };
+    return state;
+  }, input.evaluationVersion === '1.6.0');
 }
 function matches(state, quantity) {
-  return state.totals.length === 1 && state.totals[0] === (input.price * quantity).toFixed(2)
+  if (input.evaluationVersion === '1.6.0' && state.rowMarkerObservation?.kind !== 'known') return false;
+  if (input.evaluationVersion === '1.6.0' && quantity > 0 && !positiveRowIdentity(state)) return false;
+  const total = input.evaluationVersion === '1.6.0' && state.totals.length === 1
+    ? moneyObservation(state.totals[0]) : null;
+  const expected = input.evaluationVersion === '1.6.0' ? moneyObservation((input.price * quantity).toFixed(2)) : null;
+  return state.totals.length === 1 && (input.evaluationVersion === '1.6.0'
+    ? total.kind === 'known' && expected.kind === 'known' && total.minor === expected.minor
+    : state.totals[0] === (input.price * quantity).toFixed(2))
     && (!input.requireCartStatus || state.cartStatus.length === 1 && state.cartStatus[0] === 'Cart (' + quantity + ')')
     && (quantity === 0 ? state.rows.length === 0 : state.rows.length === 1
       && state.rows[0].count === String(quantity) && state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId);
 }
 function populated(state, quantity) {
+  if (input.evaluationVersion === '1.6.0' && state.rowMarkerObservation?.kind !== 'known') return false;
+  if (input.evaluationVersion === '1.6.0' && !positiveRowIdentity(state)) return false;
   if (!input.structuralPrecondition) return matches(state, quantity);
   // A readable wrong price is a product defect, not inability to perform a
   // supported removal. Keep the independently expected price for judgement.
-  return state.totals.length === 1 && /^-?\d+\.\d{2}$/.test(state.totals[0])
+  return state.totals.length === 1 && (input.evaluationVersion === '1.6.0'
+    ? moneyObservation(state.totals[0]).kind === 'known' : /^-?\d+\.\d{2}$/.test(state.totals[0]))
     && state.rows.length === 1 && state.rows[0].count === String(quantity)
     && state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId;
+}
+function positiveRowIdentity(state) {
+  return state.rows.length === 1 && /^row-[0-9]+$/.test(state.rows[0].id)
+    && Number(state.rows[0].id.slice(4)) > 0 && Number(state.rows[0].id.slice(4)) <= 2147483647;
+}
+function moneyObservation(text) {
+  if (typeof text !== 'string' || !text.trim()) return { kind: 'invalid', reason: 'missing monetary marker value' };
+  const trimmed = text.trim();
+  const match = /^([+-]?)\s*(\p{Sc})?\s*([+-]?)\s*([0-9]+(?:\.[0-9]*)?)\s*(\p{Sc})?$/u.exec(trimmed);
+  if (!match || match[1] && match[3] || match[2] && match[5]) return { kind: 'unknown', reason: 'unsupported or ambiguous monetary representation' };
+  const numeric = (match[1] || match[3]) + match[4];
+  if (!/^[+-]?[0-9]+\.[0-9]{2}$/.test(numeric)) return { kind: 'invalid', reason: 'decimal point and two fractional digits required' };
+  const minor = BigInt(numeric.replace('.', ''));
+  const absolute = minor < 0n ? -minor : minor;
+  if (absolute > 79228162514264337593543950335n) return { kind: 'unknown', reason: 'outside exact decimal coefficient range' };
+  return { kind: 'known', minor: minor.toString() };
 }
 async function capture(page, tabId, name) {
   const state = await observe(page);
@@ -68,8 +141,10 @@ async function capture(page, tabId, name) {
 
 (async () => {
   let browser;
-  const receipt = { schemaVersion: 2, actor: 'agent', runInstanceId: input.runInstanceId,
+  const receipt = { schemaVersion: repaired ? 3 : 2, actor: 'agent', runInstanceId: input.runInstanceId,
     artifactSha256: input.artifactSha256, specSha256: input.specSha256, conditions, removals: [], faults: [] };
+  if (repaired) Object.assign(receipt, { baseUrl: input.baseUrl, evaluationVersion: input.evaluationVersion,
+    requestSha256: sha(fs.readFileSync(process.argv[2])), productFailures: [] });
   try {
     const executablePath = process.env.SAMPLE2_BROWSER_EXECUTABLE || chromium.executablePath();
     conditions.executablePath = executablePath;
@@ -80,11 +155,14 @@ async function capture(page, tabId, name) {
       const context = await browser.newContext({ viewport: conditions.viewport, locale: conditions.locale,
         timezoneId: conditions.timezoneId, serviceWorkers: 'block', acceptDownloads: false });
       const tabId = crypto.randomUUID(), events = [], pending = new Set(), resourceReads = [], externalScriptFaults = [];
+      let activeCase = checkId + '-empty'; const requestCases = new WeakMap();
       const record = (kind, data) => events.push({ at: new Date().toISOString(), kind, ...data });
       const page = await context.newPage();
+      const responses = repaired ? recorder(page, input, receipt, write, ref, sha) : null;
       page.setDefaultTimeout(conditions.actionTimeoutMs);
       page.setDefaultNavigationTimeout(conditions.navigationTimeoutMs);
-      page.on('request', r => { pending.add(r); record('request', { method: r.method(), url: r.url() }); });
+      page.on('request', r => { pending.add(r); requestCases.set(r, activeCase);
+        record('request', { caseId: activeCase, method: r.method(), url: r.url(), requestPayload: r.postData() }); });
       page.on('requestfinished', r => pending.delete(r));
       page.on('requestfailed', r => {
         pending.delete(r); record('requestfailed', { url: r.url(), error: r.failure() });
@@ -92,7 +170,7 @@ async function capture(page, tabId, name) {
           externalScriptFaults.push({ url: r.url(), error: r.failure() });
       });
       page.on('response', r => {
-        record('response', { status: r.status(), url: r.url() });
+        record('response', { caseId: requestCases.get(r.request()), method: r.request().method(), status: r.status(), url: r.url() });
         if (r.request().resourceType() === 'script' && new URL(r.url()).origin !== new URL(input.baseUrl).origin) {
           resourceReads.push((async () => {
             try {
@@ -119,23 +197,40 @@ async function capture(page, tabId, name) {
             setupBefore: empty.dom, setupScreenshot: empty.screenshot, addCount: count });
         }
         if (!matches(empty.state, 0)) {
-          await unperformed(empty, 'not-run-precondition', 'empty_session_not_established');
+          await unperformed(empty, 'not-run-precondition', input.evaluationVersion === '1.6.0'
+            && empty.state.rowMarkerObservation.kind === 'unknown' ? 'cart_row_markers_unsupported' : 'empty_session_not_established');
           continue;
         }
         // Public AddToCart route is used only for preparation, before observation/click.
-        for (let n = 0; n < count; n++)
-          await page.goto(input.baseUrl + '/ShoppingCart/AddToCart/' + input.albumId, { waitUntil: 'load' });
+        let setupFailed = false;
+        for (let n = 0; n < count; n++) {
+          const caseId = checkId + '-add-' + (n + 1), route = '/ShoppingCart/AddToCart/' + input.albumId;
+          activeCase = caseId;
+          responses?.set({ caseId, checkId: 'C-012', operation: 'cart-add', method: 'GET', path: route, clickConfirmed: false });
+          try { await page.goto(input.baseUrl + route, { waitUntil: 'load' }); }
+          catch (error) {
+            if (responses) await responses.flush();
+            if (!(responses?.failed(caseId) && String(error).includes('net::ERR_HTTP_RESPONSE_CODE_FAILURE'))) throw error;
+          }
+          if (responses) await responses.flush();
+          if (responses?.failed(caseId)) { setupFailed = true; break; }
+        }
+        if (setupFailed) continue; // Add failed; removal has not been measured.
         const before = await capture(page, tabId, checkId + '-before');
         await Promise.all(resourceReads);
         if (externalScriptFaults.length) throw new Error(checkId + ': external script observation incomplete: ' + JSON.stringify(externalScriptFaults));
         if (!populated(before.state, count)) {
           const knownQuantity = before.state.rows.length === 1 && /^\d+$/.test(before.state.rows[0].count)
-            && before.state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId;
-          await unperformed(before, 'not-run-precondition', count === 2 && knownQuantity
+            && before.state.rows[0].album?.replace(/\/$/, '') === '/Store/Details/' + input.albumId
+            && (input.evaluationVersion !== '1.6.0' || before.state.rowMarkerObservation.kind === 'known' && positiveRowIdentity(before.state));
+          await unperformed(before, 'not-run-precondition', input.evaluationVersion === '1.6.0'
+            && before.state.rowMarkerObservation.kind === 'unknown' ? 'cart_row_markers_unsupported'
+            : input.evaluationVersion === '1.6.0' && !positiveRowIdentity(before.state) ? 'positive_owned_row_id_not_established' : count === 2 && knownQuantity
             && before.state.rows[0].count !== '2' ? 'quantity_after_two_adds' : 'populated_state_not_established');
           continue;
         }
-        const row = page.locator('tr[id="' + before.state.rows[0].id + '"]');
+        const row = page.locator((input.evaluationVersion === '1.6.0' ? '[id="' : 'tr[id="')
+          + before.state.rows[0].id + '"]' + (input.evaluationVersion === '1.6.0' ? ':visible' : ''));
         // Public CSS identifier, semantic link/button name or form action; no implementation/Run-specific branch.
         const control = row.locator('.RemoveLink:visible, a[href*="RemoveFromCart"]:visible, form[action*="RemoveFromCart"] button:visible, form[action*="RemoveFromCart"] input[type="submit"]:visible')
           .or(row.getByRole('link', { name: /remove|delete|削除/i })).or(row.getByRole('button', { name: /remove|delete|削除/i }));
@@ -158,8 +253,12 @@ async function capture(page, tabId, name) {
           continue;
         }
         const clickedAt = new Date().toISOString(), start = performance.now();
+        activeCase = checkId + '-remove';
+        responses?.set({ caseId: checkId + '-remove', checkId, operation: 'cart-remove', method: 'POST',
+          path: '/ShoppingCart/RemoveFromCart', clickConfirmed: false });
         try {
           await control.click({ timeout: conditions.actionTimeoutMs, noWaitAfter: true });
+          responses?.confirm(checkId + '-remove');
         } catch (e) {
           // A timeout is not proof of a product defect. Save the observation;
           // never attribute an unsuccessful attempt as a completed click.
@@ -189,6 +288,7 @@ async function capture(page, tabId, name) {
           beforeScreenshot: before.screenshot, afterScreenshot: after.screenshot,
           clickedAt, elapsedMs: Math.round(performance.now() - start), completion, pendingRequests: pending.size });
       } finally {
+        if (responses) await responses.flush();
         write(checkId + '-events.json', events);
         await context.tracing.stop({ path: path.join(out, checkId + '-trace.zip') });
         await context.close();
@@ -202,7 +302,7 @@ async function capture(page, tabId, name) {
     catch (e) { receipt.faults.push(String(e)); process.exitCode = 2; }
     write('receipt.json', receipt);
     write('collector-result.json', { status: receipt.faults.length ? 'evaluator_fault'
-      : receipt.removals.some(r => r.action.startsWith('not-run-')) ? 'partial' : 'observed',
+      : receipt.removals.length !== 2 || receipt.productFailures?.length || receipt.removals.some(r => r.action.startsWith('not-run-')) ? 'partial' : 'observed',
       conditions, faults: receipt.faults, checks: receipt.removals.map(r => ({ checkId: r.checkId, action: r.action, reason: r.reason })) });
   }
 })();

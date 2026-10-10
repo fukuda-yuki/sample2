@@ -25,24 +25,38 @@ public static class BrowserCartCorrection
             throw new InvalidDataException("Baseline identity, HTTP-only scope or complete check set mismatch.");
 
         var reconstructed = Program.BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
+        if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0") reconstructed.EvaluatorFaults.AddRange(baseline.EvaluatorFaults ?? new());
+        if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0" && baseline.ResearchStatus == "incomplete")
+        {
+            reconstructed.Quality = null;
+            reconstructed.Verdict = reconstructed.CriticalFailed.Count > 0 ? "fail_critical" : reconstructed.FailedCount > 0 ? "fail"
+                : reconstructed.EvaluatorFaults.Count > 0 ? "error" : "blocked";
+        }
         if (reconstructed.Verdict != baseline.Verdict || reconstructed.Quality != baseline.Quality
             || !reconstructed.Requirements.Select(r => (r.Id, r.Judgement)).Order()
                 .SequenceEqual(baseline.Requirements.Select(r => (r.Id, r.Judgement)).Order()))
             throw new InvalidDataException("Baseline check results disagree with its evaluation.");
 
         BrowserCartReview browser = null;
-        var faults = new List<string>();
+        var faults = new List<string>(baseline.EvaluatorFaults ?? new());
+        if (options.EvaluationVersion is "1.5.0" or "1.6.0") faults.AddRange(reconstructed.EvaluatorFaults.Except(faults));
         try { browser = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash, specHash,
-            options.ReviewRunInstanceId, catalog, ledger.SpecVersion == "1.3.0",
-            ledger.SpecVersion == "1.3.0"); }
+            options.ReviewRunInstanceId, catalog, ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0",
+            ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0", ledger.SpecVersion is "1.4.0" or "1.5.0" or "1.6.0", options.EvaluationVersion); }
         catch (Exception ex) { faults.Add("Browser evidence: " + ex.Message); }
         if (browser != null) faults.AddRange(browser.Faults);
         foreach (var result in results.Where(r => r.CheckId is "C-015" or "C-016"))
         {
             var observed = browser?.For(result.CheckId);
+            if (options.EvaluationVersion is "1.5.0" or "1.6.0" && result.Judgement is Judgement.Blocked or Judgement.Error)
+                result.UnknownObservations.Add("Original HTTP removal JSON/state predicate was not observed; independent browser evidence cannot fill this gap.");
             // The browser can veto an HTTP pass, but cannot erase a prior HTTP failure.
             if (result.Judgement == Judgement.Pass)
                 result.Judgement = observed?.Complete != true ? Judgement.Blocked : observed.Pass ? Judgement.Pass : Judgement.Fail;
+            else if (options.EvaluationVersion is "1.5.0" or "1.6.0" && observed?.Complete == true && !observed.Pass)
+                // This independent browser observation has its own populated
+                // precondition. Preserve an HTTP fault in the separate fault list.
+                result.Judgement = Judgement.Fail;
             result.Input += "; independent browser assessment (action recorded separately)";
             result.Observation += "\n" + (observed?.Detail ?? "Browser observation unavailable; HTTP failures retained.");
             result.Evidence += "\nbrowser-cart/receipt.json (relative to this evaluation directory)";
@@ -50,8 +64,8 @@ public static class BrowserCartCorrection
         foreach (var failure in browser?.ProductFailures ?? new())
         {
             var result = results.Single(r => r.CheckId == failure.Key);
-            if (result.Judgement == Judgement.Pass) result.Judgement = Judgement.Fail;
-            result.Observation += "\n" + failure.Value;
+            if(options.EvaluationVersion=="1.6.0")Attribution16.ProductFailure(result,failure.Value);
+            else {result.Judgement = Judgement.Fail;result.Observation += "\n" + failure.Value;}
             result.Evidence += "\nbrowser-cart/receipt.json";
         }
         var output = Program.BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
@@ -60,7 +74,9 @@ public static class BrowserCartCorrection
         output.BrowserCartEvidenceSha256 = browser?.ReceiptSha256;
         output.ReviewRunInstanceId = options.ReviewRunInstanceId;
         output.EvaluatorFaults.AddRange(faults);
-        output.ResearchStatus = browser?.Complete == true && output.ErrorCount == 0 && output.BlockedCount == 0 ? "complete" : "incomplete";
+        output.ResearchStatus = browser?.Complete == true && output.ErrorCount == 0 && output.BlockedCount == 0
+            && (!(options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0") || output.EvaluatorFaults.Count == 0)
+            && (options.EvaluationVersion is not ("1.5.0" or "1.6.0") || output.UncheckedScope.Count == 0) ? "complete" : "incomplete";
         if (output.ResearchStatus != "complete")
         {
             output.Quality = null;
@@ -69,7 +85,7 @@ public static class BrowserCartCorrection
                 : faults.Count > 0 ? "error" : "blocked";
         }
         output.ObservationScope = "C-015/C-016 browser actions or unavailable observations plus saved HTTP checks; "
-            + "C-013 may be vetoed by verified two-add quantity evidence; other checks inherited";
+            + "C-013 may be vetoed by verified two-add quantity evidence; C-012/C-015/C-016 by hash-bound owned HTTP500 responses; other checks inherited";
         output.BaselineEvaluationSha256 = Program.Sha256File(baselineFile);
         output.BaselineResultsSha256 = Program.Sha256File(resultsFile);
         Program.WriteResults(options, ledger, results, output);

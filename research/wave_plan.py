@@ -1,0 +1,1668 @@
+"""Separate execution amendment; never changes the frozen v5 scientific plan.
+
+Preparation is offline. The caller freezes this manifest, new source pins,
+resource thresholds and a separate exact-phase user approval before dispatch.
+"""
+from collections import Counter
+from pathlib import Path
+
+from outer.harness import util
+from research import next_phase, pair_execution
+
+KIND = 'source_info_v5_central_fixed_wave_phase_v1'
+V2_KIND = 'source_info_v5_central_fixed_wave_phase_v2'
+V3_KIND = 'source_info_v5_central_fixed_wave_phase_v3'
+V4_KIND = 'source_info_v5_central_fixed_wave_phase_v4'
+V6_KIND = 'source_info_v5_central_fixed_wave_phase_v6'
+V7_KIND = 'source_info_v5_central_fixed_wave_phase_v7'
+V8_KIND = 'source_info_v5_central_fixed_wave_phase_v8'
+V9_KIND = 'source_info_v5_central_fixed_wave_phase_v9'
+V10_KIND = 'source_info_v5_central_fixed_wave_phase_v10'
+V6_PROBE_SHA = 'bee0107bd1d82d4c20fa821d2a85f23b57e847d1c468e79994ab6436550ff36b'
+V5_KIND = 'source_info_v5_central_fixed_wave_phase_v5'
+V5_PROBE_SHA = '490e605232dc89ce024032d1236b097a9931bfb3079f0683a2de101691b32cd7'
+V5_FINITE_COUNT = 16
+V4_PROBE_SHA = '75f9bad0c64adce29527f90023ebee9f5522cad5c495f824a971c617e96a98f4'
+V3_PROBE_SHA = '5efb52edd48f37713b623df46d01ebbd89e2e3321c6548fe1ac2982bd97c9354'
+MONITOR_SHA = 'fcd37689e47423e5f9400ace9080ec2315ba3ad79df6a715f264547dc30f5a67'
+HEALTH_FLAGS = ('host_healthy', 'resource_healthy', 'journal_healthy',
+                'http_healthy', 'provider_healthy')
+RESOURCE_LIMITS = ('host_memory_available_min_bytes', 'docker_memory_available_min_bytes',
+                   'disk_free_min_bytes', 'cpu_percent_max', 'http_inflight_max')
+
+
+def shard_mapping(assignments):
+    """24/24/24/23 responsibilities with each variant count differing by <=1."""
+    capacities = [24, 24, 24, 23]
+    totals = [0] * 4
+    variants = [Counter() for _ in capacities]
+    result = {}
+    # Sorting only assigns responsibility; dispatch retains the original order.
+    for task in sorted({p['task'] for p in assignments}):
+        for pair in (p for p in assignments if p['task'] == task):
+            eligible = [i for i in range(4) if totals[i] < capacities[i]]
+            owner = min(eligible, key=lambda i: (variants[i][task], totals[i], i))
+            result[str(pair['pair'])] = owner + 1
+            totals[owner] += 1
+            variants[owner][task] += 1
+    if totals != capacities or any(max(v[t] for v in variants) - min(v[t] for v in variants) > 1
+                                  for t in sorted({p['task'] for p in assignments})):
+        raise ValueError('Remaining assignments cannot satisfy balanced fixed responsibilities')
+    return result
+
+
+def build(original_bundle, old_journal, batch, *, thresholds, source_commit, source_pins, operational_policy,
+          preparation_view=None):
+    original = util.read_json(original_bundle)
+    next_phase.validate_plan(original['plan'])
+    if original['plan']['plan_id'] != next_phase.V5_ID:
+        raise ValueError('Only the exact v5 global200 allocation is supported')
+    remaining = original['assignments'][5:]
+    phase = {'schema_version': 1, 'kind': KIND, 'phase_id': 'central-wave-pair6-100-v1',
+        'original_bundle': next_phase.reference(original_bundle),
+        'old_journal': next_phase.reference(old_journal), 'batch': str(Path(batch).resolve()),
+        'cohort': original['cohort'], 'runtime': original['runtime_id'],
+        'source_commit': source_commit, 'source_pins': source_pins,
+        'completed_pairs': list(range(1, 6)), 'assignments': remaining,
+        'shards': shard_mapping(remaining), 'responsibility_counts': [24, 24, 24, 23],
+        'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(6, 101, 2)],
+        'initial_pairs': 2, 'maximum_pairs': 4, 'internal_concurrency': 1,
+        'no_refill': True, 'use_balance': False, 'paid_fallback': False,
+        'thresholds': thresholds, 'escalation_flags': list(HEALTH_FLAGS),
+        'operational_policy': next_phase.reference(operational_policy),
+        'research_start_authorized': False}
+    if preparation_view is not None: phase['preparation_view'] = preparation_view
+    validate(phase)
+    return phase
+
+
+def validate(phase, *, repo=None):
+    if phase.get('kind') == V10_KIND:
+        return validate_v10(phase, repo=repo)
+    if phase.get('kind') == V9_KIND:
+        return validate_v9(phase, repo=repo)
+    if phase.get('kind') == V8_KIND:
+        return validate_v8(phase, repo=repo)
+    if phase.get('kind') == V7_KIND:
+        return validate_v7(phase, repo=repo)
+    if phase.get('kind') == V6_KIND:
+        return validate_v6(phase, repo=repo)
+    if phase.get('kind') == V5_KIND:
+        return validate_v5(phase, repo=repo)
+    if phase.get('kind') == V4_KIND:
+        return validate_v4(phase, repo=repo)
+    if phase.get('kind') == V3_KIND:
+        return validate_v3(phase, repo=repo)
+    if phase.get('kind') == V2_KIND:
+        return validate_v2(phase, repo=repo)
+    if (phase.get('kind') != KIND or phase.get('schema_version') != 1
+            or phase.get('phase_id') != 'central-wave-pair6-100-v1'
+            or phase.get('completed_pairs') != list(range(1, 6))
+            or phase.get('responsibility_counts') != [24, 24, 24, 23]
+            or phase.get('initial_pairs') != 2 or phase.get('maximum_pairs') != 4
+            or phase.get('internal_concurrency') != 1 or phase.get('no_refill') is not True
+            or phase.get('use_balance') is not False or phase.get('paid_fallback') is not False
+            or phase.get('research_start_authorized') is not False
+            or phase.get('escalation_flags') != list(HEALTH_FLAGS)):
+        raise ValueError('Unsupported wave amendment')
+    for field in ('original_bundle', 'old_journal', 'operational_policy'):
+        if not next_phase.verify_reference(phase[field]):
+            raise ValueError('Immutable transition reference changed: ' + field)
+    original = util.read_json(phase['original_bundle']['path'])
+    if phase.get('preparation_view'):
+        view = phase['preparation_view']
+        if (not Path(view['path']).is_absolute() or not next_phase.verify_reference(view['witness'])
+                or util.read_json(view['witness']['path']).get('original_bundle_sha256') != phase['original_bundle']['sha256']):
+            raise ValueError('Prospective preparation view lacks original-bundle-bound witness')
+    next_phase.validate_plan(original['plan'])
+    if (original['plan']['plan_id'] != next_phase.V5_ID
+            or original['assignments'] != next_phase.assignments(original['plan'])
+            or phase['assignments'] != original['assignments'][5:]
+            or phase['cohort'] != original['cohort'] or phase['runtime'] != original['runtime_id']):
+        raise ValueError('Original global slot/instance/input/priority assignment changed')
+    if phase['shards'] != shard_mapping(phase['assignments']):
+        raise ValueError('Fixed balanced responsibilities changed')
+    if phase['two_pair_blocks'] != [list(range(i, min(i + 2, 101))) for i in range(6, 101, 2)]:
+        raise ValueError('Fixed wave blocks changed')
+    if (set(phase['thresholds']) != set(RESOURCE_LIMITS)
+            or any(type(v) not in (int, float) or v <= 0 for v in phase['thresholds'].values())
+            or phase['thresholds']['cpu_percent_max'] > 100
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Predeclared objective thresholds and new source pins required')
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve():
+            raise ValueError('Canonical shared registry must be this cohort batch')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest:
+                raise ValueError('New phase code/environment pin changed: ' + name)
+    old = pair_execution.state(phase['old_journal']['path'])
+    expected = {c['run_id']: c for p in original['assignments'][:5] for c in p['cases']}
+    if (set(old['dispatch']) != set(expected) or set(old['reserved']) != set(expected)
+            or set(old['gates']) != set(range(1, 6)) or old['pending']
+            or set(old['results']) != set(expected)
+            or any(d['run_instance_id'] != expected[r]['run_instance_id']
+                   or d['slot'] != expected[r]['slot']
+                   or d['plan_sha256'] != phase['original_bundle']['sha256']
+                   or old['implementations'][r]['receipt'].get('stop_confirmed') is not True
+                   for r, d in old['dispatch'].items())):
+        raise ValueError('Exactly old10 once-only dispatches and five completed gates required')
+    return original
+
+
+def _fixed_originals(batch, current):
+    """Verify original raw/snapshot bytes; mutable manifests are not rehashed."""
+    batch = Path(batch)
+    for rid, binding in current['dispatch'].items():
+        receipt = current['implementations'].get(rid, {}).get('receipt', {})
+        root = batch / rid
+        if (receipt.get('stop_confirmed') is not True or receipt.get('submission_fixed') is not True
+                or receipt.get('collection_status') == 'collection_fault' or receipt.get('collection_error_type')
+                or not receipt.get('raw') or not receipt.get('snapshot_sha256')
+                or util.tree_hashes(root / 'usage/raw') != receipt['raw']
+                or util.sha256_file(root / 'snapshot.json') != receipt['snapshot_sha256']):
+            raise ValueError('Predecessor stop/fixed original raw/snapshot proof missing or changed: ' + rid)
+        manifest = util.read_json(root / 'manifest.json')
+        if (manifest.get('run_id') != rid or manifest.get('run_instance_id') != binding['run_instance_id']
+                or manifest.get('stop_confirmed') is not True or manifest.get('submission_fixed') is not True):
+            raise ValueError('Predecessor original instance/stop/fix changed: ' + rid)
+
+
+def predecessor_state(phase):
+    """Read frozen history without applying a new HEAD to old source pins."""
+    from research import wave_dispatch
+    ref, journal = phase['predecessor_phase'], phase['predecessor_journal']
+    if not next_phase.verify_reference(ref) or not next_phase.verify_reference(journal):
+        raise ValueError('Predecessor phase/journal bytes changed')
+    previous = util.read_json(ref['path'])
+    expected_kind = {V10_KIND: V9_KIND, V8_KIND: V7_KIND, V7_KIND: V6_KIND, V6_KIND: V5_KIND, V5_KIND: V4_KIND, V4_KIND: V3_KIND, V3_KIND: V2_KIND}.get(phase.get('kind'), KIND)
+    if previous.get('kind') != expected_kind: raise ValueError('Successor must retain the exact preceding phase version')
+    original = validate(previous)
+    for key in ('resource_monitor', 'resource_probe', 'resource_collector_acceptance'):
+        if not next_phase.verify_reference(previous[key]): raise ValueError('Historical collector proof changed: ' + key)
+    expected_journal = Path(previous['batch']) / '_control' / previous['phase_id'] / 'wave-journal.jsonl'
+    if Path(journal['path']).resolve() != expected_journal.resolve(): raise ValueError('Wrong predecessor journal location')
+    history = None
+    if phase.get('kind') == V7_KIND:
+        from research import preservation_gate
+        history = preservation_gate.load_saved_history(phase)
+    current = wave_dispatch.state(journal['path'], previous, ref['sha256'], preservation_history=history)
+    prior_pairs = {V9_KIND: range(58,68), V7_KIND: range(54,58), V6_KIND: range(50, 54), V5_KIND: range(22, 50), V4_KIND: range(18, 22), V3_KIND: range(14, 18), V2_KIND: range(12, 14)}.get(expected_kind, range(6, 12))
+    expected = {c['run_id']: c for p in original['assignments'] if p['pair'] in prior_pairs for c in p['cases']}
+    if (current['pending'] or set(current['dispatch']) != set(expected) or set(current['reserved']) != set(expected)
+            or set(current['implementations']) != set(expected) or set(current['results']) != set(expected)
+            or set(current['gates']) != set(prior_pairs)
+            or any(current['dispatch'][rid]['run_instance_id'] != c['run_instance_id'] for rid, c in expected.items())):
+        raise ValueError('All and only predecessor boundary pairs must be stopped/fixed/scored/gated before transition')
+    gates = {str(n): {'path': gate['receipt_path'], 'sha256': gate['receipt_sha256']} for n, gate in current['gates'].items()}
+    if phase['predecessor_gates'] != gates: raise ValueError('Exact predecessor gate references changed')
+    old = pair_execution.state(previous['old_journal']['path'])
+    _fixed_originals(previous['batch'], old)
+    _fixed_originals(previous['batch'], current)
+    return previous, original, current
+
+
+def build_v2(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+             resource_monitor, resource_probe, resource_collector_acceptance):
+    """Offline builder rejects an active predecessor's cohort lease."""
+    previous = util.read_json(predecessor_phase)
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        return _build_v2(predecessor_phase, predecessor_journal, source_commit=source_commit,
+            source_pins=source_pins, resource_monitor=resource_monitor, resource_probe=resource_probe,
+            resource_collector_acceptance=resource_collector_acceptance)
+
+
+def _build_v2(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+              resource_monitor, resource_probe, resource_collector_acceptance):
+    from research import wave_dispatch
+    previous = util.read_json(predecessor_phase)
+    current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+    phase = {**previous, 'schema_version': 2, 'kind': V2_KIND, 'phase_id': 'central-wave-pair12-100-v2',
+        'source_commit': source_commit, 'source_pins': source_pins,
+        'completed_pairs': list(range(1, 12)), 'assignments': previous['assignments'][6:],
+        'shards': {k: v for k, v in previous['shards'].items() if int(k) >= 12},
+        'responsibility_counts': [sum(v == owner for k, v in previous['shards'].items() if int(k) >= 12) for owner in range(1, 5)],
+        'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(12, 101, 2)],
+        'maximum_pairs': 2, 'escalation_allowed': False,
+        'predecessor_phase': next_phase.reference(predecessor_phase),
+        'predecessor_journal': next_phase.reference(predecessor_journal),
+        'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n, g in current['gates'].items()},
+        'resource_monitor': resource_monitor, 'resource_probe': resource_probe,
+        'resource_collector_acceptance': resource_collector_acceptance}
+    validate_v2(phase)
+    return phase
+
+
+def validate_v2(phase, *, repo=None):
+    previous, original, _ = predecessor_state(phase)
+    if (phase.get('schema_version') != 2 or phase.get('phase_id') != 'central-wave-pair12-100-v2'
+            or phase.get('completed_pairs') != list(range(1, 12))
+            or phase.get('assignments') != original['assignments'][11:]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(12, 101, 2)]
+            or phase.get('initial_pairs') != 2 or phase.get('maximum_pairs') != 2
+            or phase.get('escalation_allowed') is not False or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v2 future-only178-slot conservative4-Run amendment')
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks', 'maximum_pairs',
+        'resource_monitor', 'resource_probe', 'resource_collector_acceptance'}
+    if any(phase.get(k) != v for k, v in previous.items() if k not in mutable):
+        raise ValueError('V2 cannot change original model/input/criteria/budgets/operational policy thresholds')
+    inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 12}
+    if (phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+            [sum(v == owner for v in inherited.values()) for owner in range(1, 5)]):
+        raise ValueError('V2 responsibilities must inherit the frozen mapping without reassignment')
+    for key in ('resource_monitor', 'resource_probe', 'resource_collector_acceptance'):
+        if not next_phase.verify_reference(phase[key]): raise ValueError('New collector reference changed: ' + key)
+    if phase['resource_monitor']['sha256'] != previous['resource_monitor']['sha256']:
+        raise ValueError('Resource monitor rules cannot change in a probe-only amendment')
+    acceptance = util.read_json(phase['resource_collector_acceptance']['path'])
+    required = {'kind': 'resource_probe_only_v2_nonlive_acceptance',
+        'previous_probe_sha256': previous['resource_probe']['sha256'],
+        'resource_probe_sha256': phase['resource_probe']['sha256'],
+        'resource_monitor_sha256': phase['resource_monitor']['sha256'],
+        'operational_policy_sha256': previous['operational_policy']['sha256'],
+        'fail_closed_unchanged': True, 'model_called': False, 'run_created': False}
+    if any(acceptance.get(k) != v for k, v in required.items()):
+        raise ValueError('Nonlive acceptance must bind exact old/new probe, unchanged monitor/policy and fail-closed rules')
+    monitor, probe = Path(phase['resource_monitor']['path']).resolve(), Path(phase['resource_probe']['path']).resolve()
+    if probe != monitor.with_name('wave_resource_probe.py'): raise ValueError('New private probe must accompany its monitor')
+    if (probe == Path(previous['resource_probe']['path']).resolve()
+            or monitor == Path(previous['resource_monitor']['path']).resolve()):
+        raise ValueError('New collector cannot overwrite predecessor helper originals')
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v2 source pin changed: ' + name)
+    return original
+
+
+
+def _checked_json(phase, key):
+    reference = phase.get(key)
+    if not isinstance(reference, dict) or not next_phase.verify_reference(reference):
+        raise ValueError('Required final v3 acceptance reference missing or changed: ' + key)
+    return util.read_json(reference['path'])
+
+
+def _utc_timestamp(value):
+    from datetime import datetime, timezone
+    stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if stamp.tzinfo is None: raise ValueError('Evidence timestamp must retain timezone')
+    return stamp.astimezone(timezone.utc)
+
+
+
+def _verify_bound_leaf(reference, checked):
+    """Check one declared leaf, deduplicating only within this validation call."""
+    if not isinstance(reference, dict) or not {'path', 'sha256'} <= reference.keys():
+        raise ValueError('Complete immutable acceptance leaf reference required')
+    key = (str(Path(reference['path']).resolve()), reference['sha256'])
+    if key not in checked:
+        if not next_phase.verify_reference(reference):
+            raise ValueError('Listed acceptance evidence leaf changed: ' + reference['path'])
+        checked.add(key)
+
+
+def _verify_soak_observations(soak, result, checked):
+    observations = soak.get('observations')
+    if not isinstance(observations, list) or len(observations) != 183:
+        raise ValueError('Exactly183 sequential soak observations required')
+    seen, session = set(), None
+    for number, observation in enumerate(observations, 1):
+        label = ('scheduled' if number <= 180 else
+                 ('controlled-worker-stop', 'controlled-gateway-stop', 'controlled-all-stop')[number - 181])
+        raw, monitor = observation.get('raw'), observation.get('monitor')
+        if (observation.get('sequence') != number or not isinstance(raw, dict)
+                or not isinstance(monitor, dict) or len(monitor) != 1):
+            raise ValueError('Soak observations must retain sequential unique raw/monitor bindings')
+        raw_path, monitor_path = Path(raw['path']).resolve(), Path(next(iter(monitor))).resolve()
+        if (raw_path in seen or monitor_path in seen or raw_path == monitor_path
+                or raw_path.name != f'{number:06d}-' + label + '.json'
+                or not monitor_path.name.endswith(f'-{number:06d}.json')):
+            raise ValueError('Swapped/duplicate/mislabelled soak observation evidence')
+        seen.update((raw_path, monitor_path))
+        _verify_bound_leaf(raw, checked)
+        _verify_bound_leaf({'path': str(monitor_path), 'sha256': next(iter(monitor.values()))}, checked)
+        sample, record = util.read_json(raw_path), util.read_json(monitor_path)
+        if (record.get('sequence') != number or record.get('expected_runs') != 4
+                or record.get('schema') != 'prospective-wave-resource-observation-v1'
+                or record.get('sample') != sample or sample.get('ok') is not True or record.get('faults') != []):
+            raise ValueError('Raw/monitor observation sequence or exact sample binding changed')
+        if number == 1: session = record.get('monitor_session')
+        if not session or record.get('monitor_session') != session:
+            raise ValueError('Soak observations must belong to one monitor session')
+        if number > 180:
+            transition = result['transition_observations'][number - 181]
+            if transition.get('raw') != raw or transition.get('monitor') != monitor:
+                raise ValueError('Controlled stop-stage references differ from exact final183 observations')
+
+def _validate_v3_acceptance(phase, previous):
+    """Technical success alone cannot close the retained formal-dispatch hold."""
+    finite = _checked_json(phase, 'finite_acceptance')
+    soak = _checked_json(phase, 'actual_soak_verification')
+    review = _checked_json(phase, 'post_soak_independent_review')
+    boundary = _checked_json(phase, 'post_v2_boundary')
+    hold_boundary = _checked_json(phase, 'hold_boundary')
+    _checked_json(phase, 'revised_hold_instruction')
+    decision = _checked_json(phase, 'resource_collector_acceptance')
+    checked = set()
+    # The existing finite receipt lists original source/fixture references directly.
+    for reference in finite.values():
+        if isinstance(reference, dict) and {'path', 'sha256'} <= reference.keys():
+            _verify_bound_leaf(reference, checked)
+    inputs = review.get('input_references')
+    if not isinstance(inputs, list) or not inputs or any(not isinstance(r, dict) or 'path' not in r or 'sha256' not in r for r in inputs):
+        raise ValueError('Independent review must retain all listed immutable input references')
+    for reference in inputs: _verify_bound_leaf(reference, checked)
+    probe, monitor = phase['resource_probe']['sha256'], phase['resource_monitor']['sha256']
+    if (finite.get('candidate', {}).get('sha256') != probe
+            or finite.get('unchanged_monitor', {}).get('sha256') != monitor
+            or finite.get('all_native_expected_decisions_passed') is not True):
+        raise ValueError('Exact candidate finite acceptance required')
+    for reference in (finite['candidate'], finite['unchanged_monitor']):
+        if not next_phase.verify_reference(reference): raise ValueError('Finite candidate bytes changed')
+    if (boundary.get('kind') != 'quiescent_pre_v3_boundary'
+            or boundary.get('phase') != phase['predecessor_phase']
+            or boundary.get('journal') != phase['predecessor_journal']
+            or boundary.get('gates') != phase['predecessor_gates']
+            or boundary.get('actual_sent') != 26 or boundary.get('all_stopped_fixed') is not True
+            or boundary.get('active_run_containers_at_final_recovery_sample') != 0
+            or boundary.get('recovery_controller_exit_code') != 0):
+        raise ValueError('Exact quiescent26-instance/13-gate boundary required')
+    _utc_timestamp(boundary['at'])
+    if (hold_boundary.get('kind') != 'quiescent_post_v2_recurrence_boundary'
+            or hold_boundary.get('phase') != phase['predecessor_phase']
+            or hold_boundary.get('journal') != phase['predecessor_journal']
+            or hold_boundary.get('gates') != phase['predecessor_gates']
+            or hold_boundary.get('total_actual_sent') != 26 or hold_boundary.get('remaining_original_unsent') != 174
+            or hold_boundary.get('all26_stopped_fixed') is not True or hold_boundary.get('all13_gates_complete') is not True
+            or hold_boundary.get('new_research_dispatch_held') is not True):
+        raise ValueError('Original immutable post-v2 hold boundary required')
+    hold_at = _utc_timestamp(hold_boundary['at'])
+    if (soak.get('kind') != 'actual_nonmodel_soak_bounded_evidence_verification'
+            or soak.get('scheduled_samples') != 180 or soak.get('controlled_stop_observations') != 3
+            or soak.get('owned_fixtures_created_started_stopped_removed') != 8
+            or soak.get('all_original_references_checked_unchanged') is not True
+            or soak.get('original_research_sent_runs') != 26 or soak.get('remaining_original_unsent') != 174
+            or soak.get('formal_research_resume_authorized') is not False
+            or soak.get('historical_cause_resolved') is not False or soak.get('model_called') is not False):
+        raise ValueError('Completed independently verified actual180+3 nonmodel soak required')
+    for field in ('result', 'protocol', 'attempt', 'ownership', 'command_ledger'):
+        if not next_phase.verify_reference(soak[field]): raise ValueError('Actual soak evidence changed')
+    result, protocol = util.read_json(soak['result']['path']), util.read_json(soak['protocol']['path'])
+    if (result.get('status') != 'passed' or result.get('completed_scheduled_samples') != 180
+            or len(result.get('transition_observations', [])) != 3 or result.get('cleanup_errors') != []
+            or result.get('model_called') is not False or result.get('research_dispatched') is not False
+            or result.get('protocol_sha256') != soak['protocol']['sha256']
+            or protocol.get('probe', {}).get('sha256') != probe or protocol.get('monitor', {}).get('sha256') != monitor
+            or protocol.get('original_bundle') != phase['original_bundle']
+            or protocol.get('source', {}).get('commit') != soak.get('source_commit')
+            or not soak.get('source_commit')
+            or protocol.get('scheduled_samples') != 180 or protocol.get('cadence_seconds') != 10):
+        raise ValueError('Actual soak result/protocol does not bind exact reviewed candidate')
+    _verify_soak_observations(soak, result, checked)
+    if (review.get('kind') != 'actual_nonmodel_soak_independent_evidence_review_v3'
+            or review.get('operational_soak_verified') is not True
+            or review.get('historical_cause_resolved') is not False
+            or review.get('formal_174_hold_remains') is not True
+            or review.get('actual_verification') != phase['actual_soak_verification']
+            or review.get('protocol') != soak['protocol'] or review.get('result') != soak['result']):
+        raise ValueError('Exact advisory post-soak review must preserve unresolved historical cause and174 hold')
+    bindings = {'source_commit': phase['source_commit'], 'original_bundle_sha256': phase['original_bundle']['sha256'],
+        'post_v2_boundary': phase['post_v2_boundary'], 'hold_boundary': phase['hold_boundary'],
+        'revised_hold_instruction': phase['revised_hold_instruction'], 'predecessor_journal_sha256': phase['predecessor_journal']['sha256'],
+        'resource_probe_sha256': probe, 'resource_monitor_sha256': monitor,
+        'operational_policy_sha256': previous['operational_policy']['sha256'],
+        'finite_acceptance': phase['finite_acceptance'], 'actual_soak_verification': phase['actual_soak_verification'],
+        'post_soak_independent_review': phase['post_soak_independent_review']}
+    if (decision.get('kind') != 'prospective_resource_fault_recovery_decision_v3'
+            or decision.get('formal_remaining_dispatch_authorized') is not True
+            or decision.get('cause_condition_satisfied') is not True
+            or type(decision.get('historical_cause_resolved')) is not bool
+            or any(decision.get(k) != v for k, v in bindings.items())):
+        raise ValueError('Explicit exact-source cause-condition recovery decision required; soak alone cannot authorize')
+    mode = decision.get('acceptance_mode')
+    if mode not in ('verified_mechanism_resolution', 'parent_explicit_revised_condition'):
+        raise ValueError('Unsupported cause-condition acceptance mode')
+    if mode == 'verified_mechanism_resolution' or decision['historical_cause_resolved']:
+        evidence = decision.get('mechanism_resolution')
+        if not decision['historical_cause_resolved'] or not evidence or not next_phase.verify_reference(evidence):
+            raise ValueError('Historical mechanism resolution must have exact affirmative evidence')
+        proof = util.read_json(evidence['path'])
+        if (proof.get('kind') != 'verified_resource_transport_mechanism_resolution'
+                or proof.get('historical_cause_resolved') is not True
+                or proof.get('predecessor_journal_sha256') != phase['predecessor_journal']['sha256']
+                or proof.get('resource_probe_sha256') != probe):
+            raise ValueError('Mechanism evidence does not resolve this retained historical failure')
+        evidence, independent = proof.get('causal_evidence'), proof.get('independent_review')
+        if not evidence or not independent or not next_phase.verify_reference(evidence) or not next_phase.verify_reference(independent):
+            raise ValueError('Separate genuine affirmative independent mechanism evidence required')
+        checked = util.read_json(independent['path'])
+        if (checked.get('kind') != 'verified_resource_transport_mechanism_independent_review'
+                or checked.get('status') != 'passed' or checked.get('historical_cause_resolved') is not True
+                or checked.get('causal_evidence') != evidence
+                or checked.get('predecessor_journal_sha256') != phase['predecessor_journal']['sha256']
+                or checked.get('resource_probe_sha256') != probe):
+            raise ValueError('Advisory false post-soak facts cannot substitute for affirmative mechanism review')
+    if mode == 'parent_explicit_revised_condition':
+        instruction_ref = decision.get('parent_instruction')
+        if not instruction_ref or not next_phase.verify_reference(instruction_ref):
+            raise ValueError('New exact parent instruction required; existing hold is not permission')
+        instruction = util.read_json(instruction_ref['path'])
+        if (instruction.get('kind') != 'parent_explicit_revised_resource_fault_condition_instruction'
+                or instruction.get('authority') != 'parent' or instruction.get('received_after_hold_boundary') is not True
+                or instruction.get('hold_boundary') != phase['hold_boundary']
+                or instruction.get('revised_hold_instruction') != phase['revised_hold_instruction']
+                or instruction_ref == phase['revised_hold_instruction']
+                or instruction.get('revises_existing_hold') is not True
+                or instruction.get('formal_remaining_instances') != 174
+                or instruction.get('original_bundle_sha256') != phase['original_bundle']['sha256']
+                or instruction.get('predecessor_journal_sha256') != phase['predecessor_journal']['sha256']
+                or type(instruction.get('message')) is not str or not instruction['message']
+                or instruction['message'] != decision.get('parent_instruction_verbatim')
+                or _utc_timestamp(instruction['received_at']) <= hold_at):
+            raise ValueError('Received parent authority/new timestamp/verbatim revised-condition provenance required')
+    return decision
+
+
+def build_v3(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+             resource_monitor, resource_probe, finite_acceptance, actual_soak_verification,
+             post_soak_independent_review, post_v2_boundary, hold_boundary, revised_hold_instruction, recovery_decision):
+    """Future-only builder; never supplies a missing cause-condition decision."""
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V2_KIND: raise ValueError('Exact v2 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        from research import wave_dispatch
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        phase = {**previous, 'schema_version': 3, 'kind': V3_KIND, 'phase_id': 'central-wave-pair14-100-v3',
+            'source_commit': source_commit, 'source_pins': source_pins,
+            'completed_pairs': list(range(1, 14)), 'assignments': previous['assignments'][2:],
+            'shards': {k: v for k, v in previous['shards'].items() if int(k) >= 14},
+            'responsibility_counts': [21, 22, 22, 22],
+            'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(14, 101, 2)],
+            'predecessor_phase': next_phase.reference(predecessor_phase),
+            'predecessor_journal': next_phase.reference(predecessor_journal),
+            'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n, g in current['gates'].items()},
+            'resource_monitor': resource_monitor, 'resource_probe': resource_probe,
+            'finite_acceptance': finite_acceptance, 'actual_soak_verification': actual_soak_verification,
+            'post_soak_independent_review': post_soak_independent_review, 'post_v2_boundary': post_v2_boundary,
+            'hold_boundary': hold_boundary, 'revised_hold_instruction': revised_hold_instruction,
+            'resource_collector_acceptance': recovery_decision}
+        validate_v3(phase)
+        return phase
+
+
+def validate_v3(phase, *, repo=None):
+    previous, original, _ = predecessor_state(phase)
+    if (phase.get('schema_version') != 3 or phase.get('phase_id') != 'central-wave-pair14-100-v3'
+            or phase.get('completed_pairs') != list(range(1, 14))
+            or phase.get('assignments') != original['assignments'][13:]
+            or phase.get('responsibility_counts') != [21, 22, 22, 22]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(14, 101, 2)]
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v3 future-only174-instance amendment')
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks', 'predecessor_phase',
+        'predecessor_journal', 'predecessor_gates', 'resource_monitor', 'resource_probe', 'resource_collector_acceptance'}
+    if any(phase.get(k) != v for k, v in previous.items() if k not in mutable):
+        raise ValueError('V3 cannot alter model/input/criteria/budgets/policy or four-Run cap')
+    inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 14}
+    if phase.get('shards') != inherited: raise ValueError('Original responsibility owners changed')
+    for key in ('resource_monitor', 'resource_probe'):
+        if not next_phase.verify_reference(phase[key]): raise ValueError('New collector reference changed: ' + key)
+    if (phase['resource_monitor']['sha256'] != previous['resource_monitor']['sha256']
+            or phase['resource_monitor']['sha256'] != MONITOR_SHA or phase['resource_probe']['sha256'] != V3_PROBE_SHA):
+        raise ValueError('V3 admits only exact reviewed5efb probe and unchanged monitor')
+    monitor, probe = Path(phase['resource_monitor']['path']).resolve(), Path(phase['resource_probe']['path']).resolve()
+    if (probe != monitor.with_name('wave_resource_probe.py')
+            or monitor == Path(previous['resource_monitor']['path']).resolve()
+            or probe == Path(previous['resource_probe']['path']).resolve()):
+        raise ValueError('Prospective helper paths cannot replace predecessor originals')
+    _validate_v3_acceptance(phase, previous)
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v3 source pin changed: ' + name)
+    return original
+
+
+def build_v4(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+             resource_monitor, resource_probe, resource_collector_acceptance):
+    """Offline, future-only successor for the observed pre-write busy acquisition."""
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V3_KIND: raise ValueError('Exact v3 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        from research import wave_dispatch
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 18}
+        phase = {**previous, 'schema_version': 4, 'kind': V4_KIND, 'phase_id': 'central-wave-pair18-100-v4',
+            'source_commit': source_commit, 'source_pins': source_pins,
+            'completed_pairs': list(range(1, 18)), 'assignments': previous['assignments'][4:],
+            'shards': inherited, 'responsibility_counts': [sum(v == n for v in inherited.values()) for n in range(1, 5)],
+            'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(18, 101, 2)],
+            'predecessor_phase': next_phase.reference(predecessor_phase),
+            'predecessor_journal': next_phase.reference(predecessor_journal),
+            'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n, g in current['gates'].items()},
+            'resource_monitor': resource_monitor, 'resource_probe': resource_probe,
+            'resource_collector_acceptance': resource_collector_acceptance}
+        validate_v4(phase)
+        return phase
+
+
+def _validate_v4_acceptance(phase, previous, current):
+    version5 = phase['kind'] == V5_KIND
+    version, remaining, sent, last, boundary_key = (5, 158, 42, 21, 'post_v4_boundary') if version5 else (4, 166, 34, 17, 'post_v3_boundary')
+    acceptance = _checked_json(phase, 'resource_collector_acceptance')
+    required = {'kind': 'resource_probe_prewrite_pipe_busy_v' + str(version) + '_acceptance',
+        'previous_probe_sha256': previous['resource_probe']['sha256'],
+        'resource_probe_sha256': phase['resource_probe']['sha256'],
+        'resource_monitor_sha256': phase['resource_monitor']['sha256'],
+        'operational_policy_sha256': phase['operational_policy']['sha256'],
+        'source_commit': phase['source_commit'], 'original_bundle_sha256': phase['original_bundle']['sha256'],
+        'predecessor_journal_sha256': phase['predecessor_journal']['sha256'],
+        'prewrite_only': True, 'postwrite_retry': False, 'whole_probe_deadline_seconds': 10,
+        'fail_closed_unchanged': True, 'historical_cause_resolved': False,
+        'remaining_original_instances': remaining, 'maximum_runs': 4, 'model_called': False, 'run_created': False}
+    if version5: required['repeated_native_race_fixture_verified'] = True
+    if any(acceptance.get(k) != v for k, v in required.items()):
+        raise ValueError('V4 acceptance must bind exact prewrite repair, frozen policy and retained historical uncertainty')
+    checked, documents = set(), {}
+    for key in ('finite_acceptance', 'independent_acceptance', 'observed_resource_fault',
+                'stop_acknowledgements', boundary_key, 'standing_completion_authority',
+                'parent_revised_recovery_authority', *(['verification_results_shared'] if version5 else [])):
+        reference = acceptance.get(key)
+        _verify_bound_leaf(reference, checked)
+        documents[key] = util.read_json(reference['path'])
+    finite, review = documents['finite_acceptance'], documents['independent_acceptance']
+    if (finite.get('schema') != ('prospective-pipe-busy-acquire-loop-finite-v1' if version5 else 'prospective-pipe-busy-acquire-finite-v1')
+            or finite.get('old_probe', {}).get('sha256') != previous['resource_probe']['sha256']
+            or finite.get('candidate', {}).get('sha256') != phase['resource_probe']['sha256']
+            or finite.get('unchanged_monitor', {}).get('sha256') != phase['resource_monitor']['sha256']
+            or finite.get('observed_failure') != acceptance['observed_resource_fault']
+            or type(finite.get('finite_passed')) is not int or finite['finite_passed'] != (V5_FINITE_COUNT if version5 else 13)
+            or type(finite.get('old_cpu_identity_cases_passed')) is not int or finite['old_cpu_identity_cases_passed'] != 31
+            or finite.get('all_ast_outside_native_constructor_unchanged') is not True
+            or finite.get('deadline_checks') != {'10_seconds': True, 'shorter_outer_deadline_preserved': True, 'above_10_rejected': True,
+                **({'aggregate_1second_before_open': True, 'backoff_inside_budget': True, 'at_most_8_opens': True} if version5 else {})}
+            or review.get('kind') != 'prospective_pipe_busy_v' + str(version) + '_independent_acceptance'
+            or review.get('status') != 'passed' or review.get('finite_acceptance') != acceptance['finite_acceptance']
+            or review.get('resource_probe_sha256') != phase['resource_probe']['sha256']
+            or review.get('historical_cause_resolved') is not False or review.get('operationally_acceptable') is not True):
+        raise ValueError('Exact finite and independent prewrite repair acceptance required')
+    for reference in finite.values():
+        if isinstance(reference, dict) and {'path', 'sha256'} <= reference.keys():
+            _verify_bound_leaf(reference, checked)
+    inputs = review.get('input_references')
+    if not isinstance(inputs, list) or not inputs:
+        raise ValueError('Independent v4 review must retain its listed immutable input references')
+    for reference in inputs: _verify_bound_leaf(reference, checked)
+    if version5 and (V5_FINITE_COUNT <= 0 or finite.get('repeated_native_race_fixture_verified') is not True
+            or review.get('repeated_native_race_fixture_verified') is not True):
+        raise ValueError('Actual repeated native pipe race verification and independent acceptance required')
+    if version5: _verify_native_race_repetitions(finite, phase['resource_probe'], checked)
+    sample = documents['observed_resource_fault'].get('sample', {})
+    diagnostic = sample.get('transport_diagnostic', {})
+    if (sample.get('ok') is not False or sample.get('timeout_seconds') != 10
+            or any(diagnostic.get(k) != v for k, v in {'substage': 'pipe_open', 'errno': 22,
+                'winerror': 231, 'bytes_written': 0, 'body_bytes_returned': 0}.items())):
+        raise ValueError('Observed original failure must be exact zero-write pipe-open231')
+    boundary = documents[boundary_key]
+    if (boundary.get('kind') != ('quiescent_post_v4_pipe_busy_race_boundary' if version5 else 'quiescent_post_v3_pipe_busy_boundary')
+            or boundary.get('phase') != phase['predecessor_phase'] or boundary.get('journal') != phase['predecessor_journal']
+            or boundary.get('gates') != phase['predecessor_gates'] or boundary.get('actual_sent') != sent
+            or boundary.get('all_stopped_fixed') is not True
+            or boundary.get('all' + str(last) + '_gates_complete') is not True
+            or boundary.get('active_run_containers_at_final_recovery_sample') != 0
+            or boundary.get('recovery_controller_exit_code') != 0):
+        raise ValueError('All34 stopped/fixed and17 gates with quiescent predecessor required')
+    _utc_timestamp(boundary['at'])
+    fence = documents['stop_acknowledgements']; receipt = fence.get('receipt', {})
+    expected = {r: b['run_instance_id'] for r, b in current['dispatch'].items() if b['pair'] in (last - 1, last)}
+    if (fence.get('phase_sha256') != phase['predecessor_phase']['sha256'] or fence.get('evidence_errors') != []
+            or receipt.get('http_fence_confirmed') is not True or not receipt.get('effective_stop_at')
+            or len(fence.get('owned', [])) != 4
+            or {b['run_id']: b['run_instance_id'] for b in fence.get('owned', [])} != expected):
+        raise ValueError('Exact owned fault-wave stop ACK proof required')
+    for key, confirmed in (('gateway_receipts', 'confirmed'), ('worker_stops', 'stop_confirmed')):
+        rows = receipt.get(key, [])
+        if (len(rows) != 4 or {b['run_id']: b['run_instance_id'] for b in rows} != expected
+                or any(b.get(confirmed) is not True for b in rows)):
+            raise ValueError('All four owned gateway ACKs and worker stops required')
+        if key == 'gateway_receipts' and any(b.get('acknowledgement', {}).get('run_id') != b['run_id']
+                or b['acknowledgement'].get('session_id') != b['run_instance_id']
+                or b['acknowledgement'].get('admission_closed') is not True for b in rows):
+            raise ValueError('Gateway acknowledgement identities must match the exact owned instances')
+    # Root retains the received limited repair instruction, not a new human reply.
+    authority = documents['parent_revised_recovery_authority']
+    if (authority.get('kind') != ('parent_explicit_prewrite_race_verification_hold_instruction_v5' if version5 else 'parent_explicit_pipe_busy_recovery_condition_instruction_v4')
+            or authority.get('authority') != 'parent' or not isinstance(authority.get('message'), str)
+            or not authority['message'] or authority.get('message') != acceptance.get('parent_instruction_verbatim')
+            or authority.get('formal_remaining_instances') != remaining or authority.get('maximum_concurrent_runs') != 4
+            or authority.get('original_bundle_sha256') != phase['original_bundle']['sha256']
+            or authority.get('predecessor_phase') != phase['predecessor_phase']
+            or authority.get('observed_resource_fault') != acceptance['observed_resource_fault']
+            or (not version5 and authority.get('received_after_observed_fault') is not True)
+            or authority.get('model_request_retry_authorized') is not False
+            or authority.get('hold_until_preservation_gates_and_repeated_native_race_verification_and_result_sharing' if version5 else 'hold_until_known_prewrite_acquisition_handling_verified') is not True
+            or authority.get('not_a_new_human_reply') is not True):
+        raise ValueError('Exact received limited pipe-only recovery instruction required')
+    standing = documents['standing_completion_authority']
+    if version5:
+        prior_acceptance = util.read_json(previous['resource_collector_acceptance']['path'])
+        if (acceptance['standing_completion_authority'] != prior_acceptance.get('standing_completion_authority')
+                or authority.get('previous_revised_condition') != prior_acceptance.get('parent_revised_recovery_authority')
+                or authority.get('formal_acquisition_as_repair_test_prohibited') is not True
+                or authority.get('monitor_deadline_and_threshold_changes_authorized') is not False):
+            raise ValueError('Remaining158 must inherit original174 standing completion authority')
+        shared = documents['verification_results_shared']
+        if (shared.get('kind') != 'prewrite_race_verification_results_shared_v5'
+                or shared.get('results_shared') is not True or shared.get('not_a_new_human_reply') is not True
+                or shared.get('finite_acceptance') != acceptance['finite_acceptance']
+                or shared.get('independent_acceptance') != acceptance['independent_acceptance']
+                or shared.get('post_v4_boundary') != acceptance['post_v4_boundary']
+                or shared.get('formal_remaining_instances') != 158 or shared.get('maximum_concurrent_runs') != 4):
+            raise ValueError('Preservation counts and actual repeated fixture results must be shared before adoption')
+        return
+    if (standing.get('kind') != 'standing_delegated_completion_with_parent_revised_recovery_condition'
+            or standing.get('approved_by') != 'user' or standing.get('not_a_new_human_reply') is not True
+            or standing.get('parent_revised_instruction') != util.read_json(previous['resource_collector_acceptance']['path']).get('parent_instruction')
+            or standing.get('recovery_decision') != previous['resource_collector_acceptance']):
+        raise ValueError('Remaining166 must be a subset of the standing original174 completion authority')
+    _verify_bound_leaf({'path': standing['original_instruction_path'],
+                        'sha256': standing['original_instruction_sha256']}, checked)
+
+
+def validate_v4(phase, *, repo=None):
+    previous, original, current = predecessor_state(phase)
+    if (phase.get('schema_version') != 4 or phase.get('phase_id') != 'central-wave-pair18-100-v4'
+            or phase.get('completed_pairs') != list(range(1, 18)) or phase.get('assignments') != original['assignments'][17:]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(18, 101, 2)]
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v4 future-only166-instance amendment')
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks', 'predecessor_phase',
+        'predecessor_journal', 'predecessor_gates', 'resource_monitor', 'resource_probe', 'resource_collector_acceptance'}
+    if any(phase.get(k) != v for k, v in previous.items() if k not in mutable):
+        raise ValueError('V4 cannot alter model/input/criteria/budgets/policy or four-Run cap')
+    inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 18}
+    if (phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+            [sum(v == n for v in inherited.values()) for n in range(1, 5)]):
+        raise ValueError('V4 must inherit original responsibility mapping')
+    for key in ('resource_monitor', 'resource_probe'):
+        if not next_phase.verify_reference(phase[key]): raise ValueError('New collector reference changed: ' + key)
+    if (phase['resource_monitor']['sha256'] != previous['resource_monitor']['sha256']
+            or phase['resource_monitor']['sha256'] != MONITOR_SHA or phase['resource_probe']['sha256'] != V4_PROBE_SHA):
+        raise ValueError('V4 admits only exact reviewed prewrite231 repair and unchanged monitor')
+    monitor, probe = Path(phase['resource_monitor']['path']).resolve(), Path(phase['resource_probe']['path']).resolve()
+    if (probe != monitor.with_name('wave_resource_probe.py') or monitor == Path(previous['resource_monitor']['path']).resolve()
+            or probe == Path(previous['resource_probe']['path']).resolve()):
+        raise ValueError('Prospective helper paths cannot replace predecessor originals')
+    _validate_v4_acceptance(phase, previous, current)
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v4 source pin changed: ' + name)
+    return original
+
+
+def _verify_native_race_repetitions(finite, probe, checked):
+    """Verify the accepted43 native case leaves, not only their enclosing receipt."""
+    counts = {'repeated_race_success': 30, 'attempt_exhaustion': 10, 'permanent_busy_timeout': 3}
+    if (type(finite.get('repeated_native_passed')) is not int or finite['repeated_native_passed'] != 43
+            or finite.get('repeated_native_counts') != counts):
+        raise ValueError('Fixed30/10/3 actual native repetitions required')
+    reference = finite.get('repeated_native_receipt'); _verify_bound_leaf(reference, checked)
+    native = util.read_json(reference['path'])
+    expected = {'schema': 'repeated-native-race-verification-v1', 'executions': 43,
+        'repeated_race_successes': 30, 'attempt_exhaustions': 10, 'aggregate_timeouts': 3, 'passed': 43, 'failures': []}
+    if (any(native.get(k) != v for k,v in expected.items())
+            or native.get('candidate', {}).get('sha256') != probe['sha256']):
+        raise ValueError('Exact accepted native repetition receipt required')
+    for key in ('plan', 'candidate', 'fixture', 'runner'): _verify_bound_leaf(native.get(key), checked)
+    plan = util.read_json(native['plan']['path'])
+    if (plan.get('schema') != 'predeclared-native-race-repetitions-v1'
+            or plan.get('candidate') != native['candidate'] or plan.get('fixture') != native['fixture']
+            or plan.get('fixed_matrix') != [
+                {'case': 'repeated_race', 'count': 30, 'expected_GET': 1, 'expected_races': 2},
+                {'case': 'perpetual_race', 'count': 10, 'expected_GET': 0, 'expected_attempts': 8},
+                {'case': 'permanent', 'count': 3, 'expected_GET': 0, 'expected_winerror': 121}]):
+        raise ValueError('Exact predeclared native race matrix required')
+    leaves = native.get('per_case_receipts')
+    if not isinstance(leaves,list) or len(leaves) != 43: raise ValueError('All43 native receipts required')
+    seen, actual = set(), {'repeated_race': 0, 'perpetual_race': 0, 'permanent': 0}
+    for leaf in leaves:
+        _verify_bound_leaf(leaf, checked); row = util.read_json(leaf['path']); case = row.get('case')
+        identity = (case, row.get('repeat'))
+        if (case not in actual or identity in seen or row.get('all_expected_checks_passed') is not True
+                or row.get('candidate_endpoint_identity_checked') is not True or row.get('server_stopped') is not True
+                or row.get('server_errors') != [] or row.get('owned_clients_remaining') != 0
+                or type(row.get('request_count')) is not int or row['request_count'] != (1 if case == 'repeated_race' else 0)
+                or row.get('child_exit_code') != 0):
+            raise ValueError('Native race identity/once-only send/cleanup proof changed')
+        if case != 'repeated_race' and row.get('transport',{}).get('bytes_written') != 0:
+            raise ValueError('Exhausted native acquisition must send zero bytes')
+        seen.add(identity); actual[case] += 1
+    if actual != {'repeated_race':30,'perpetual_race':10,'permanent':3}:
+        raise ValueError('Native repetition grouping changed')
+
+
+def build_v5(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+             resource_monitor, resource_probe, resource_collector_acceptance):
+    """Future-only158; missing real race verification/sharing always holds."""
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V4_KIND: raise ValueError('Exact v4 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        from research import wave_dispatch
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 22}
+        phase = {**previous, 'schema_version': 5, 'kind': V5_KIND, 'phase_id': 'central-wave-pair22-100-v5',
+            'source_commit': source_commit, 'source_pins': source_pins,
+            'completed_pairs': list(range(1, 22)), 'assignments': previous['assignments'][4:],
+            'shards': inherited, 'responsibility_counts': [sum(v == n for v in inherited.values()) for n in range(1, 5)],
+            'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(22, 101, 2)],
+            'predecessor_phase': next_phase.reference(predecessor_phase),
+            'predecessor_journal': next_phase.reference(predecessor_journal),
+            'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n,g in current['gates'].items()},
+            'resource_monitor': resource_monitor, 'resource_probe': resource_probe,
+            'resource_collector_acceptance': resource_collector_acceptance}
+        validate_v5(phase)
+        return phase
+
+
+def validate_v5(phase, *, repo=None):
+    previous, original, current = predecessor_state(phase)
+    if (phase.get('schema_version') != 5 or phase.get('phase_id') != 'central-wave-pair22-100-v5'
+            or phase.get('completed_pairs') != list(range(1, 22)) or phase.get('assignments') != original['assignments'][21:]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(22, 101, 2)]
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v5 future-only158-instance amendment')
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks', 'predecessor_phase',
+        'predecessor_journal', 'predecessor_gates', 'resource_monitor', 'resource_probe', 'resource_collector_acceptance'}
+    if any(phase.get(k) != v for k,v in previous.items() if k not in mutable):
+        raise ValueError('V5 cannot alter model/input/criteria/budgets/policy or four-Run cap')
+    inherited = {k: v for k,v in previous['shards'].items() if int(k) >= 22}
+    if (phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+            [sum(v == n for v in inherited.values()) for n in range(1, 5)]):
+        raise ValueError('V5 must inherit original responsibility mapping')
+    for key in ('resource_monitor', 'resource_probe'):
+        if not next_phase.verify_reference(phase[key]): raise ValueError('New collector reference changed: ' + key)
+    if (phase['resource_monitor']['sha256'] != previous['resource_monitor']['sha256']
+            or phase['resource_monitor']['sha256'] != MONITOR_SHA or phase['resource_probe']['sha256'] != V5_PROBE_SHA):
+        raise ValueError('V5 admits only exact reviewed bounded acquire loop and unchanged monitor')
+    monitor, probe = Path(phase['resource_monitor']['path']).resolve(), Path(phase['resource_probe']['path']).resolve()
+    if (probe != monitor.with_name('wave_resource_probe.py') or monitor == Path(previous['resource_monitor']['path']).resolve()
+            or probe == Path(previous['resource_probe']['path']).resolve()):
+        raise ValueError('Prospective helper paths cannot replace predecessor originals')
+    _validate_v4_acceptance(phase, previous, current)
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v5 source pin changed: ' + name)
+    return original
+
+
+
+def _validate_v6_acceptance(phase, previous, current):
+    """Require actual bounded pacing proof and the unchanged49/98 stop boundary."""
+    acceptance = _checked_json(phase, 'resource_collector_acceptance')
+    required = {'kind': 'resource_probe_paced_acquire_v6_acceptance',
+        'previous_probe_sha256': previous['resource_probe']['sha256'],
+        'resource_probe_sha256': phase['resource_probe']['sha256'],
+        'resource_monitor_sha256': phase['resource_monitor']['sha256'],
+        'operational_policy_sha256': phase['operational_policy']['sha256'],
+        'source_commit': phase['source_commit'], 'original_bundle_sha256': phase['original_bundle']['sha256'],
+        'predecessor_journal_sha256': phase['predecessor_journal']['sha256'],
+        'prewrite_only': True, 'postwrite_retry': False, 'whole_probe_deadline_seconds': 10,
+        'acquire_deadline_seconds': 1, 'open_attempt_cap': 8, 'fail_closed_unchanged': True,
+        'historical_cause_resolved': False, 'remaining_original_instances': 102,
+        'maximum_runs': 4, 'model_called': False, 'run_created': False}
+    if any(acceptance.get(k) != v for k, v in required.items()):
+        raise ValueError('Exact V6 pacing scope, policy and102 original UUIDs required')
+    checked, documents = set(), {}
+    for key in ('finite_acceptance', 'native_acceptance', 'independent_acceptance',
+                'observed_resource_fault', 'stop_acknowledgements', 'preserved_boundary',
+                'standing_completion_authority', 'parent_revised_recovery_authority',
+                'verification_results_shared'):
+        reference = acceptance.get(key); _verify_bound_leaf(reference, checked)
+        documents[key] = util.read_json(reference['path'])
+    finite, native, review = (documents[k] for k in ('finite_acceptance','native_acceptance','independent_acceptance'))
+    if (finite.get('kind') != 'paced_acquire_finite_safety_v6' or finite.get('passed') != 16
+            or finite.get('candidate_sha256') != phase['resource_probe']['sha256']
+            or finite.get('outer_10_seconds_unchanged') is not True
+            or finite.get('postwrite_reopen_forbidden') is not True or finite.get('events_bounded') != 21
+            or finite.get('model_called') is not False or len(finite.get('cases', [])) != 16
+            or any(row.get('passed') is not True for row in finite['cases'])):
+        raise ValueError('All16 finite safety checks must pass for the exact candidate')
+    _verify_bound_leaf(finite.get('legacy_fixture_reference'), checked)
+    if (native.get('kind') != 'actual_native_paced_acquire_acceptance_v6'
+            or any(native.get(k) != 35 for k in ('planned','executed','passed'))
+            or native.get('failures') != [] or native.get('candidate',{}).get('sha256') != phase['resource_probe']['sha256']
+            or native.get('native_returns_not_injected') is not True or native.get('model_called') is not False
+            or native.get('Docker_called') is not False or native.get('historical_per_call_timing_reconstructed') is not False):
+        raise ValueError('Actual model-free35-case native proof required')
+    for key in ('plan','candidate','fixture','runner'): _verify_bound_leaf(native.get(key), checked)
+    plan = util.read_json(native['plan']['path'])
+    matrix = [('immediate','new',3,True), ('busy_available','new',3,True),
+        ('fast_perpetual','old',3,False), ('fast_perpetual','new',5,False),
+        ('window_250ms','old',3,False), ('window_250ms','new',5,True),
+        ('window_600ms','old',3,False), ('window_600ms','new',5,True),
+        ('permanent','new',3,False), ('absent','new',2,False)]
+    expected_matrix = [{'case':c,'variant':v,'count':n,'expected_success':ok,'expected_GET':int(ok)} for c,v,n,ok in matrix]
+    if (plan.get('kind') != 'predeclared_native_paced_acquire_v6' or plan.get('matrix') != expected_matrix
+            or plan.get('candidate') != native['candidate'] or plan.get('fixture') != native['fixture']
+            or plan.get('previous_probe',{}).get('sha256') != previous['resource_probe']['sha256']
+            or plan.get('acquire_budget_seconds') != 1 or plan.get('attempt_cap') != 8
+            or plan.get('outer_deadline_seconds') != 10 or plan.get('total_executions') != 35):
+        raise ValueError('Exact predeclared native comparison matrix required')
+    for key in ('previous_probe','finite_script'): _verify_bound_leaf(plan.get(key), checked)
+    expected = {(c,v,i):ok for c,v,n,ok in matrix for i in range(n)}
+    leaves = native.get('per_case_receipts', []); seen = set()
+    if len(leaves) != 35: raise ValueError('All35 actual native leaves required')
+    for leaf in leaves:
+        _verify_bound_leaf(leaf, checked); row = util.read_json(leaf['path'])
+        identity = (row.get('case'),row.get('variant'),row.get('repetition')); transport = row.get('transport',{})
+        if (identity not in expected or identity in seen or row.get('ok') is not expected[identity]
+                or row.get('request_count') != int(expected[identity])
+                or row.get('all_expected_checks_passed') is not True
+                or row.get('candidate_endpoint_identity_checked') is not True or row.get('server_stopped') is not True
+                or row.get('server_errors') != [] or row.get('owned_clients_remaining') != 0 or row.get('child_exit_code') != 0
+                or not 1 <= transport.get('pipe_open_attempts',0) <= 8):
+            raise ValueError('Native once-only acquisition identity/cleanup proof changed')
+        if not expected[identity] and (transport.get('bytes_written') != 0 or transport.get('body_bytes_returned') != 0):
+            raise ValueError('Failed native acquisition must send zero HTTP bytes')
+        if row['variant'] == 'new':
+            events = transport.get('pipe_acquire_events', [])
+            if not events or len(events) > 21 or any(e.get('begin_seconds',1) >= 1 for e in events if e.get('operation') == 'open'):
+                raise ValueError('New acquisition opens must remain inside logical1s deadline')
+        seen.add(identity)
+    if (review.get('kind') != 'independent_v6_paced_acquire_acceptance'
+            or review.get('status') != 'passed_with_scope_limits' or review.get('candidate') != native['candidate']
+            or review.get('plan') != native['plan'] or review.get('parent_native_receipt') != acceptance['native_acceptance']
+            or review.get('outside_constructor_ast_identical') is not True
+            or review.get('old_probe_and_monitor_hash_unchanged') is not True
+            or review.get('parent_native_leaf_hashes_and_timelines_verified') != 35
+            or review.get('finite_cases_independently_reexecuted') != 16
+            or review.get('trace_allowlist_and_max21_verified') is not True or review.get('source_inputs_unchanged') is not True
+            or len(review.get('independent_native_cases',[])) != 4 or not review.get('input_references')):
+        raise ValueError('Actual independent pacing acceptance with retained limits required')
+    for reference in review['input_references']: _verify_bound_leaf(reference, checked)
+    sample = documents['observed_resource_fault'].get('sample',{})
+    diagnostic = sample.get('diagnostic',{}).get('transport',{})
+    if (sample.get('ok') is not False or sample.get('timeout_seconds') != 10
+            or any(diagnostic.get(k) != v for k,v in {'substage':'pipe_open','winerror':231,'errno':22,
+                'bytes_written':0,'body_bytes_returned':0,'pipe_open_attempts':8,'pipe_busy_wait_calls':7,
+                'pipe_acquire_exhaustion':'attempt_limit'}.items())
+            or not 0 <= diagnostic.get('pipe_acquire_elapsed_seconds',1) < 1):
+        raise ValueError('Retained original prewrite attempt-limit fault required')
+    boundary = documents['preserved_boundary']; counts = boundary.get('counts',{})
+    if (boundary.get('kind') != 'post_v5_attempt_limit_stop_preserved_boundary'
+            or boundary.get('phase_reference') != phase['predecessor_phase']
+            or boundary.get('closed_current_journal_reference') != phase['predecessor_journal']
+            or boundary.get('fault_reference') != acceptance['observed_resource_fault']
+            or boundary.get('actual_fence_reference') != acceptance['stop_acknowledgements']
+            or any(type(counts.get(k)) is not int or counts[k] != v for k,v in {'full_gated_pairs':49,'actually_sent':98,
+                'stopped_fixed_postprocessed':98,'unknown_or_unfixed_sent_runs':0,'undispatched':102}.items())
+            or boundary.get('controllers',{}).get('finish_only_66858_exit') != 0
+            or boundary['controllers'].get('new_wave_dispatched') is not False
+            or type(boundary.get('ledger',{}).get('requests_started')) is not int
+            or type(boundary.get('ledger',{}).get('requests_ended')) is not int
+            or boundary['ledger']['requests_started'] < 0
+            or boundary['ledger']['requests_started'] != boundary['ledger']['requests_ended']):
+        raise ValueError('Exact stopped/fixed49gate98original boundary required')
+    for key in ('stop_reference','fault_summary_reference','busy_observations_reference'):
+        _verify_bound_leaf(boundary.get(key), checked)
+    gates = boundary.get('gate_references',[])
+    if len(gates) != 49 or any(g not in gates for g in phase['predecessor_gates'].values()):
+        raise ValueError('All49 immutable preservation gates required')
+    for reference in gates: _verify_bound_leaf(reference, checked)
+    rows = boundary.get('all_98_saved_run_facts',[])
+    original = util.read_json(phase['original_bundle']['path'])
+    expected_originals = {c['run_id']:c['run_instance_id'] for p in original['assignments'][:49] for c in p['cases']}
+    if (len(rows) != 98 or {r.get('run_id'):r.get('run_instance_id') for r in rows} != expected_originals
+            or any(r.get('actual_send_observed') is not True or r.get('stop_confirmed') is not True
+                or r.get('submission_fixed') is not True for r in rows)):
+        raise ValueError('All98 original UUIDs must stay sent/stopped/fixed')
+    for row in rows: _verify_bound_leaf(row.get('manifest_reference'), checked)
+    expected_stop = {r['run_id']:r['run_instance_id'] for r in rows if r['pair'] in (48,49) and r['end_reason']=='operator_stop'}
+    fence = documents['stop_acknowledgements']; receipt = fence.get('receipt',{})
+    if (len(expected_stop) != 3 or fence.get('phase_sha256') != phase['predecessor_phase']['sha256']
+            or fence.get('evidence_errors') != [] or receipt.get('http_fence_confirmed') is not True
+            or not receipt.get('effective_stop_at') or len(fence.get('owned',[])) != 3
+            or {r['run_id']:r['run_instance_id'] for r in fence.get('owned',[])} != expected_stop):
+        raise ValueError('Exact three owned fault-wave stop ACKs required; completed fourth preserved')
+    for key,flag in (('gateway_receipts','confirmed'),('worker_stops','stop_confirmed')):
+        acks = receipt.get(key,[])
+        if (len(acks)!=3 or {r['run_id']:r['run_instance_id'] for r in acks} != expected_stop
+                or any(r.get(flag) is not True for r in acks)):
+            raise ValueError('Owned ACK and worker stop identities must match')
+        if key=='gateway_receipts' and any(r.get('acknowledgement',{}).get('run_id') != r['run_id']
+                or r['acknowledgement'].get('session_id') != r['run_instance_id']
+                or r['acknowledgement'].get('admission_closed') is not True for r in acks):
+            raise ValueError('Exact gateway admission fence required')
+    authority = documents['parent_revised_recovery_authority']
+    if (authority.get('kind') != 'parent_explicit_bounded_acquisition_pacing_recovery_instruction_v6'
+            or authority.get('authority') != 'parent' or not authority.get('message')
+            or authority['message'] != acceptance.get('parent_instruction_verbatim')
+            or authority.get('original_bundle_sha256') != phase['original_bundle']['sha256']
+            or authority.get('predecessor_phase') != phase['predecessor_phase']
+            or authority.get('preserved_boundary') != acceptance['preserved_boundary']
+            or authority.get('remaining_original_instances') != 102 or authority.get('maximum_concurrent_runs') != 4
+            or authority.get('received_after_hold_boundary') is not True or authority.get('not_a_new_human_reply') is not True
+            or authority.get('model_request_retry_authorized') is not False
+            or authority.get('formal_acquisition_as_repair_test_prohibited') is not True
+            or authority.get('threshold_or_deadline_changes_authorized') is not False
+            or authority.get('new_cost_or_permission_changes_authorized') is not False):
+        raise ValueError('Exact received limited recovery instruction required')
+    prior = util.read_json(previous['resource_collector_acceptance']['path'])
+    if acceptance['standing_completion_authority'] != prior.get('standing_completion_authority'):
+        raise ValueError('Original standing completion authority must be inherited')
+    shared = documents['verification_results_shared']
+    if (shared.get('kind') != 'paced_acquire_v6_verification_results_shared' or shared.get('results_shared') is not True
+            or shared.get('finite_acceptance') != acceptance['finite_acceptance']
+            or shared.get('native_acceptance') != acceptance['native_acceptance']
+            or shared.get('independent_acceptance') != acceptance['independent_acceptance']
+            or shared.get('preserved_boundary') != acceptance['preserved_boundary']
+            or shared.get('remaining_original_instances') != 102 or shared.get('maximum_runs') != 4):
+        raise ValueError('Actual repair results must be shared before adoption')
+
+
+def build_v6(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+             resource_monitor, resource_probe, resource_collector_acceptance):
+    """Future-only102; missing real race verification/sharing always holds."""
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V5_KIND: raise ValueError('Exact v5 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        from research import wave_dispatch
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 50}
+        phase = {**previous, 'schema_version': 6, 'kind': V6_KIND, 'phase_id': 'central-wave-pair50-100-v6',
+            'source_commit': source_commit, 'source_pins': source_pins,
+            'completed_pairs': list(range(1, 50)), 'assignments': previous['assignments'][28:],
+            'shards': inherited, 'responsibility_counts': [sum(v == n for v in inherited.values()) for n in range(1, 5)],
+            'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(50, 101, 2)],
+            'predecessor_phase': next_phase.reference(predecessor_phase),
+            'predecessor_journal': next_phase.reference(predecessor_journal),
+            'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n,g in current['gates'].items()},
+            'resource_monitor': resource_monitor, 'resource_probe': resource_probe,
+            'resource_collector_acceptance': resource_collector_acceptance}
+        validate_v6(phase)
+        return phase
+
+
+def validate_v6(phase, *, repo=None):
+    previous, original, current = predecessor_state(phase)
+    if (phase.get('schema_version') != 6 or phase.get('phase_id') != 'central-wave-pair50-100-v6'
+            or phase.get('completed_pairs') != list(range(1, 50)) or phase.get('assignments') != original['assignments'][49:]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(50, 101, 2)]
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v6 future-only102-instance amendment')
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks', 'predecessor_phase',
+        'predecessor_journal', 'predecessor_gates', 'resource_monitor', 'resource_probe', 'resource_collector_acceptance'}
+    if any(phase.get(k) != v for k,v in previous.items() if k not in mutable):
+        raise ValueError('V6 cannot alter model/input/criteria/budgets/policy or four-Run cap')
+    inherited = {k: v for k,v in previous['shards'].items() if int(k) >= 50}
+    if (phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+            [sum(v == n for v in inherited.values()) for n in range(1, 5)]):
+        raise ValueError('V6 must inherit original responsibility mapping')
+    for key in ('resource_monitor', 'resource_probe'):
+        if not next_phase.verify_reference(phase[key]): raise ValueError('New collector reference changed: ' + key)
+    if (phase['resource_monitor']['sha256'] != previous['resource_monitor']['sha256']
+            or phase['resource_monitor']['sha256'] != MONITOR_SHA or phase['resource_probe']['sha256'] != V6_PROBE_SHA):
+        raise ValueError('V6 admits only exact reviewed bounded acquire loop and unchanged monitor')
+    monitor, probe = Path(phase['resource_monitor']['path']).resolve(), Path(phase['resource_probe']['path']).resolve()
+    if (probe != monitor.with_name('wave_resource_probe.py') or monitor == Path(previous['resource_monitor']['path']).resolve()
+            or probe == Path(previous['resource_probe']['path']).resolve()):
+        raise ValueError('Prospective helper paths cannot replace predecessor originals')
+    _validate_v6_acceptance(phase, previous, current)
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('New v6 source pin changed: ' + name)
+    return original
+
+
+def build_v7(predecessor_phase, predecessor_journal, *, source_commit, source_pins, preservation_acceptance):
+    """Original54..100 only, following the explicitly accepted retained53 fault."""
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V6_KIND: raise ValueError('Exact v6 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch'])/'_control', phase_permit=util.sha256_file(predecessor_phase)):
+        from research import wave_dispatch
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        inherited = {k:v for k,v in previous['shards'].items() if int(k) >= 54}
+        phase = {**previous,'schema_version':7,'kind':V7_KIND,'phase_id':'central-wave-pair54-100-v7',
+            'source_commit':source_commit,'source_pins':source_pins,
+            'completed_pairs':list(range(1,54)),'assignments':previous['assignments'][4:],
+            'shards':inherited,'responsibility_counts':[sum(v == n for v in inherited.values()) for n in range(1,5)],
+            'two_pair_blocks':[list(range(i,min(i+2,101))) for i in range(54,101,2)],
+            'predecessor_phase':next_phase.reference(predecessor_phase),
+            'predecessor_journal':next_phase.reference(predecessor_journal),
+            'predecessor_gates':{str(n):{'path':g['receipt_path'],'sha256':g['receipt_sha256']} for n,g in current['gates'].items()},
+            'preservation_acceptance':preservation_acceptance}
+        validate_v7(phase)
+        return phase
+
+
+def validate_v7(phase, *, repo=None):
+    previous,original,current = predecessor_state(phase)
+    if (phase.get('schema_version') != 7 or phase.get('phase_id') != 'central-wave-pair54-100-v7'
+            or phase.get('completed_pairs') != list(range(1,54))
+            or phase.get('assignments') != original['assignments'][53:]
+            or phase.get('two_pair_blocks') != [list(range(i,min(i+2,101))) for i in range(54,101,2)]
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('Unsupported v7 original94-instance amendment')
+    mutable = {'schema_version','kind','phase_id','source_commit','source_pins','completed_pairs',
+        'assignments','shards','responsibility_counts','two_pair_blocks','predecessor_phase',
+        'predecessor_journal','predecessor_gates'}
+    if (set(phase) != set(previous) | {'preservation_acceptance'}
+            or any(phase.get(k) != v for k,v in previous.items() if k not in mutable)):
+        raise ValueError('V7 cannot alter model/input/criteria/budgets/policy/collector or four-Run cap')
+    inherited = {k:v for k,v in previous['shards'].items() if int(k) >= 54}
+    if (phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+            [sum(v == n for v in inherited.values()) for n in range(1,5)]):
+        raise ValueError('V7 must retain original responsibility mapping')
+    from research import preservation_gate
+    acceptance = util.read_json(preservation_gate.checked(phase['preservation_acceptance']))
+    if (acceptance.get('kind') != 'exact_pair53_preservation_and_v7_future94_acceptance'
+            or acceptance.get('passed') is not True or acceptance.get('source_commit') != phase['source_commit']
+            or acceptance.get('remaining_original_UUID_count') != 94
+            or acceptance.get('model_called') is not False or acceptance.get('evaluator_called') is not False):
+        raise ValueError('Reviewed original53 preservation and future94 acceptance required')
+    for key in ('contract','preservation_gate','source_review','nonmodel_acceptance','preserved_boundary','source_sharing'):
+        preservation_gate.checked(acceptance[key])
+    gate = util.read_json(acceptance['preservation_gate']['path'])
+    history = preservation_gate.load_saved_history(phase)
+    preservation_gate.validate_saved_gate(gate,current,53,history=history,
+        gate_reference=acceptance['preservation_gate'])
+    if (acceptance['preservation_gate'] != phase['predecessor_gates']['53']
+            or gate.get('preservation_contract') != acceptance['contract']):
+        raise ValueError('Accepted preservation gate differs from actual predecessor')
+    review = util.read_json(acceptance['source_review']['path'])
+    contract = preservation_gate.validate_saved_contract(acceptance['contract'],history=history)
+    if (acceptance['source_review'] != contract['evidence']['source_review']
+            or acceptance['nonmodel_acceptance'] != contract['evidence']['nonmodel_acceptance']
+            or review.get('status') != 'passed' or review.get('reviewed_commit') != contract['source_commit']
+            or any(phase['source_pins'].get(n) != h for n,h in review['reviewed_source_sha256'].items())):
+        raise ValueError('New source pins must retain the independently accepted preservation implementation')
+    checks = util.read_json(acceptance['nonmodel_acceptance']['path'])
+    shared = util.read_json(acceptance['source_sharing']['path'])
+    boundary = util.read_json(acceptance['preserved_boundary']['path'])
+    if (checks.get('passed') is not True or checks.get('model_called') is not False
+            or shared.get('ordinary_push_and_no_ff_integration_completed') is not True
+            or shared.get('source_commit') != phase['source_commit']
+            or boundary.get('gated_pairs') != 53 or boundary.get('sent_stopped_fixed_archived') != 106
+            or boundary.get('remaining_original_UUID_count') != 94
+            or boundary.get('original_evaluator_fault_retained') is not True
+            or boundary.get('pair52_usage_missingness_retained') is not True):
+        raise ValueError('Actual preservation, nonmodel verification and source sharing required')
+    if repo is not None:
+        root=Path(repo).resolve()
+        if (root/phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong canonical cohort')
+        for name,digest in phase['source_pins'].items():
+            path=(root/name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest:
+                raise ValueError('New v7 source pin changed: '+name)
+    return original
+
+
+def ancestor_references(phase):
+    result = []
+    while phase.get('predecessor_phase'):
+        reference = phase['predecessor_phase']
+        result.append(reference)
+        phase = util.read_json(reference['path'])
+    return list(reversed(result))
+
+
+def build_v8(predecessor_phase, predecessor_journal, *, source_commit, source_pins,
+             resource_monitor, resource_probe, resource_collector_acceptance, independent_monitor_acceptance):
+    """Original58..100, independent operational supervision; no scientific changes."""
+    from research import wave_dispatch
+    previous = util.read_json(predecessor_phase)
+    if previous.get('kind') != V7_KIND:
+        raise ValueError('Exact V7 predecessor required')
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        current = wave_dispatch.state(predecessor_journal,previous,util.sha256_file(predecessor_phase))
+        phase = {**previous,'schema_version':8,'kind':V8_KIND,'phase_id':'central-wave-pair58-100-v8',
+            'source_commit':source_commit,'source_pins':source_pins,
+            'completed_pairs':list(range(1,58)), 'assignments':previous['assignments'][4:],
+            'shards':{k:v for k,v in previous['shards'].items() if int(k)>=58},
+            'responsibility_counts':[sum(v==n for k,v in previous['shards'].items() if int(k)>=58) for n in range(1,5)],
+            'two_pair_blocks':[list(range(i,min(i+2,101))) for i in range(58,101,2)],
+            'predecessor_phase':next_phase.reference(predecessor_phase),
+            'predecessor_journal':next_phase.reference(predecessor_journal),
+            'predecessor_gates':{str(n):{'path':g['receipt_path'],'sha256':g['receipt_sha256']} for n,g in current['gates'].items()},
+            'resource_monitor':resource_monitor,'resource_probe':resource_probe,
+            'resource_collector_acceptance':resource_collector_acceptance,
+            'independent_monitor_acceptance':independent_monitor_acceptance}
+        validate_v8(phase)
+        return phase
+
+
+def validate_v8(phase, *, repo=None):
+    previous,original,current = predecessor_state(phase)
+    if (phase.get('schema_version') != 8 or phase.get('phase_id') != 'central-wave-pair58-100-v8'
+            or phase.get('completed_pairs') != list(range(1,58))
+            or phase.get('assignments') != original['assignments'][57:]
+            or phase.get('two_pair_blocks') != [list(range(i,min(i+2,101))) for i in range(58,101,2)]
+            or phase.get('maximum_pairs') != 2 or phase.get('escalation_allowed') is not False):
+        raise ValueError('Only original86 UUIDs with unchanged four-Run cap supported')
+    mutable = {'schema_version','kind','phase_id','source_commit','source_pins','completed_pairs',
+        'assignments','shards','responsibility_counts','two_pair_blocks','predecessor_phase',
+        'predecessor_journal','predecessor_gates','resource_monitor','resource_probe','resource_collector_acceptance'}
+    if (set(phase) != set(previous) | {'independent_monitor_acceptance'}
+            or any(phase.get(k) != value for k,value in previous.items() if k not in mutable)):
+        raise ValueError('V8 cannot alter scientific inputs/model/budget/policy/thresholds or historical evidence')
+    inherited = {k:v for k,v in previous['shards'].items() if int(k)>=58}
+    if (phase['shards'] != inherited or phase['responsibility_counts'] !=
+            [sum(v==n for v in inherited.values()) for n in range(1,5)]):
+        raise ValueError('Original responsibility mapping required')
+    for key in ('resource_monitor','resource_probe','resource_collector_acceptance','independent_monitor_acceptance'):
+        if not next_phase.verify_reference(phase[key]):
+            raise ValueError('Independent acceptance reference changed: '+key)
+    if (phase['resource_monitor']['sha256'] != MONITOR_SHA
+            or phase['resource_monitor']['path'] == previous['resource_monitor']['path']
+            or phase['resource_probe']['path'] == previous['resource_probe']['path']):
+        raise ValueError('Preserved original monitor and separately stored strict-deadline probe required')
+    acceptance = util.read_json(phase['independent_monitor_acceptance']['path'])
+    if (acceptance.get('kind') != 'actual_v8_independent_nonmodel_monitor_acceptance'
+            or acceptance.get('passed') is not True or acceptance.get('model_called') is not False
+            or acceptance.get('evaluator_called') is not False or acceptance.get('user_credential_accessed') is not False
+            or acceptance.get('thresholds_unchanged') is not True
+            or acceptance.get('resource_monitor') != phase['resource_monitor']
+            or acceptance.get('resource_probe') != phase['resource_probe']
+            or acceptance.get('source_pins') != phase['source_pins']
+            or acceptance.get('original_unsent_UUID_count') != 86
+            or phase['resource_collector_acceptance'] != phase['independent_monitor_acceptance']):
+        raise ValueError('Actual finite independent original86 nonmodel acceptance required')
+    required = ('central_gil_hold_monitor_progress','blocked_sampler_stale_timer_and_real_gateway_ack',
+        'late_gateway_fenced','lock_blocked_enrollment_timer_progress','no_old_generation_health_reuse',
+        'unobservable_docker_no_shutdown_ack','evidence_failure_still_fences','unresolved_scope_replacement_rejected',
+        'over_deadline_success_rejected','saved_exact53_history_strict','recovery_reserved_binding_no_resend')
+    if any(acceptance.get('checks',{}).get(name) is not True for name in required):
+        raise ValueError('Every declared safety boundary requires actual finite validation')
+    proof_names = ('independent_review','finite_plan','actual_fixture_receipt','local_safety_receipt',
+        'saved_history_receipt','closed_predecessor_boundary','source_sharing')
+    proofs = {}
+    for key in proof_names:
+        reference = acceptance.get(key,{})
+        if not next_phase.verify_reference(reference):
+            raise ValueError('Missing independent actual acceptance evidence: '+key)
+        proofs[key] = util.read_json(reference['path'])
+    required_pins = {'research/resource_supervisor.py','research/preservation_gate.py',
+        'research/wave_dispatch.py','research/wave_campaign.py','research/wave_plan.py','research/wave_sharing.py',
+        'outer/harness/runtime.py','outer/harness/util.py','outer/harness/run.py','outer/harness/ownership.py',
+        'outer/harness/preserve.py','research/tests/test_resource_supervisor.py'}
+    if not required_pins <= set(phase['source_pins']):
+        raise ValueError('Independent supervisor and imported ownership/source pins required')
+    review = proofs['independent_review']
+    sharing = proofs['source_sharing']
+    boundary = proofs['closed_predecessor_boundary']
+    fixture = proofs['actual_fixture_receipt']
+    local = proofs['local_safety_receipt']
+    history = proofs['saved_history_receipt']
+    plan = proofs['finite_plan']
+    if (review.get('kind') != 'independent_v8_actual_source_and_nonmodel_acceptance_review'
+            or review.get('status') != 'passed' or review.get('model_called') is not False
+            or review.get('reviewed_source_sha256') != phase['source_pins']
+            or review.get('reviewed_commit') != acceptance.get('reviewed_source_commit')
+            or review.get('actual_fixture_receipt') != acceptance['actual_fixture_receipt']
+            or review.get('local_safety_receipt') != acceptance['local_safety_receipt']
+            or review.get('saved_history_receipt') != acceptance['saved_history_receipt']):
+        raise ValueError('Passed independent review must bind actual source and finite results')
+    if (sharing.get('ordinary_push_and_no_ff_integration_completed') is not True
+            or sharing.get('source_commit') != phase['source_commit']
+            or sharing.get('source_pins') != phase['source_pins']
+            or sharing.get('reviewed_source_commit') != review['reviewed_commit']):
+        raise ValueError('Actual reviewed source integration and remote sharing required')
+    if (boundary.get('kind') != 'actual_v7_closed_pair57_boundary_before_nonmodel_acceptance'
+            or boundary.get('phase') != phase['predecessor_phase']
+            or boundary.get('closed_journal') != phase['predecessor_journal']
+            or boundary.get('gated_pairs') != 57
+            or boundary.get('actual_sent_stopped_fixed_postprocessed') != 114
+            or boundary.get('original_unsent_UUIDs') != 86
+            or any(check.get('exit_code') != 0 or check.get('names') != []
+                for check in boundary.get('owned_running_checks',{}).values())
+            or set(boundary.get('owned_running_checks',{})) != {'sample2.run','sample2.browser-review'}
+            or not next_phase.verify_reference(boundary['stop'])):
+        raise ValueError('Exact57-gate/114-original/86-unsent stopped boundary required')
+    if (fixture.get('kind') != 'actual_finite_v8_independent_resource_supervisor_fixture_receipt'
+            or fixture.get('passed') is not True or fixture.get('model_called') is not False
+            or fixture.get('evaluator_called') is not False or fixture.get('user_credential_accessed') is not False
+            or fixture.get('formal_UUIDs_touched') is not False
+            or fixture.get('actual_provider_calls') != 0 or fixture.get('networks') != 'none'
+            or fixture.get('owned_fixture_resources_remaining') != []
+            or fixture.get('thresholds') != {'cadence_seconds':10,'stale_seconds':30,'probe_deadline_seconds':10}
+            or fixture['candidate_monitor']['sha256'] != phase['resource_monitor']['sha256']
+            or fixture['candidate_probe']['sha256'] != phase['resource_probe']['sha256']
+            or fixture['supervisor_source']['sha256'] != phase['source_pins']['research/resource_supervisor.py']
+            or any(fixture.get('checks',{}).get(name) is not True for name in (
+                'central_gil_hold_monitor_progress','blocked_sampler_stale_timer_and_real_gateway_ack',
+                'late_gateway_fenced','actual_shutdown_ACK_and_owned_stopped','actual_fixture_owned_cleanup'))):
+        raise ValueError('Actual finite unchanged-threshold owned gateway fixture required')
+    if (local.get('kind') != 'actual_finite_v8_local_safety_boundary_validation'
+            or local.get('passed') is not True or local.get('tests_run',0) < 54
+            or local.get('errors') != 0 or local.get('failures') != 0
+            or local.get('model_called') is not False or local.get('user_credential_accessed') is not False
+            or set(local.get('source_hashes',{})) != {'research/resource_supervisor.py','research/wave_dispatch.py',
+                'research/wave_campaign.py','research/tests/test_resource_supervisor.py'}
+            or any(local['source_hashes'][name] != phase['source_pins'][name] for name in local['source_hashes'])
+            or any(local.get('checks',{}).get(name) is not True for name in required
+                if fixture['checks'].get(name) is not True and name != 'saved_exact53_history_strict')):
+        raise ValueError('Actual current-source finite local boundary validation required')
+    if (history.get('kind') != 'actual_v8_exact53_saved_history_nonmodel_validation'
+            or history.get('passed') is not True or history.get('model_called') is not False
+            or history.get('originals_modified') is not False or history.get('default_live_source_mismatch_rejected') is not True
+            or history.get('saved_actual_v7_recursive_replay_passed') is not True
+            or set(history.get('source_hashes',{})) != {'research/preservation_gate.py','research/wave_plan.py','research/wave_dispatch.py'}
+            or any(history['source_hashes'][name] != phase['source_pins'][name] for name in history['source_hashes'])
+            or not history.get('negative_checks')
+            or any(row.get('rejected') is not True for row in history['negative_checks'])):
+        raise ValueError('Actual strict exact53 saved history and negative checks required')
+    if (plan.get('kind') != 'declared_finite_nonmodel_resource_supervisor_acceptance_plan_v1'
+            or plan.get('model_calls') != 0 or plan.get('evaluator_calls') != 0
+            or plan.get('real_user_credential_access') is not False or plan.get('formal_unsent_UUIDs') != 86
+            or plan.get('thresholds') != fixture['thresholds'] or plan.get('no_until_pass_loop') is not True):
+        raise ValueError('Declared finite nonmodel unchanged-threshold plan required')
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root/phase['cohort']).resolve() != Path(phase['batch']).resolve():
+            raise ValueError('Wrong V8 canonical cohort')
+        for name,digest in phase['source_pins'].items():
+            path=(root/name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest:
+                raise ValueError('New V8 source pin changed: '+name)
+    return original
+
+def _v9_empty_predecessor(phase):
+    """Only the actual never-dispatched V8 lease failure may lack a journal."""
+    if phase.get('kind') != V9_KIND:
+        raise ValueError('Absent journal is restricted to the explicit V9 boundary')
+    previous_ref = phase['predecessor_phase']
+    if not next_phase.verify_reference(previous_ref):
+        raise ValueError('Changed empty predecessor phase')
+    previous = util.read_json(previous_ref['path'])
+    if previous.get('kind') != V8_KIND:
+        raise ValueError('Exact failed V8 predecessor required')
+    original = validate_v8(previous)
+    expected = Path(previous['batch']) / '_control' / previous['phase_id'] / 'wave-journal.jsonl'
+    if (phase.get('predecessor_journal') != {'path':str(expected), 'sha256':None, 'absent':True}
+            or expected.exists() or phase.get('predecessor_gates') != {}):
+        raise ValueError('Actual V8 journal must remain absent; even a new empty file is invalid')
+    boundary_ref = phase.get('predecessor_empty_boundary', {})
+    if not next_phase.verify_reference(boundary_ref):
+        raise ValueError('Actual zero-dispatch predecessor boundary required')
+    boundary = util.read_json(boundary_ref['path'])
+    marker = Path(previous['batch']) / '_control' / 'phase-handoff-v8.json'
+    if (boundary.get('kind') != 'actual_v8_zero_dispatch_absent_journal_boundary'
+            or boundary.get('phase') != previous_ref or boundary.get('absent_journal') != phase['predecessor_journal']
+            or boundary.get('handoff') != next_phase.reference(marker)
+            or boundary.get('controller_observed_exit_code') != 1
+            or boundary.get('controller_started_monitor') is not False
+            or boundary.get('new_formal_dispatches') != 0
+            or boundary.get('remaining_original_UUID_count') != 86
+            or boundary.get('model_called') is not False or boundary.get('credentials_accessed') is not False):
+        raise ValueError('Exact observed V8 pre-send failure evidence required')
+    handoff = util.read_json(marker)
+    if (handoff.get('new_phase') != previous_ref
+            or handoff.get('predecessor_journal') != previous['predecessor_journal']
+            or handoff.get('predecessor_gates') != previous['predecessor_gates']):
+        raise ValueError('Actual immutable V8 handoff differs')
+    wanted = [{'run_id':c['run_id'],'run_instance_id':c['run_instance_id'],
+               'path':str(Path(previous['batch'])/c['run_id']),'absent':True}
+              for pair in previous['assignments'] for c in pair['cases']]
+    if boundary.get('remaining_original_paths') != wanted:
+        raise ValueError('Every original86 absence must be witnessed at the boundary')
+    if (set(boundary.get('owned_running_checks', {})) != {'sample2.run','sample2.browser-review'}
+            or any(v.get('exit_code') != 0 or v.get('names') != []
+                   for v in boundary['owned_running_checks'].values())
+            or not next_phase.verify_reference(boundary.get('saved_start_attempt',{}))
+            or not next_phase.verify_reference(boundary.get('closed_114_57_boundary',{}))):
+        raise ValueError('Actual stopped original114 boundary and owned-resource observations required')
+    launch = util.read_json(boundary['saved_start_attempt']['path'])
+    prior_acceptance = util.read_json(previous['independent_monitor_acceptance']['path'])
+    if (boundary['closed_114_57_boundary'] != prior_acceptance['closed_predecessor_boundary']
+            or launch.get('kind') != 'actual_v8_single_foreground_original86_start_attempt'
+            or launch.get('phase') != previous_ref or launch.get('source_commit') != previous['source_commit']
+            or launch.get('pid') != boundary.get('controller_PID')
+            or launch.get('actual_send_not_yet_claimed') is not True):
+        raise ValueError('Actual V8 launch and closed114 boundary must match the saved evidence')
+    return previous, original
+
+
+def check_v9_unsent_boundary(phase):
+    """One-time build/handoff check; legitimate V9 prepared roots may exist later."""
+    import subprocess
+    previous, _ = _v9_empty_predecessor(phase)
+    if any((Path(previous['batch'])/c['run_id']).exists()
+           for pair in previous['assignments'] for c in pair['cases']):
+        raise ValueError('Original86 must still be unprepared and unsent before V9 handoff')
+    for label in ('sample2.run','sample2.browser-review'):
+        result = subprocess.run(['docker','ps','--format','{{.Names}}','--filter','label='+label],
+                                capture_output=True,text=True,check=True)
+        if result.stdout.strip():
+            raise ValueError('Owned running resources block empty-boundary handoff')
+
+
+def build_v9(predecessor_phase, empty_boundary, *, source_commit, source_pins, lease_repair_acceptance):
+    previous = util.read_json(predecessor_phase)
+    with pair_execution.exclusive(Path(previous['batch'])/'_control', phase_permit=util.sha256_file(predecessor_phase)):
+        phase = {**previous,'schema_version':9,'kind':V9_KIND,'phase_id':'central-wave-pair58-100-v9',
+            'source_commit':source_commit,'source_pins':source_pins,
+            'predecessor_phase':next_phase.reference(predecessor_phase),
+            'predecessor_journal':{'path':str(Path(previous['batch'])/'_control'/previous['phase_id']/'wave-journal.jsonl'),
+                                   'sha256':None,'absent':True},
+            'predecessor_gates':{},'predecessor_empty_boundary':empty_boundary,
+            'lease_repair_acceptance':lease_repair_acceptance}
+        validate_v9(phase)
+        check_v9_unsent_boundary(phase)
+        return phase
+
+
+def validate_v9(phase, *, repo=None):
+    previous, original = _v9_empty_predecessor(phase)
+    mutable = {'schema_version','kind','phase_id','source_commit','source_pins',
+               'predecessor_phase','predecessor_journal','predecessor_gates'}
+    if (phase.get('schema_version') != 9 or phase.get('phase_id') != 'central-wave-pair58-100-v9'
+            or set(phase) != set(previous)|{'predecessor_empty_boundary','lease_repair_acceptance'}
+            or any(phase.get(k) != v for k,v in previous.items() if k not in mutable)):
+        raise ValueError('V9 only repairs the zero-dispatch lease; all acquisition conditions remain inherited')
+    allowed = {'research/pair_execution.py','research/wave_plan.py','research/wave_dispatch.py',
+               'research/wave_campaign.py','research/wave_sharing.py','research/resource_supervisor.py'}
+    if (set(phase['source_pins']) != set(previous['source_pins'])|{'research/tests/test_lease_chain.py'}
+            or any(phase['source_pins'][name] != digest
+                   for name,digest in previous['source_pins'].items() if name not in allowed)):
+        raise ValueError('Lease repair cannot alter or drop other frozen source dependencies')
+    reference = phase['lease_repair_acceptance']
+    if not next_phase.verify_reference(reference):
+        raise ValueError('Actual independently reviewed lease repair acceptance required')
+    proof = util.read_json(reference['path'])
+    if (proof.get('kind') != 'actual_v9_zero_dispatch_lease_repair_acceptance'
+            or proof.get('passed') is not True or proof.get('source_pins') != phase['source_pins']
+            or proof.get('model_called') is not False or proof.get('evaluator_called') is not False
+            or proof.get('user_credential_accessed') is not False
+            or proof.get('predecessor_empty_boundary') != phase['predecessor_empty_boundary']
+            or proof.get('original_unsent_UUID_count') != 86):
+        raise ValueError('Current source and actual empty-boundary acceptance differ')
+    evidence = {}
+    for name in ('independent_review','actual_lease_receipt','actual_resource_fixture','source_sharing'):
+        if not next_phase.verify_reference(proof.get(name,{})):
+            raise ValueError('Missing actual V9 acceptance evidence: '+name)
+        evidence[name] = util.read_json(proof[name]['path'])
+    review,lease,fixture,sharing = (evidence[n] for n in
+        ('independent_review','actual_lease_receipt','actual_resource_fixture','source_sharing'))
+    required = ('actual_saved_v8_permit_accepted','stale_v7_and_legacy_permits_rejected',
+        'v9_only_permit_after_handoff','missing_intermediate_rejected','changed_hash_path_kind_rejected',
+        'unsupported_successor_rejected','competing_process_lock_rejected','release_reacquisition_passed',
+        'absent_journal_strict','v9_independent_monitor_and_publication_routing')
+    if (lease.get('kind') != 'actual_v9_finite_lease_chain_nonmodel_validation'
+            or lease.get('passed') is not True or lease.get('model_called') is not False
+            or lease.get('source_pins') != phase['source_pins']
+            or any(lease.get('checks',{}).get(name) is not True for name in required)
+            or review.get('status') != 'passed' or review.get('reviewed_source_sha256') != phase['source_pins']
+            or review.get('kind') != 'independent_v9_actual_lease_and_source_review'
+            or review.get('model_called') is not False
+            or review.get('actual_lease_receipt') != proof['actual_lease_receipt']
+            or review.get('actual_resource_fixture') != proof['actual_resource_fixture']
+            or review.get('reviewed_commit') != proof.get('reviewed_source_commit')):
+        raise ValueError('Actual finite lease checks and independent current-source review required')
+    if (fixture.get('kind') != 'actual_finite_v8_independent_resource_supervisor_fixture_receipt'
+            or fixture.get('passed') is not True or fixture.get('model_called') is not False
+            or fixture.get('user_credential_accessed') is not False or fixture.get('actual_provider_calls') != 0
+            or fixture.get('evaluator_called') is not False or fixture.get('formal_UUIDs_touched') is not False
+            or fixture.get('networks') != 'none'
+            or fixture.get('thresholds') != {'cadence_seconds':10,'stale_seconds':30,'probe_deadline_seconds':10}
+            or fixture['candidate_monitor']['sha256'] != phase['resource_monitor']['sha256']
+            or fixture['candidate_probe']['sha256'] != phase['resource_probe']['sha256']
+            or fixture.get('owned_fixture_resources_remaining') != []
+            or fixture.get('supervisor_source',{}).get('sha256') != phase['source_pins']['research/resource_supervisor.py']
+            or any(fixture.get('checks',{}).get(name) is not True for name in (
+                'central_gil_hold_monitor_progress','blocked_sampler_stale_timer_and_real_gateway_ack',
+                'late_gateway_fenced','actual_shutdown_ACK_and_owned_stopped','actual_fixture_owned_cleanup'))):
+        raise ValueError('New supervisor source requires actual unchanged-threshold finite fixture')
+    if (sharing.get('ordinary_push_and_no_ff_integration_completed') is not True
+            or sharing.get('source_commit') != phase['source_commit']
+            or sharing.get('source_pins') != phase['source_pins']
+            or sharing.get('reviewed_source_commit') != review['reviewed_commit']):
+        raise ValueError('Actual no-ff integration and approved source sharing required')
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root/phase['cohort']).resolve() != Path(phase['batch']).resolve():
+            raise ValueError('Wrong V9 canonical cohort')
+        for name,digest in phase['source_pins'].items():
+            path=(root/name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest:
+                raise ValueError('Frozen V9 source changed: '+name)
+    return original
+
+
+def _v10_closed_boundary(phase, previous, current):
+    """A real closed V9 boundary, including its immutable unsent transport stop."""
+    ref = phase['closed_predecessor_boundary']
+    if not next_phase.verify_reference(ref):
+        raise ValueError('Actual closed V9 boundary changed')
+    proof = util.read_json(ref['path'])
+    stop = Path(previous['batch']) / '_control' / previous['phase_id'] / 'dispatch-stop.json'
+    gates = {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']}
+             for n, g in current['gates'].items()}
+    if (proof.get('kind') != 'actual_v9_original134_67_closed_recovery_boundary'
+            or proof.get('phase') != phase['predecessor_phase']
+            or proof.get('journal') != phase['predecessor_journal']
+            or proof.get('gates') != gates or proof.get('actual_sent_runs') != 134
+            or proof.get('pairs_gated') != 67
+            or proof.get('remaining_original66_paths_absent') is not True
+            or proof.get('old_scoped_controllers_and_observers_absent') is not True
+            or proof.get('original_stop', {}).get('path') != str(stop)
+            or not next_phase.verify_reference(proof.get('original_stop', {}))):
+        raise ValueError('Closed134/67 and unchanged V9 STOP evidence required')
+    if (set(proof.get('owned_running_checks', {})) != {'sample2.run', 'sample2.browser-review'}
+            or any(v.get('exit_code') != 0 or v.get('names') != []
+                   for v in proof['owned_running_checks'].values())):
+        raise ValueError('Actual owned-resource zero required')
+    terminal, start = (proof.get(k, {}) for k in ('stopped_only_terminal', 'stopped_only_start'))
+    if not next_phase.verify_reference(terminal) or not next_phase.verify_reference(start):
+        raise ValueError('Actual stopped-only terminal required')
+    result = util.read_json(terminal['path'])
+    launched = util.read_json(start['path'])
+    if (result.get('kind') != 'actual_authorized_app_preservation_v9_recovery_terminal'
+            or launched.get('kind') != 'actual_authorized_app_preservation_v9_recovery_start'
+            or launched.get('phase') != phase['predecessor_phase']
+            or launched.get('pid') != result.get('pid')
+            or proof.get('source_commit') != previous['source_commit']
+            or launched.get('canonical_source_unchanged') is not True
+            or launched.get('app_failure_policy') != phase['app_failure_policy']
+            or result.get('result') != {'status': 'wave_gated', 'pairs': [66, 67], 'next_wave_dispatched': False}
+            or any(result.get(k) is not True for k in ('canonical_source_unchanged',
+                'raw_request_bytes_unchanged', 'remaining_original66_paths_absent',
+                'old_stop_unchanged', 'old_observers_absent', 'owned_running_zero'))
+            or result.get('new_run_dispatch') is not False or result.get('observer_started') is not False
+            or proof.get('stopped_only_actual_exit_code') != 0):
+        raise ValueError('Stopped-only actual completion without dispatch/rescore required')
+    from research import app_failure_preservation as app
+    handler_ref = result.get('actual_handler_execution', {})
+    if not next_phase.verify_reference(handler_ref): raise ValueError('Actual approved recovery handler required')
+    gate = util.read_json(current['gates'][67]['receipt_path'])
+    contract = app.validate_contract(gate['preservation_contract'], current=current, historical=True)
+    if (gate.get('gate_kind') != app.KIND or contract['policy'] != phase['app_failure_policy']
+            or contract['handler_execution'] != handler_ref
+            or not any(f['run_id'] == 'MS1-CONT-B-preload-5067'
+                and f['run_instance_id'] == 'f0ba008e299b529f85cac4de35b65212' for f in contract['faults'])):
+        raise ValueError('Exact67 approved retained-fault gate and actual handler required')
+    shutdowns = proof.get('monitor_shutdowns', [])
+    if len(shutdowns) != 2:
+        raise ValueError('Both actual V9 observer shutdowns required')
+    sessions = set()
+    for leaf in shutdowns:
+        if not next_phase.verify_reference(leaf): raise ValueError('Observer shutdown changed')
+        ack = util.read_json(leaf['path'])
+        session = ack.get('session')
+        expected = stop.parent / 'resources' / str(session) / 'shutdown-ack.json'
+        if (not session or session in sessions or ack.get('phase_sha256') != phase['predecessor_phase']['sha256']
+                or leaf.get('path') != str(expected)
+                or ack.get('monitor_stop_confirmed') is not True or ack.get('owned_resources_resolved') is not True):
+            raise ValueError('Observer shutdown not confirmed')
+        sessions.add(session)
+    if shutdowns != launched.get('prior_monitor_shutdowns'):
+        raise ValueError('Exact recorded V9 observer sessions required')
+    wanted = [{'run_id': c['run_id'], 'run_instance_id': c['run_instance_id'],
+               'path': str(Path(previous['batch']) / c['run_id']), 'absent': True}
+              for p in previous['assignments'] if p['pair'] >= 68 for c in p['cases']]
+    if proof.get('remaining_original_paths') != wanted or len(wanted) != 66:
+        raise ValueError('Exactly original68–100 absence required')
+    return proof
+
+
+def check_v10_unsent_boundary(phase):
+    """Only at build/first handoff: later legitimate original roots may exist."""
+    import subprocess
+    if any((Path(phase['batch']) / c['run_id']).exists()
+           for p in phase['assignments'] for c in p['cases']):
+        raise ValueError('Original66 must remain unprepared and unsent at V10 handoff')
+    for label in ('sample2.run', 'sample2.browser-review'):
+        result = subprocess.run(['docker', 'ps', '--format', '{{.Names}}', '--filter', 'label=' + label],
+                                capture_output=True, text=True, check=True)
+        if result.stdout.strip(): raise ValueError('Owned running resources block V10 handoff')
+
+
+def build_v10(predecessor_phase, predecessor_journal, closed_boundary, *, source_commit,
+              source_pins, continuation_acceptance, app_failure_policy):
+    from research import wave_dispatch
+    previous = util.read_json(predecessor_phase)
+    with pair_execution.exclusive(Path(previous['batch']) / '_control', phase_permit=util.sha256_file(predecessor_phase)):
+        current = wave_dispatch.state(predecessor_journal, previous, util.sha256_file(predecessor_phase))
+        original = util.read_json(previous['original_bundle']['path'])
+        inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 68}
+        phase = {**previous, 'schema_version': 10, 'kind': V10_KIND, 'phase_id': 'central-wave-pair68-100-v10',
+            'source_commit': source_commit, 'source_pins': source_pins,
+            'completed_pairs': list(range(1, 68)), 'assignments': original['assignments'][67:],
+            'shards': inherited, 'responsibility_counts': [sum(v == n for v in inherited.values()) for n in range(1, 5)],
+            'two_pair_blocks': [list(range(i, min(i + 2, 101))) for i in range(68, 101, 2)],
+            'predecessor_phase': next_phase.reference(predecessor_phase),
+            'predecessor_journal': next_phase.reference(predecessor_journal),
+            'predecessor_gates': {str(n): {'path': g['receipt_path'], 'sha256': g['receipt_sha256']} for n, g in current['gates'].items()},
+            'closed_predecessor_boundary': closed_boundary, 'continuation_acceptance': continuation_acceptance,
+            'app_failure_policy': app_failure_policy}
+        validate_v10(phase)
+        check_v10_unsent_boundary(phase)
+        return phase
+
+
+def validate_v10(phase, *, repo=None):
+    previous, original, current = predecessor_state(phase)
+    mutable = {'schema_version', 'kind', 'phase_id', 'source_commit', 'source_pins', 'completed_pairs',
+        'assignments', 'shards', 'responsibility_counts', 'two_pair_blocks',
+        'predecessor_phase', 'predecessor_journal', 'predecessor_gates'}
+    inherited = {k: v for k, v in previous['shards'].items() if int(k) >= 68}
+    if (phase.get('schema_version') != 10 or phase.get('phase_id') != 'central-wave-pair68-100-v10'
+            or set(phase) != set(previous) | {'closed_predecessor_boundary', 'continuation_acceptance', 'app_failure_policy'}
+            or phase.get('completed_pairs') != list(range(1, 68))
+            or phase.get('assignments') != original['assignments'][67:]
+            or phase.get('two_pair_blocks') != [list(range(i, min(i + 2, 101))) for i in range(68, 101, 2)]
+            or phase.get('shards') != inherited or phase.get('responsibility_counts') !=
+                [sum(v == n for v in inherited.values()) for n in range(1, 5)]
+            or any(phase.get(k) != v for k, v in previous.items() if k not in mutable)
+            or not phase.get('source_commit') or not phase.get('source_pins')):
+        raise ValueError('V10 only continues original68–100; all acquisition conditions remain inherited')
+    allowed = {'research/pair_execution.py', 'research/wave_plan.py', 'research/wave_dispatch.py',
+        'research/wave_campaign.py', 'research/wave_sharing.py', 'research/resource_supervisor.py',
+        'research/tests/test_lease_chain.py', 'research/next_phase_sharing.py'}
+    if (set(phase['source_pins']) != set(previous['source_pins']) | {'research/tests/test_v10_successor.py',
+            'research/app_failure_preservation.py', 'research/tests/test_app_failure_preservation.py'}
+            or any(phase['source_pins'][name] != digest for name, digest in previous['source_pins'].items() if name not in allowed)):
+        raise ValueError('V10 cannot alter other frozen source dependencies')
+    _v10_closed_boundary(phase, previous, current)
+    from research import app_failure_preservation
+    policy = app_failure_preservation.validate_policy(phase['app_failure_policy'])
+    if policy['original_bundle'] != phase['original_bundle'] or policy['batch'] != phase['batch']:
+        raise ValueError('V10 app-failure policy must retain original cohort')
+    ref = phase['continuation_acceptance']
+    if not next_phase.verify_reference(ref): raise ValueError('Current-source V10 acceptance required')
+    proof = util.read_json(ref['path'])
+    if (proof.get('kind') != 'actual_v10_original66_closed_successor_acceptance'
+            or proof.get('passed') is not True or proof.get('source_pins') != phase['source_pins']
+            or proof.get('closed_predecessor_boundary') != phase['closed_predecessor_boundary']
+            or proof.get('original_unsent_UUID_count') != 66
+            or any(proof.get(k) is not False for k in ('model_called', 'evaluator_called', 'user_credential_accessed'))):
+        raise ValueError('Exact original66 current-source acceptance differs')
+    evidence = {}
+    for name in ('finite_validation', 'independent_review', 'supervisor_body_equivalence', 'source_sharing'):
+        if not next_phase.verify_reference(proof.get(name, {})): raise ValueError('Missing actual V10 evidence: ' + name)
+        evidence[name] = util.read_json(proof[name]['path'])
+    finite, review, reuse, sharing = (evidence[n] for n in
+        ('finite_validation', 'independent_review', 'supervisor_body_equivalence', 'source_sharing'))
+    if (finite.get('passed') is not True or finite.get('source_pins') != phase['source_pins']
+            or finite.get('failures') != 0 or finite.get('errors') != 0 or finite.get('skipped') != 0
+            or finite.get('model_called') is not False
+            or review.get('status') != 'passed' or review.get('reviewed_source_sha256') != phase['source_pins']
+            or review.get('kind') != 'independent_v10_closed_successor_source_review'
+            or review.get('model_called') is not False or review.get('finite_validation') != proof['finite_validation']
+            or review.get('supervisor_body_equivalence') != proof['supervisor_body_equivalence']
+            or review.get('reviewed_commit') != proof.get('reviewed_source_commit')):
+        raise ValueError('Finite current-source validation and independent review required')
+    old_source, new_source, fixture = (reuse.get(k, {}) for k in ('previous_supervisor', 'current_supervisor', 'actual_resource_fixture'))
+    if (reuse.get('passed') is not True or reuse.get('allowed_changes') != ['V10_KIND constant', 'Supervisor kind allowlist', 'Supervisor source-guard allowlist']
+            or any(not next_phase.verify_reference(r) for r in (old_source, new_source, fixture))
+            or old_source.get('sha256') != previous['source_pins']['research/resource_supervisor.py']
+            or new_source.get('sha256') != phase['source_pins']['research/resource_supervisor.py']):
+        raise ValueError('Actual unchanged supervisor safety bodies required for fixture reuse')
+    old_bytes = Path(old_source['path']).read_bytes().replace(b'\r\n', b'\n')
+    new_bytes = Path(new_source['path']).read_bytes().replace(b'\r\n', b'\n')
+    new_bytes = new_bytes.replace(b"V10_KIND = 'source_info_v5_central_fixed_wave_phase_v10'\n", b'')
+    new_bytes = new_bytes.replace(b'(KIND, V9_KIND, V10_KIND, FIXTURE_KIND)', b'(KIND, V9_KIND, FIXTURE_KIND)')
+    new_bytes = new_bytes.replace(b'(KIND, V9_KIND, V10_KIND)', b'(KIND, V9_KIND)')
+    if new_bytes != old_bytes: raise ValueError('Supervisor safety body changed beyond version allowlists')
+    actual = util.read_json(fixture['path'])
+    previous_acceptance = util.read_json(previous['lease_repair_acceptance']['path'])
+    if (fixture != previous_acceptance['actual_resource_fixture']
+            or actual.get('passed') is not True or actual.get('supervisor_source', {}).get('sha256') != old_source['sha256']
+            or actual.get('candidate_monitor', {}).get('sha256') != phase['resource_monitor']['sha256']
+            or actual.get('candidate_probe', {}).get('sha256') != phase['resource_probe']['sha256']
+            or actual.get('owned_fixture_resources_remaining') != []
+            or actual.get('thresholds') != {'cadence_seconds': 10, 'stale_seconds': 30, 'probe_deadline_seconds': 10}
+            or any(actual.get(k) is not False for k in ('model_called', 'evaluator_called', 'user_credential_accessed', 'formal_UUIDs_touched'))
+            or actual.get('actual_provider_calls') != 0
+            or any(actual.get('checks', {}).get(k) is not True for k in ('central_gil_hold_monitor_progress',
+                'blocked_sampler_stale_timer_and_real_gateway_ack', 'late_gateway_fenced',
+                'actual_shutdown_ACK_and_owned_stopped', 'actual_fixture_owned_cleanup'))):
+        raise ValueError('Historical fixture does not prove unchanged monitor/probe/safety bodies')
+    if (sharing.get('ordinary_push_and_no_ff_integration_completed') is not True
+            or sharing.get('source_commit') != phase['source_commit'] or sharing.get('source_pins') != phase['source_pins']
+            or sharing.get('reviewed_source_commit') != review['reviewed_commit']):
+        raise ValueError('Actual V10 no-ff source integration and sharing required')
+    if repo is not None:
+        root = Path(repo).resolve()
+        if (root / phase['cohort']).resolve() != Path(phase['batch']).resolve(): raise ValueError('Wrong V10 canonical cohort')
+        for name, digest in phase['source_pins'].items():
+            path = (root / name).resolve()
+            if not path.is_relative_to(root) or util.sha256_file(path) != digest: raise ValueError('Frozen V10 source changed: ' + name)
+    return original
+
+
+def healthy(snapshot, thresholds):
+    """Allowlist only operational inputs. Quality/arm/token outcomes cannot enter."""
+    required = set(HEALTH_FLAGS) | set(RESOURCE_LIMITS) | {'sampled_at', 'evidence_files', 'escalation_healthy'}
+    if set(snapshot) != required or any(snapshot[k] is not True for k in HEALTH_FLAGS):
+        return False
+    if type(snapshot['escalation_healthy']) is not bool: return False
+    refs = snapshot['evidence_files']
+    if (not snapshot['sampled_at'] or not refs
+            or any(util.sha256_file(p) != h for p, h in refs.items())):
+        return False
+    for name in RESOURCE_LIMITS:
+        value = snapshot[name]
+        if type(value) not in (int, float): return False
+        if name.endswith('_min_bytes') and value < thresholds[name]: return False
+        if name.endswith('_max') and value > thresholds[name]: return False
+    return True

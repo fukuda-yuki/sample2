@@ -1,0 +1,336 @@
+{
+  "specVersion": "education-1.1.0",
+  "taskId": "CU1-ENR-D",
+  "taskTitle": "Contoso enrollment migration D",
+  "sourceRepository": "https://github.com/jbogard/ContosoUniversity",
+  "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+  "migrationContract": {
+    "initialDatabase": "initial-store.sqlite",
+    "oracle": "migration-oracle.json",
+    "importInput": "legacy-school.sqlite"
+  },
+  "browserReview": {
+    "required": true,
+    "scope": "StudentCreateEdit",
+    "ordinaryControlsOnly": true,
+    "humanReview": "not_run"
+  },
+  "requirements": [
+    {
+      "id": "EDU-R-001",
+      "category": "build",
+      "title": "Runnable modern web application",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "Publish the submitted Web project as net8.0 or later and GET / responds 200.",
+      "checks": [
+        {
+          "id": "E-001",
+          "observation": "Publish the submitted Web project as net8.0 or later and GET / responds 200."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-002",
+      "category": "static",
+      "title": "No legacy execution dependency",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "No System.Web or old application assembly/project is referenced or launched.",
+      "checks": [
+        {
+          "id": "E-002",
+          "observation": "No System.Web or old application assembly/project is referenced or launched."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-003",
+      "category": "migration",
+      "title": "Actual singular/TPH source schema import",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "From a missing target path, import every specified raw Person/Department/Course/Enrollment record and map FirstName to FirstMidName, preserving IDs, values and relationships.",
+      "checks": [
+        {
+          "id": "E-003",
+          "observation": "From a missing target path, import every specified raw Person/Department/Course/Enrollment record and map FirstName to FirstMidName, preserving IDs, values and relationships."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-004",
+      "category": "browse",
+      "title": "Home, student list and substring search",
+      "severity": "normal",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "Home links to Student/Course; list and SearchString show exactly the expected student IDs and ordinary details/edit links.",
+      "checks": [
+        {
+          "id": "E-004",
+          "observation": "Home links to Student/Course; list and SearchString show exactly the expected student IDs and ordinary details/edit links."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-005",
+      "category": "semantics",
+      "title": "Student detail and enum meaning",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "Names, ISO date, LastName comma FirstMidName FullName, exact enrollment/course joins and source-defined grade enum meanings including No grade.",
+      "checks": [
+        {
+          "id": "E-005",
+          "observation": "Names, ISO date, LastName comma FirstMidName FullName, exact enrollment/course joins and source-defined grade enum meanings including No grade."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-006",
+      "category": "browse",
+      "title": "Course identifiers and department join",
+      "severity": "normal",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "List/details preserve externally assigned CourseIDs, titles, credits and joined department names; unknown IDs return 404.",
+      "checks": [
+        {
+          "id": "E-006",
+          "observation": "List/details preserve externally assigned CourseIDs, titles, credits and joined department names; unknown IDs return 404."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-007",
+      "category": "workflow",
+      "title": "Create with a fresh identifier",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "Valid ordinary fields create exactly one student, preserve originals and redirect to its matching details.",
+      "checks": [
+        {
+          "id": "E-007",
+          "observation": "Valid ordinary fields create exactly one student, preserve originals and redirect to its matching details."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-008",
+      "category": "validation",
+      "title": "Invalid create is non-mutating",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "Each absent/whitespace required field, 51-character name and impossible calendar date redisplays the form with HTTP200 without database mutation.",
+      "checks": [
+        {
+          "id": "E-008",
+          "observation": "Each absent/whitespace required field, 51-character name and impossible calendar date redisplays the form with HTTP200 without database mutation."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-009",
+      "category": "workflow",
+      "title": "Edit only selected new student",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "Valid edit stores all three fields on the selected existing ID without duplicating a row or changing originals/relationships; unknown edit IDs return404.",
+      "checks": [
+        {
+          "id": "E-009",
+          "observation": "Valid edit stores all three fields on the selected existing ID without duplicating a row or changing originals/relationships; unknown edit IDs return404."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-010",
+      "category": "validation",
+      "title": "Invalid edit is non-mutating",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "The same nine invalid field cases return formHTTP200 without changing any data.",
+      "checks": [
+        {
+          "id": "E-010",
+          "observation": "The same nine invalid field cases return formHTTP200 without changing any data."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-011",
+      "category": "continuity",
+      "title": "Restart retains imported and created data",
+      "severity": "critical",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "A real process restart uses the same target file and preserves all original rows plus the newly edited student without duplication.",
+      "checks": [
+        {
+          "id": "E-011",
+          "observation": "A real process restart uses the same target file and preserves all original rows plus the newly edited student without duplication."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    },
+    {
+      "id": "EDU-R-012",
+      "category": "browser",
+      "title": "Actual ordinary Create/Edit/Save",
+      "severity": "normal",
+      "basis": "Pinned upstream source and explicit portable public migration contract",
+      "basisDetail": {
+        "publicRequestSha256": "51f9f7663ca4cfc8fb9629a0f62aac140f773483d5b30bc562d7dc37bc1d7ff3",
+        "sourceCommit": "5c4e4ec11395172f82606f95ec520f0a93508541",
+        "authority": "Independent task owner manual source/data expectations, not evaluator output"
+      },
+      "expectation": "Use visible ordinary form controls to create and edit a new student; Save itself causes the normal details navigation with correct UI values and independently confirmed SQLite persistence, without evaluator refresh/navigation after Save.",
+      "checks": [
+        {
+          "id": "E-012",
+          "observation": "Use visible ordinary form controls to create and edit a new student; Save itself causes the normal details navigation with correct UI values and independently confirmed SQLite persistence, without evaluator refresh/navigation after Save."
+        }
+      ],
+      "coverage": {
+        "automated": "implemented; runtime acceptance recorded separately",
+        "human": "not_run",
+        "limitations": "Finite declared routes/data/invalid cases; no broad legacy-equivalence guarantee."
+      }
+    }
+  ],
+  "outOfScope": [
+    "Login",
+    "Instructors",
+    "Department/course administration",
+    "Grade editing",
+    "Delete",
+    "Pagination/sort",
+    "Concurrency/performance",
+    "External integrations"
+  ],
+  "knownLimits": [
+    "One education source family; C/D are nested semantic variants.",
+    "Authored installation overlays and operational export are synthetic and explicitly recorded.",
+    "No pre-migration Windows runtime equivalence or ordinary-user acceptance assertion.",
+    "Human review is not_run.",
+    "No accessibility, load, deployment or broad application-migration generalization."
+  ],
+  "measurementRevision": {
+    "sourceSpecVersion": "education-1.0.0",
+    "scope": "new evaluation of same saved artifact, not historical labels or new acquisition",
+    "changes": [
+      "SQLite Students.EnrollmentDate and Departments.StartDate compare calendar values: YYYY-MM-DD or exactly midnight YYYY-MM-DD HH:mm:ss / YYYY-MM-DDTHH:mm:ss with optional zero-only fractional seconds; invalid dates, other times, offsets, timezones and arbitrary coercions are rejected.",
+      "Visible date markers must remain exactly YYYY-MM-DD; DB equivalence does not relax UI.",
+      "Create identity is the unique database post-minus-pre ID, never a matching name.",
+      "Owned operation HTTP500 is a finite product failure; downstream unobserved operations and independent observer failures remain partial coverage with no complete quality."
+    ],
+    "humanReview": "not_run"
+  }
+}

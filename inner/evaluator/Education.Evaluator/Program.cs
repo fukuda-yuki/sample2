@@ -16,17 +16,19 @@ namespace Education.Evaluator;
 // researcher-owned source/data authority, not values returned by the product.
 public static class Program
 {
-    public const string Version = "education-1.0.0";
+    public const string Version = "education-1.1.0";
+    public const string ImplementationRevision = "education-1.1.0-observation-1";
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     static readonly string[] Tables = { "Students", "Departments", "Courses", "Enrollments" };
     static Dictionary<string,string> options;
     static JsonObject ledger, oracle;
     static readonly Dictionary<string,(string judgement,string detail)> results = new();
     static string artifactHash, specHash, evidence;
+    static bool browserWorkflowObserved;
 
     public static int Main(string[] args)
     {
-        options = new();
+        options = new();results.Clear();browserWorkflowObserved=false;
         for (var i=0; i<args.Length; i+=2)
         {
             if (i+1>=args.Length || !args[i].StartsWith("--")) throw new ArgumentException("Expected named value pairs.");
@@ -89,28 +91,49 @@ public static class Program
         return decimal.TryParse(a,NumberStyles.Number,CultureInfo.InvariantCulture,out var x)
             && decimal.TryParse(b,NumberStyles.Number,CultureInfo.InvariantCulture,out var y)?x==y:a==b;
     }
+    // Only these domain fields denote calendar dates. IDs, names, money, nulls
+    // and the portable UI markers retain their existing comparison contracts.
+    static bool CalendarDateMatches(string expected,string actual)
+    {
+        if(!DateOnly.TryParseExact(expected,"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out var date))return false;
+        if(actual==null || !System.Text.RegularExpressions.Regex.IsMatch(actual,@"\A[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[ T]00:00:00(?:\.0+)?)?\z"))return false;
+        return DateOnly.TryParseExact(actual[..10],"yyyy-MM-dd",CultureInfo.InvariantCulture,DateTimeStyles.None,out var stored)&&stored==date;
+    }
+    static bool SameField(string table,string column,JsonNode expected,object actual)
+        =>(table=="Students"&&column=="EnrollmentDate" || table=="Departments"&&column=="StartDate")
+            ? expected!=null&&actual is not(null or DBNull)&&CalendarDateMatches(expected.ToString(),Convert.ToString(actual,CultureInfo.InvariantCulture))
+            :Same(expected,actual);
     static bool RowsMatch(string path,out string detail,bool raw=false)
     {
         var missing=new List<string>();
-        try
         {
-            using var db=Database(path);
+            using var db=Database(path);using var transaction=db.BeginTransaction(deferred:true);
             foreach(var table in Tables)
             {
                 var contract=oracle["tables"][table];var key=S(contract,"key");
+                var from=raw?table switch {"Students"=>"Person","Departments"=>"Department","Courses"=>"Course",_=>"Enrollment"}:table;
+                using var schema=db.CreateCommand();schema.Transaction=transaction;schema.CommandText="PRAGMA table_info(\""+from+"\")";
+                var columns=new HashSet<string>(StringComparer.OrdinalIgnoreCase);using(var info=schema.ExecuteReader())while(info.Read())columns.Add(info.GetString(1));
+                var needed=contract["rows"].AsArray().SelectMany(r=>r.AsObject().Select(k=>raw&&table=="Students"&&k.Key=="FirstMidName"?"FirstName":k.Key)).Append(key);
+                if(raw&&table=="Students")needed=needed.Append("Discriminator");
+                if(columns.Count==0 || needed.Any(c=>!columns.Contains(c))){missing.Add(table+" schema lacks required table/columns");continue;}
                 foreach(var row in contract["rows"].AsArray())
                 {
-                    using var cmd=db.CreateCommand();
-                    var from=raw?table switch {"Students"=>"Person","Departments"=>"Department","Courses"=>"Course",_=>"Enrollment"}:table;
+                    using var cmd=db.CreateCommand();cmd.Transaction=transaction;
                     var fields=row.AsObject().Select(k=>raw&&table=="Students"&&k.Key=="FirstMidName"?"FirstName AS FirstMidName":"\""+k.Key+"\"");
                     cmd.CommandText="SELECT "+string.Join(",",fields)+" FROM \""+from+"\" WHERE \""+key+"\"=$id"+(raw&&table=="Students"?" AND Discriminator='Student'":"");
                     cmd.Parameters.AddWithValue("$id",row[key].ToString());using var reader=cmd.ExecuteReader();
                     if(!reader.Read()) missing.Add(table+"/"+row[key]+" absent");
-                    else foreach(var value in row.AsObject()) if(!Same(value.Value,reader[value.Key])) missing.Add(table+"/"+row[key]+"/"+value.Key+" differs");
+                    else
+                    {
+                        foreach(var value in row.AsObject()) if(!SameField(table,value.Key,value.Value,reader[value.Key])) missing.Add(table+"/"+row[key]+"/"+value.Key+" differs");
+                        if(reader.Read())missing.Add(table+"/"+row[key]+" identifier is duplicated");
+                    }
                 }
             }
         }
-        catch(SqliteException ex){missing.Add("SQLite "+ex.SqliteErrorCode+": "+ex.Message);}
+        // Busy/locked, unreadable, corrupt and I/O failures are observation
+        // faults, not evidence that a specified product value differs.
         detail=missing.Count==0?"Every specified original row/column is preserved.":string.Join("; ",missing);
         return missing.Count==0;
     }
@@ -135,19 +158,31 @@ public static class Program
     }
     static JsonObject Student(string path,long id)
     {
-        using var db=Database(path);using var cmd=db.CreateCommand();cmd.CommandText="SELECT ID,LastName,FirstMidName,EnrollmentDate FROM Students WHERE ID=$id";cmd.Parameters.AddWithValue("$id",id);
+        using var db=Database(path);using var cmd=db.CreateCommand();cmd.CommandText="SELECT ID AS ID,LastName AS LastName,FirstMidName AS FirstMidName,EnrollmentDate AS EnrollmentDate FROM Students WHERE ID=$id";cmd.Parameters.AddWithValue("$id",id);
         using var r=cmd.ExecuteReader();if(!r.Read()) return null;var row=new JsonObject();
         for(var i=0;i<r.FieldCount;i++) row[r.GetName(i)]=JsonValue.Create(Convert.ToString(r.GetValue(i),CultureInfo.InvariantCulture));return row;
     }
     static string Snapshot(string path,bool includeStudents=true)
     {
-        using var db=Database(path);var text=new StringBuilder();
+        using var db=Database(path);using var transaction=db.BeginTransaction(deferred:true);var snapshot=new List<object>();
         foreach(var table in Tables.Where(t=>includeStudents||t!="Students"))
         {
-            using var cmd=db.CreateCommand();cmd.CommandText="SELECT * FROM \""+table+"\" ORDER BY \""+S(oracle["tables"][table],"key")+"\"";
-            using var r=cmd.ExecuteReader();while(r.Read()) for(var i=0;i<r.FieldCount;i++) text.Append(table).Append('/').Append(r.GetName(i)).Append('=').Append(Convert.ToString(r.GetValue(i),CultureInfo.InvariantCulture)).Append('\0');
+            using var cmd=db.CreateCommand();cmd.Transaction=transaction;cmd.CommandText="SELECT * FROM \""+table+"\" ORDER BY \""+S(oracle["tables"][table],"key")+"\"";
+            using var r=cmd.ExecuteReader();var rows=new List<object>();
+            while(r.Read())
+            {
+                var cells=new List<object>();
+                for(var i=0;i<r.FieldCount;i++)
+                {
+                    var value=r.GetValue(i);var isNull=value is null or DBNull;
+                    cells.Add(new{column=r.GetName(i),isNull,type=isNull?null:value.GetType().FullName,
+                        value=isNull?null:value is byte[] bytes?Convert.ToHexString(bytes):Convert.ToString(value,CultureInfo.InvariantCulture)});
+                }
+                rows.Add(cells);
+            }
+            snapshot.Add(new{table,rows});
         }
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()))).ToLowerInvariant();
+        return Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(snapshot))).ToLowerInvariant();
     }
     static long StudentCount(string path)
     {
@@ -175,12 +210,23 @@ public static class Program
         return true;
     }
     static Dictionary<string,string> Fields(JsonNode node)=>node.AsObject().ToDictionary(k=>k.Key,k=>k.Value.ToString());
-    static bool StudentMatches(JsonObject row,Dictionary<string,string> fields)=>row!=null&&fields.All(f=>S(row,f.Key)==f.Value);
-    static long CreatedId(string path,Dictionary<string,string> fields)
+    static bool StudentMatches(JsonObject row,Dictionary<string,string> fields)=>row!=null&&fields.All(f=>f.Key=="EnrollmentDate"?CalendarDateMatches(f.Value,S(row,f.Key)):S(row,f.Key)==f.Value);
+    static HashSet<long> StudentIds(string path)
     {
-        using var db=Database(path);using var cmd=db.CreateCommand();cmd.CommandText="SELECT ID FROM Students WHERE LastName=$last AND FirstMidName=$first AND EnrollmentDate=$date";
-        cmd.Parameters.AddWithValue("$last",fields["LastName"]);cmd.Parameters.AddWithValue("$first",fields["FirstMidName"]);cmd.Parameters.AddWithValue("$date",fields["EnrollmentDate"]);
-        using var r=cmd.ExecuteReader();if(!r.Read()) return 0;var id=r.GetInt64(0);return r.Read()?0:id;
+        using var db=Database(path);using var cmd=db.CreateCommand();cmd.CommandText="SELECT ID FROM Students";
+        using var r=cmd.ExecuteReader();var ids=new HashSet<long>();while(r.Read())ids.Add(r.GetInt64(0));return ids;
+    }
+    static long CreatedId(string path,HashSet<long> before)
+    {
+        var after=StudentIds(path);var added=after.Except(before).ToArray();
+        return after.IsSupersetOf(before)&&StudentCount(path)==after.Count&&added.Length==1&&added[0]>0?added[0]:0;
+    }
+    static string CreatedObservation(long id,JsonObject row,Dictionary<string,string> fields)
+    {
+        var mismatches=row==null?new[]{"unique new database ID not identified"}:fields.Where(f=>f.Key=="EnrollmentDate"?!CalendarDateMatches(f.Value,S(row,f.Key)):S(row,f.Key)!=f.Value)
+            .Select(f=>f.Key+" expected="+f.Value+"; stored="+S(row,f.Key)).ToArray();
+        return "One new student stored without old-ID collision; ID="+id
+            +"; calendar-date/exact-other-field comparison="+(mismatches.Length==0?"match":string.Join(" | ",mismatches));
     }
     sealed record Response(int Status,string Body,string Location);
     sealed class Web:IDisposable
@@ -203,8 +249,12 @@ public static class Program
     {
         var nodes=new HtmlParser().ParseDocument(html).QuerySelectorAll("[id='"+id+"']");return nodes.Length==1?nodes[0].TextContent.Trim():null;
     }
-    static HashSet<long> Ids(string html,string prefix)=>new HtmlParser().ParseDocument(html).QuerySelectorAll("[id^='"+prefix+"']")
-        .Select(e=>long.TryParse(e.Id[prefix.Length..],out var id)?id:0).Where(id=>id>0).ToHashSet();
+    static HashSet<long> Ids(string html,string prefix)
+    {
+        var ids=new HtmlParser().ParseDocument(html).QuerySelectorAll("[id^='"+prefix+"']")
+            .Select(e=>long.TryParse(e.Id[prefix.Length..],out var id)?id:0).Where(id=>id>0).ToArray();
+        var distinct=ids.ToHashSet();if(distinct.Count!=ids.Length)distinct.Add(0);return distinct;
+    }
     static Dictionary<string,string> Form(string html,Dictionary<string,string> fields)
     {
         var result=new HtmlParser().ParseDocument(html).QuerySelectorAll("input[type='hidden'][name]").ToDictionary(x=>x.GetAttribute("name"),x=>x.GetAttribute("value")??"");
@@ -285,12 +335,13 @@ public static class Program
             coursesOk&=courseOk;
         }
         coursesOk&=web.Get("/Course/Details/99999999").Status==404;Check(6,coursesOk,"Externally assigned course IDs, title, credits and department relationships.");
-        var create=Fields(oracle["workflow"]["create"]["fields"]);var beforeCreateCount=StudentCount(host.DatabasePath);var form=web.Get("/Student/Create");
+        var create=Fields(oracle["workflow"]["create"]["fields"]);var beforeCreateIds=StudentIds(host.DatabasePath);var beforeCreateCount=beforeCreateIds.Count;var beforeCreateSnapshot=Snapshot(host.DatabasePath);var form=web.Get("/Student/Create");
         if(form.Status!=200||!HasForm(form.Body))Check(7,false,"Create form failed before submitting a valid student.");
+        if(Snapshot(host.DatabasePath)!=beforeCreateSnapshot)Check(7,false,"Create form GET mutated the database before submission.");
         var posted=web.Post("/Student/Create",Form(form.Body,create));
         if(posted.Status is not(302 or 303))Check(7,false,"Valid Create failed to redirect before database observation.");
-        var newId=CreatedId(host.DatabasePath,create);var created=Student(host.DatabasePath,newId);
-        Check(7,form.Status==200&&HasForm(form.Body)&&posted.Status is 302 or 303&&posted.Location=="/Student/Details/"+newId&&newId>0&&!ids.Contains(newId)&&StudentCount(host.DatabasePath)==beforeCreateCount+1&&StudentMatches(created,create)&&RowsMatch(host.DatabasePath,out _),"One new student stored without old-ID collision; ID="+newId);
+        var newId=CreatedId(host.DatabasePath,beforeCreateIds);var created=Student(host.DatabasePath,newId);
+        Check(7,form.Status==200&&HasForm(form.Body)&&posted.Status is 302 or 303&&posted.Location=="/Student/Details/"+newId&&newId>0&&!ids.Contains(newId)&&StudentCount(host.DatabasePath)==beforeCreateCount+1&&StudentMatches(created,create)&&RowsMatch(host.DatabasePath,out _),CreatedObservation(newId,created,create));
         var invalidCreateOk=true;var initialSnapshot=Snapshot(host.DatabasePath);
         foreach(var invalid in Invalids(create))
         {
@@ -336,8 +387,41 @@ public static class Program
         var relative=S(reference,"path");if(string.IsNullOrWhiteSpace(relative)||Path.IsPathRooted(relative)||relative.Replace('\\','/').Split('/').Contains(".."))throw new InvalidDataException("Invalid browser evidence path.");
         var path=Path.GetFullPath(Path.Combine(root,relative));if(!path.StartsWith(Path.GetFullPath(root)+Path.DirectorySeparatorChar,StringComparison.Ordinal)||HashFile(path)!=S(reference,"sha256"))throw new InvalidDataException("Browser evidence hash mismatch.");return File.ReadAllText(path);
     }
+    static void BrowserProductFailures(string root,JsonNode receipt)
+    {
+        var requestPath=Path.Combine(root,"request.json");
+        if(HashFile(requestPath)!=S(receipt,"requestSha256"))throw new InvalidDataException("Browser request hash mismatch.");
+        var request=JsonNode.Parse(File.ReadAllText(requestPath));
+        if(S(request,"artifactSha256")!=artifactHash||S(request,"specSha256")!=specHash||S(request,"runInstanceId")!=O("--review-run-instance-id")
+            ||S(request,"evaluationVersion")!=Version||S(request,"baseUrl")!=S(receipt,"baseUrl"))throw new InvalidDataException("Browser request identity mismatch.");
+        var owned=new Uri(S(request,"baseUrl"));
+        if(owned.Scheme!="http"||!owned.IsLoopback||owned.IsDefaultPort||owned.UserInfo!=""||owned.AbsolutePath!="/"||owned.Query!=""||owned.Fragment!="")throw new InvalidDataException("Browser base must be an explicit owned loopback origin.");
+        var origin=owned.GetLeftPart(UriPartial.Authority);var cases=new HashSet<string>();
+        foreach(var failure in receipt["productFailures"].AsArray())
+        {
+            var observed=JsonNode.Parse(ReadVerified(root,failure["evidence"]));
+            var operation=S(failure,"operation");var method=S(failure,"method");var url=new Uri(S(failure,"url"));
+            var path=url.AbsolutePath;var submit=operation is "school-create-submit" or "school-edit-submit";
+            var editPath=System.Text.RegularExpressions.Regex.IsMatch(path,"^/Student/Edit/[1-9][0-9]*$");
+            var allowed=operation switch
+            {
+                "school-create-form"=>method=="GET"&&path=="/Student/Create",
+                "school-create-submit"=>method=="POST"&&path=="/Student/Create",
+                "school-edit-form"=>method=="GET"&&editPath,
+                "school-edit-submit"=>method=="POST"&&editPath,
+                _=>false
+            };
+            if(!allowed||url.GetLeftPart(UriPartial.Authority)!=origin||url.UserInfo!=""||url.Query!=""||url.Fragment!=""||S(failure,"checkId")!="E-012"||string.IsNullOrWhiteSpace(S(failure,"caseId"))||!cases.Add(S(failure,"caseId"))
+                ||failure["status"].GetValue<int>() is <500 or >599||failure["clickConfirmed"].GetValue<bool>()!=submit
+                ||new[]{"caseId","checkId","operation","method","url","status","clickConfirmed"}.Any(k=>S(observed,k)!=S(failure,k))
+                ||S(observed,"resourceType") is not("document" or "xhr" or "fetch")
+                ||submit&&string.IsNullOrWhiteSpace(S(observed,"requestPayload")))throw new InvalidDataException("Unbound or unsupported browser product failure.");
+            Check(12,false,"Observed owned ordinary workflow product response: "+S(failure,"caseId")+" "+method+" "+path+" HTTP "+S(failure,"status")+"; remaining workflow coverage is independent.");
+        }
+    }
     static void Compose()
     {
+        browserWorkflowObserved=false;
         var baseline=O("--browser-school-baseline");var previous=JsonNode.Parse(File.ReadAllText(Path.Combine(baseline,"evaluation.json")));
         if(S(previous,"artifactSha256")!=artifactHash||S(previous,"specSha256")!=specHash||S(previous,"evaluationVersion")!=Version)throw new InvalidDataException("Baseline identity mismatch.");
         var baselineChecks=new HashSet<string>();
@@ -350,23 +434,26 @@ public static class Program
         }
         if(baselineChecks.Count!=12)throw new InvalidDataException("Missing baseline checks.");
         var receiptPath=O("--browser-school-evidence");var receipt=JsonNode.Parse(File.ReadAllText(receiptPath));
-        if(receipt["schemaVersion"].GetValue<int>()!=1||S(receipt,"actor")!="agent"||S(receipt,"artifactSha256")!=artifactHash||S(receipt,"specSha256")!=specHash||S(receipt,"runInstanceId")!=O("--review-run-instance-id"))throw new InvalidDataException("School browser identity mismatch.");
+        if(receipt["schemaVersion"].GetValue<int>()!=2||S(receipt,"actor")!="agent"||S(receipt,"artifactSha256")!=artifactHash||S(receipt,"specSha256")!=specHash||S(receipt,"runInstanceId")!=O("--review-run-instance-id"))throw new InvalidDataException("School browser identity mismatch.");
+        var root=Path.GetDirectoryName(receiptPath);BrowserProductFailures(root,receipt);
         if(receipt["faults"].AsArray().Count>0)throw new IOException("Browser observer fault: "+receipt["faults"]);
         if(S(receipt,"action")!="create-edit-save")return;
-        var root=Path.GetDirectoryName(receiptPath);var after=JsonNode.Parse(ReadVerified(root,receipt["after"]));
+        var after=JsonNode.Parse(ReadVerified(root,receipt["after"]));
         var before=JsonNode.Parse(ReadVerified(root,receipt["before"]));var created=JsonNode.Parse(ReadVerified(root,receipt["created"]));var edit=JsonNode.Parse(ReadVerified(root,receipt["edit"]));
         ReadVerified(root,receipt["beforeScreenshot"]);ReadVerified(root,receipt["afterScreenshot"]);
         var database=JsonNode.Parse(ReadVerified(root,receipt["database"]));var id=S(receipt,"studentId");
         var captures=new[]{before,created,edit,after};var origins=captures.Select(c=>new Uri(S(c["page"],"url")).GetLeftPart(UriPartial.Authority)).Distinct().Count();
-        if(string.IsNullOrWhiteSpace(S(before,"tabId"))||captures.Any(c=>S(c,"tabId")!=S(before,"tabId"))||origins!=1
+        if(string.IsNullOrWhiteSpace(S(before,"tabId"))||captures.Any(c=>S(c,"tabId")!=S(before,"tabId"))||origins!=1||captures.Any(c=>new Uri(S(c["page"],"url")).GetLeftPart(UriPartial.Authority)!=new Uri(S(receipt,"baseUrl")).GetLeftPart(UriPartial.Authority))
             ||new Uri(S(before["page"],"url")).AbsolutePath!="/Student/Create"||new Uri(S(created["page"],"url")).AbsolutePath!="/Student/Details/"+id
             ||new Uri(S(edit["page"],"url")).AbsolutePath!="/Student/Edit/"+id
             ||!captures.Select(c=>DateTimeOffset.Parse(S(c,"at"))).SequenceEqual(captures.Select(c=>DateTimeOffset.Parse(S(c,"at"))).Order()))throw new InvalidDataException("Browser context/action chronology mismatch.");
         var expected=Fields(oracle["workflow"]["edit"]["fields"]);var page=after["page"];
+        if(database["read_only"]?.GetValue<bool>()!=true)throw new InvalidDataException("Independent database observation must be read-only.");
         var pass=new Uri(S(page,"url")).AbsolutePath=="/Student/Details/"+id&&S(page,"studentId")==id&&S(page,"firstName")==expected["FirstMidName"]&&S(page,"lastName")==expected["LastName"]&&S(page,"enrollmentDate")==expected["EnrollmentDate"]
             &&S(page,"fullName")==expected["LastName"]+", "+expected["FirstMidName"]&&StudentMatches(database["student"].AsObject(),expected)
             &&S(database["student"],"ID")==id&&database["original_rows_preserved"].GetValue<bool>();
         Check(12,pass,"Actual ordinary Create/Edit/Save: UI and independently read SQLite row match; student ID="+id);
+        browserWorkflowObserved=true;
     }
 
     static int Emit(IEnumerable<string> faults)
@@ -378,13 +465,15 @@ public static class Program
             if(judgement=="pass")passed++;else if(judgement=="fail"){failed++;if(S(r,"severity")=="critical")critical.Add(S(r,"id"));}else blocked++;
             outcomes.Add(new{id=S(r,"id"),category=S(r,"category"),title=S(r,"title"),severity=S(r,"severity"),basis=S(r,"basis"),expectation=S(r,"expectation"),judgement});
         }
-        var complete=options.ContainsKey("--browser-school-evidence")&&results["E-012"].judgement!="blocked"&&blocked==0&&faultList.Count==0;
+        var browserObserved=options.ContainsKey("--browser-school-evidence")&&browserWorkflowObserved&&results["E-012"].judgement!="blocked"&&faultList.Count==0;
+        var complete=browserObserved&&blocked==0;
         var output=new JsonObject
         {
             ["evaluationId"]=S(ledger,"taskId")+"-"+artifactHash[..12]+"-"+Version+"-"+int.Parse(O("--sequence")).ToString("000"),["taskId"]=S(ledger,"taskId"),["taskTitle"]=S(ledger,"taskTitle"),
             ["evaluationVersion"]=Version,["specVersion"]=S(ledger,"specVersion"),["specSha256"]=specHash,["artifactPath"]=O("--artifact"),["artifactSha256"]=artifactHash,
+            ["evaluatorImplementationRevision"]=ImplementationRevision,
             ["sourceRepository"]=S(ledger,"sourceRepository"),["sourceCommit"]=S(ledger,"sourceCommit"),["researchStatus"]=complete?"complete":"incomplete",
-            ["browserReviewCoverage"]=complete?"agent_observed_StudentCreateEdit":"not_run_or_partial",["browserReviewEvidenceSha256"]=options.ContainsKey("--browser-school-evidence")?HashFile(O("--browser-school-evidence")):null,
+            ["browserReviewCoverage"]=browserObserved?"agent_observed_StudentCreateEdit":"not_run_or_partial",["browserReviewEvidenceSha256"]=options.ContainsKey("--browser-school-evidence")?HashFile(O("--browser-school-evidence")):null,
             ["reviewRunInstanceId"]=options.GetValueOrDefault("--review-run-instance-id"),["baselineEvaluationSha256"]=options.ContainsKey("--browser-school-baseline")?HashFile(Path.Combine(O("--browser-school-baseline"),"evaluation.json")):null,
             ["baselineResultsSha256"]=options.ContainsKey("--browser-school-baseline")?HashFile(Path.Combine(O("--browser-school-baseline"),"results.jsonl")):null,
             ["verdict"]=critical.Count>0?"fail_critical":failed>0?"fail":faultList.Count>0?"error":blocked>0?"blocked":"pass",
@@ -393,7 +482,7 @@ public static class Program
         };
         File.WriteAllText(Path.Combine(O("--out"),"evaluation.json"),output.ToJsonString(Json));
         File.WriteAllText(Path.Combine(O("--out"),"results.jsonl"),string.Concat(ledger["requirements"].AsArray().SelectMany(r=>r["checks"].AsArray().Select(c=>JsonSerializer.Serialize(new{requirementId=S(r,"id"),checkId=S(c,"id"),judgement=results[S(c,"id")].judgement,observation=results[S(c,"id")].detail})+"\n"))));
-        File.WriteAllText(Path.Combine(O("--out"),"evaluator-manifest.json"),JsonSerializer.Serialize(new{evaluationVersion=Version,evaluatorVersion=Version,evaluatorSha256=HashFile(typeof(Program).Assembly.Location),artifactSha256=artifactHash,specSha256=specHash,implementedCheckIds=results.Keys,humanReview="not_run"},Json));
+        File.WriteAllText(Path.Combine(O("--out"),"evaluator-manifest.json"),JsonSerializer.Serialize(new{evaluationVersion=Version,evaluatorVersion=Version,evaluatorImplementationRevision=ImplementationRevision,evaluatorSha256=HashFile(typeof(Program).Assembly.Location),artifactSha256=artifactHash,specSha256=specHash,implementedCheckIds=results.Keys,humanReview="not_run"},Json));
         return faultList.Count>0?2:0;
     }
 }

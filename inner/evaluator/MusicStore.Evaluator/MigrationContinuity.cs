@@ -16,13 +16,16 @@ public sealed class MigrationContinuity
 {
     private string initialDatabase;
     private JsonDocument oracle;
+    private string evaluationVersion;
     private readonly List<string> failures = new();
     private readonly List<string> observations = new();
+    public List<string> UnknownObservations { get; } = new();
+    public List<string> ObservationFaults { get; } = new();
     public string Judgement { get; private set; } = MusicStore.Evaluator.Judgement.Blocked;
     public bool HasConfirmedFailure => failures.Count > 0;
-    public string Detail => string.Join("\n", observations.Concat(failures));
+    public string Detail => string.Join("\n", observations.Concat(failures).Concat(UnknownObservations).Concat(ObservationFaults));
 
-    public static MigrationContinuity Load(MigrationContract contract, string assetDirectory)
+    public static MigrationContinuity Load(MigrationContract contract, string assetDirectory, string evaluationVersion = "1.5.0")
     {
         string Asset(string relative)
         {
@@ -34,6 +37,7 @@ public sealed class MigrationContinuity
         }
         var value = new MigrationContinuity
         {
+            evaluationVersion = evaluationVersion,
             initialDatabase = Asset(contract.InitialDatabase),
             oracle = JsonDocument.Parse(File.ReadAllText(Asset(contract.Oracle))),
         };
@@ -44,7 +48,7 @@ public sealed class MigrationContinuity
             throw new InvalidDataException("Independent migration oracle schema/authority missing.");
         // Prove the initial database agrees with the oracle before it is given to a product.
         value.Preserved(value.initialDatabase, "initial_asset");
-        if (value.failures.Count > 0) throw new InvalidDataException(value.Detail);
+        if (value.failures.Count > 0 || value.ObservationFaults.Count > 0 || value.UnknownObservations.Count > 0) throw new InvalidDataException(value.Detail);
         value.observations.Clear();
         return value;
     }
@@ -84,8 +88,9 @@ public sealed class MigrationContinuity
                 observations.Add($"{phase}: {table.Name} preserved row observations {observed}/{rows.GetArrayLength()}");
             }
         }
-        catch (SqliteException ex) { failures.Add(phase + ": stored migration contract unavailable: " + ex.Message); }
+        catch (SqliteException ex) { SqlFault(ex,phase); }
         catch (IndexOutOfRangeException ex) { failures.Add(phase + ": stored migration column missing: " + ex.Message); }
+        catch (Exception ex) when (evaluationVersion == "1.6.0") { ObservationFaults.Add(phase+": "+ex.GetType().Name+": "+ex.Message); UnknownObservations.Add(phase+": stored rows not fully observed."); }
     }
 
     public void Observe(RunState state)
@@ -95,9 +100,19 @@ public sealed class MigrationContinuity
             Preserved(state.Host.DatabasePath, "after_restart");
             using var db = Open(state.Host.DatabasePath);
             var workflow = oracle.RootElement.GetProperty("workflow");
-            Order(db, state.Order?.OrderId, workflow.GetProperty("checkout"), "checkout");
-            Order(db, state.Order?.SecondOrderId, workflow.GetProperty("second"), "second");
-            Order(db, state.Restart?.OrderIdAfter, workflow.GetProperty("restart"), "restart");
+            if(evaluationVersion=="1.6.0")
+            {
+                List<Html.CartLine> Input(WebResponse response)=>response?.Status==200 && Html.ObserveCart16(response.Body).Violations.Count==0?Html.CartLines(response.Body,"1.6.0"):new();
+                ObserveStoredOrder(state.Host.DatabasePath,state.Order?.OrderId,Input(state.Order?.CartBeforeCheckout),"checkout");
+                ObserveStoredOrder(state.Host.DatabasePath,state.Order?.SecondOrderId,Input(state.Order?.CartBeforeSecondCheckout),"second");
+                ObserveStoredOrder(state.Host.DatabasePath,state.Restart?.OrderIdAfter,Input(state.Restart?.CartBeforeCheckout),"restart");
+            }
+            else
+            {
+                Order(db, state.Order?.OrderId, workflow.GetProperty("checkout"), "checkout");
+                Order(db, state.Order?.SecondOrderId, workflow.GetProperty("second"), "second");
+                Order(db, state.Restart?.OrderIdAfter, workflow.GetProperty("restart"), "restart");
+            }
             db.Close();
             var existing = state.Host.DatabasePath;
             state.Host.Stop();
@@ -108,18 +123,42 @@ public sealed class MigrationContinuity
             else Preserved(state.Host.DatabasePath, "fresh_import");
             state.Host.Stop();
             state.Host.UseDatabase(existing);
-            Judgement = failures.Count == 0 ? MusicStore.Evaluator.Judgement.Pass : MusicStore.Evaluator.Judgement.Fail;
+            SetJudgement();
         }
         catch (SqliteException ex)
         {
-            failures.Add("Stored order contract unavailable: " + ex.Message);
-            Judgement = MusicStore.Evaluator.Judgement.Fail;
+            SqlFault(ex,"Stored order contract");
+            SetJudgement();
         }
         catch (Exception ex)
         {
             observations.Add("Evaluator observation fault: " + ex.Message);
+            if(evaluationVersion=="1.6.0") { ObservationFaults.Add(ex.GetType().Name+": "+ex.Message); UnknownObservations.Add("Migration observation did not finish."); }
             Judgement = MusicStore.Evaluator.Judgement.Error;
         }
+    }
+
+    private void SetJudgement() => Judgement=failures.Count>0?MusicStore.Evaluator.Judgement.Fail
+        :ObservationFaults.Count>0?MusicStore.Evaluator.Judgement.Error:UnknownObservations.Count>0?MusicStore.Evaluator.Judgement.Blocked:MusicStore.Evaluator.Judgement.Pass;
+
+    private void SqlFault(SqliteException ex,string phase)
+    {
+        if(evaluationVersion!="1.6.0" || ex.SqliteErrorCode is 1 or 26)
+            failures.Add(phase+": stored contract unavailable: "+ex.Message);
+        else { ObservationFaults.Add(phase+": SQLite observation fault "+ex.SqliteErrorCode+": "+ex.Message); UnknownObservations.Add(phase+": database predicate not observed."); }
+    }
+
+    /// <summary>Read-only exact frozen workflow comparison only after its input quantities existed.</summary>
+    public void ObserveStoredOrder(string path,int? id,IReadOnlyList<Html.CartLine> cart,string phase)
+    {
+        var expected=oracle.RootElement.GetProperty("workflow").GetProperty(phase);
+        var wanted=expected.GetProperty("album_quantities").EnumerateObject().Select(x=>(Album:int.Parse(x.Name,CultureInfo.InvariantCulture),Quantity:x.Value.GetInt32())).ToArray();
+        if(!Attribution16.CartMatches(cart,wanted) || id is null or <=0)
+        { UnknownObservations.Add(phase+": frozen workflow input cart or positive output order ID was not established; no storage mismatch inferred.");SetJudgement();return; }
+        try { using var db=Open(path);Order(db,id,expected,phase); }
+        catch(SqliteException ex) { SqlFault(ex,phase); }
+        catch(Exception ex) { ObservationFaults.Add(phase+": "+ex.GetType().Name+": "+ex.Message);UnknownObservations.Add(phase+": stored order not fully observed."); }
+        SetJudgement();
     }
 
     private void Order(SqliteConnection db, int? id, JsonElement expected, string phase)
@@ -150,10 +189,10 @@ public sealed class MigrationContinuity
         observations.Add($"{phase}: stored order {id}, {seen.Count} detail rows, total {amount}");
     }
 
-    private static SqliteConnection Open(string path)
+    private SqliteConnection Open(string path)
     {
         var db = new SqliteConnection(new SqliteConnectionStringBuilder
-        { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout=evaluationVersion=="1.6.0"?1:30 }.ToString());
         db.Open(); return db;
     }
     private static string Identifier(string name) => Regex.IsMatch(name, @"\A[A-Za-z][A-Za-z0-9_]*\z")

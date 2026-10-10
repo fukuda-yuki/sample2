@@ -16,6 +16,15 @@ class BrowserCoverageTests(unittest.TestCase):
         self.assertTrue(browser_cart.required('1.2.0'))
         self.assertFalse(browser_cart.required('1.1.0'))
 
+    def test_music_15_inherits_browser_requirement_without_accepting_future_versions(self):
+        self.assertTrue(browser_cart.required('1.5.0'))
+        self.assertFalse(browser_cart.required('1.7.0'))
+
+    def test_music_16_inherits_browser_requirement_and_retains_prior_contracts(self):
+        for version in ('1.4.0', '1.5.0', '1.6.0'):
+            with self.subTest(version=version): self.assertTrue(browser_cart.required(version))
+        self.assertFalse(browser_cart.required('1.7.0'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -45,6 +54,17 @@ class BrowserCoverageTests(unittest.TestCase):
     def test_http_pass_without_browser_is_not_complete(self):
         self.assertFalse(browser_cart.coverage_complete({'verdict': 'pass', 'quality': 100,
             'browserCartCoverage': 'not_run_http_only'}))
+
+    def test_music_16_unknown_required_observation_cannot_be_adopted_by_version_route(self):
+        self.output.update(evaluationVersion='1.6.0',researchStatus='incomplete',quality=None,
+                           verdict='fail_critical',uncheckedScope=['C-014: fixture precondition unavailable'])
+        util.write_json_atomic(self.root/'evaluation.json',self.output)
+        self.assertTrue(browser_cart.required('1.6.0'))
+        self.assertFalse(browser_cart.coverage_complete(self.output))
+        self.assertFalse(self.covered())
+        # Partial evidence can retain a finite failure; it cannot provide a numeric score.
+        self.assertTrue(browser_cart.stored_coverage_complete(self.root,'instance','artifact','spec',allow_partial=True))
+        self.assertIsNone(util.read_json(self.root/'evaluation.json')['quality'])
 
     def test_missing_screenshot_vetoes_index_pass(self):
         (self.review/'C-016-afterScreenshot').unlink()

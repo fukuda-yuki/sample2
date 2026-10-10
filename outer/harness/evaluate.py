@@ -147,8 +147,99 @@ def run_evaluator(command, repo, environment, out, err, timeout):
         raise
 
 
+def validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_path):
+    """Bind a repaired scoring to the current prepared lock and immutable build.
+
+    Historical build cleanliness is evidence, not current controller admission.
+    An amended controller needs a fresh lock; this does not repair old Runs.
+    """
+    from . import profiles
+    from research.repaired_runtime import validate_repaired_runtime_binding
+    repo, run_dir = Path(repo).resolve(), Path(run_dir).resolve()
+    if condition.get('schema_version') != 2 or condition.get('task_profile_revision') != 'evaluators-20261006':
+        raise ValueError('Repaired scoring requires a frozen revised isolated condition')
+    runtime_profile = condition.get('runtime') or {}
+    current_runtime = profiles.read(repo, 'runtimes', runtime_profile.get('id'))
+    if current_runtime != runtime_profile or util.read_json(run_dir/'profiles/runtime.json') != current_runtime:
+        raise ValueError('Repaired scoring runtime profile mismatch')
+    root = profiles.runtime_root(repo, condition['task_id'], current_runtime)
+    lock = util.read_json(root/'lock.json')
+    if condition.get('runtime_lock') != lock:
+        raise ValueError('Frozen repaired lock differs from current prepared lock')
+    validate_repaired_runtime_binding(repo, lock)
+    task = profiles.task_profile(repo, condition['task_id'], condition['task_profile_revision'])
+    if util.read_json(run_dir/'profiles/task.json') != task or condition.get('start_state') != task.get('start_state'):
+        raise ValueError('Repaired scoring frozen task profile mismatch')
+    evaluation = condition.get('evaluation') or {}
+    expected = dict(task['evaluation'], executor='docker',
+        spec_path='evaluation-assets/requirements.json', catalog_path='evaluation-assets/catalog.json',
+        evaluator_sha256=lock['evaluator_sha256'], evaluator_build=lock['evaluator_build'])
+    if evaluation != expected:
+        raise ValueError('Repaired scoring evaluation/build differs from accepted binding')
+    assets = run_dir/'evaluation-assets'
+    bundle = assets/'evaluator'
+    if (util.tree_hashes(bundle) != lock['evaluator_files']
+            or Path(evaluator_path).resolve() != (bundle/evaluation['assembly']).resolve()
+            or util.sha256_file(evaluator_path) != lock['evaluator_sha256']):
+        raise ValueError('Repaired scoring copied evaluator bundle mismatch')
+    expected_assets = {}
+    for key, destination in [('spec_path', 'requirements.json'), ('catalog_path', 'catalog.json')]:
+        expected_assets[destination] = util.sha256_file(repo/task['evaluation'][key])
+    for source, destination in task['evaluation'].get('extra_assets', {}).items():
+        if Path(destination).name != destination or ':' in destination or '\\' in destination:
+            raise ValueError('Invalid extra evaluator asset name')
+        original = (repo/source).resolve()
+        if not original.is_relative_to(repo):
+            raise ValueError('Extra evaluator asset escaped repository')
+        expected_assets[destination] = util.sha256_file(original)
+    actual_assets = {name: entry['sha256'] for name, entry in util.tree_hashes(assets).items()
+                     if not name.startswith('evaluator/')}
+    if actual_assets != expected_assets:
+        raise ValueError('Repaired scoring specification/catalog/extra assets mismatch')
+    return True
+
+
+def saved_scoring_provenance(repo, original_repo, run_dir, condition, evaluator_path):
+    """Validate frozen measurement assets at their source; separately record repair code."""
+    from . import runtime
+    repo, original_repo = Path(repo).resolve(), Path(original_repo).resolve()
+    validate_repaired_scoring_provenance(original_repo, run_dir, condition, evaluator_path)
+    if subprocess.check_output(['git', 'status', '--porcelain'], cwd=repo, text=True).strip():
+        raise ValueError('Saved scoring recovery requires committed clean repair code')
+    commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+    return dict(kind='saved_scoring_recovery_v1', original_repo=str(original_repo),
+        repair_repo=str(repo), repair_commit=commit, model_calls=0,
+        controller_files=runtime.controller_files(repo),
+        browser_files={str(p.relative_to(repo)).replace('\\', '/'): util.sha256_file(p)
+                       for p in sorted((repo/'inner/browser').glob('*.cjs'))},
+        frozen_condition_sha256=util.sha256_file(Path(run_dir)/'condition.json'),
+        evaluator_sha256=util.sha256_file(evaluator_path))
+
+
+def finish_scoring_container(name, native_work, work_dir, out):
+    """Export Linux scratch before removing its exact owned container/volume."""
+    from . import runtime
+    copied = None
+    try:
+        if native_work:
+            halted = runtime.docker('stop', '--time', '10', name, check=False, timeout=25)
+            if halted.returncode != 0:
+                raise RuntimeError('Native scoring stop before export failed: '+name)
+            copied = runtime.docker('cp', name+':/work/.', str(work_dir), check=False, timeout=180)
+            util.write_new_json(Path(out)/'native-work-export.json', dict(
+                container=name, storage='linux-volume', exported=copied.returncode == 0,
+                destination=str(work_dir), exit_code=copied.returncode))
+    finally:
+        stopped = runtime.docker('rm', '-f', *(['-v'] if native_work else []), name, check=False)
+        if stopped.returncode != 0:
+            raise RuntimeError('Evaluator container stop could not be confirmed: '+name)
+    if native_work and copied.returncode != 0:
+        raise RuntimeError('Native scoring work export failed; see native-work-export.json')
+    return stopped
+
+
 def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None,
-              sequence=None, timeout=SCORING_TIMEOUT_SECONDS):
+              sequence=None, timeout=SCORING_TIMEOUT_SECONDS, native_work=False, recovery_source_repo=None):
     repo = Path(repo).resolve()
     run_dir = run_mod.run_dir_for(runs_dir, run_id)
     manifest = run_mod.load_manifest(runs_dir, run_id)
@@ -185,7 +276,17 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     evaluator_sha256 = util.sha256_file(evaluator_path)
     pinned_evaluator = evaluation.get('evaluator_sha256')
     pinned_build = evaluation.get('evaluator_build') or {}
-    if pinned_evaluator:
+    recovery_provenance = None
+    if (condition.get('task_profile_revision') == 'evaluators-20261006'
+            or (condition.get('runtime') or {}).get('id') in ('deepseek-music-repaired-v1', 'deepseek-education-repaired-v1')
+            or 'repaired_runtime_binding' in (condition.get('runtime_lock') or {})
+            or pinned_build.get('binding_kind') == 'accepted_bundle_reuse_v1'):
+        if recovery_source_repo is None:
+            validate_repaired_scoring_provenance(repo, run_dir, condition, evaluator_path)
+        else:
+            recovery_provenance = saved_scoring_provenance(
+                repo, recovery_source_repo, run_dir, condition, evaluator_path)
+    elif pinned_evaluator:
         # A pinned hash without its build provenance cannot be diagnosed later,
         # so it is refused as a condition error rather than scored and rejected.
         # `clean_worktree` is the source bytes: the hash moves with the line
@@ -200,6 +301,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
                                + '（clean_worktree は、固定値が .gitattributes の eol=lf のままの'
                                  'クリーンな作業ツリーで測られ、bin obj を消して作り直しても'
                                  '同じ値になったことを示す）')
+    if recovery_source_repo is not None and recovery_provenance is None:
+        raise ValueError('Saved recovery requires a frozen repaired measurement')
     evaluations = run_dir / 'evaluations'
     evaluations.mkdir(exist_ok=True)
     used = used_sequences(run_dir)
@@ -259,6 +362,8 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     browser_required = browser_cart.required(str(version))
     temporary = evaluations / (('{}-{}-{}'.format('attempt' if browser_required else '.tmp', sequence, uuid.uuid4().hex)))
     temporary.mkdir(parents=True)
+    if recovery_provenance is not None:
+        util.write_new_json(temporary/'scoring-recovery-provenance.json', recovery_provenance)
     http_out = temporary / 'http-only' if browser_required else temporary
     http_out.mkdir(exist_ok=True)
     command[command.index('--out') + 1] = str(http_out)
@@ -266,7 +371,7 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     if isolated:
         from . import runtime
         container_name, command = runtime.scoring_command(condition, frozen, http_out, work_dir,
-            run_dir / 'evaluation-assets', str(version), sequence)
+            run_dir / 'evaluation-assets', str(version), sequence, native_work=native_work)
     evidence = run_dir / 'evidence'
     evidence.mkdir(exist_ok=True)
     environment = child_environment()
@@ -281,16 +386,21 @@ def score_run(repo, runs_dir, run_id, *, evaluator=None, evaluation_version=None
     with (evidence / 'scoring-{:03d}-stdout.log'.format(sequence)).open('xb') as out, \
             (evidence / 'scoring-{:03d}-stderr.log'.format(sequence)).open('xb') as err:
         try:
-            exit_code, timed_out = run_evaluator(command, repo, environment, out, err, timeout)
+            execution_command = (runtime.prepare_native_container(command, '/work', http_out/'native-work-init.json')
+                                 if isolated and native_work else command)
+            exit_code, timed_out = run_evaluator(execution_command, repo, environment, out, err, timeout)
         finally:
             if container_name:
-                stopped = runtime.docker('rm', '-f', container_name, check=False)
-                if stopped.returncode != 0:
-                    raise RuntimeError('Evaluator container stop could not be confirmed: ' + container_name)
-    if browser_required and not timed_out and exit_code == 0 and (http_out / 'evaluation.json').is_file():
+                stopped = finish_scoring_container(container_name, native_work, work_dir, http_out)
+    if browser_required and browser_cart.http_phase_eligible(condition,http_out,
+            exit_code=exit_code,timed_out=timed_out,
+            cleanup_confirmed=container_name is None or stopped.returncode==0,
+            stopped=(run_dir/'STOP').exists(),frozen=frozen,artifact_hash=independent_hash,
+            spec=spec,spec_hash=spec_sha256,evaluator_hash=evaluator_sha256):
         if isolated:
             exit_code = browser_cart.complete_evaluation(repo, condition, frozen, http_out, work_dir / 'publish',
-                run_dir / 'evaluation-assets', temporary, manifest.get('run_instance_id'), sequence)
+                run_dir / 'evaluation-assets', temporary, manifest.get('run_instance_id'), sequence,
+                **({'native_state': True} if native_work and str(version).startswith('education-') else {}))
         else:
             # The research browser runner requires the frozen isolated runtime.
             # Keep legacy HTTP output as evidence, never adopt it as research quality.

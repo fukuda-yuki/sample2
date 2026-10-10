@@ -49,6 +49,7 @@ public static class Checks
 
     private static CheckResult C033(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-033");
         var pre = Precondition(state, "R-024", "C-033", "Omit each required address field individually");
         if (pre != null) return pre;
         if (!state.InvalidCheckout.Ok) return Fault(state, "R-024", "C-033", "Missing address fields", state.InvalidCheckout);
@@ -59,6 +60,7 @@ public static class Checks
 
     private static CheckResult C032(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-032");
         var pre = Precondition(state, "R-031", "C-032", "Another session attempts removal of an owned cart line");
         if (pre != null) return pre;
         if (!state.Isolation.Ok) return Fault(state, "R-031", "C-032", "Foreign cart removal", state.Isolation);
@@ -70,6 +72,7 @@ public static class Checks
 
     private static CheckResult C031(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-031");
         if (state.Migration?.HasConfirmedFailure == true)
             return Make(state, "R-030", "C-031", "Seeded SQLite migration, checkout and restart",
                 Judgement.Fail, state.Migration.Detail, state.Migration.Detail);
@@ -123,7 +126,7 @@ public static class Checks
             return Make(state, requirementId, checkId, input, Judgement.Error, "評価側の障害: " + state.EvaluatorFault, string.Empty);
         }
 
-        if (!state.AppReady)
+        if (!state.StartupReady)
         {
             return Make(state, requirementId, checkId, input, Judgement.Blocked, "未評価: " + state.AppStartDetail, string.Empty);
         }
@@ -193,7 +196,7 @@ public static class Checks
             return Make(state, "R-001", "C-002", input, Judgement.Error, "評価側の障害: " + state.EvaluatorFault, string.Empty);
         }
 
-        if (!state.AppReady)
+        if (!state.StartupReady)
         {
             return Fail(state, "R-001", "C-002", input, "アプリが HTTP で応答しませんでした。", state.AppStartDetail);
         }
@@ -203,6 +206,7 @@ public static class Checks
 
     private static CheckResult C003(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-003");
         var pre = Precondition(state, "R-002", "C-003", "GET /Store");
         if (pre != null)
         {
@@ -230,6 +234,7 @@ public static class Checks
 
     private static CheckResult C004(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-004");
         const string input = "GET /Store/Browse?genre={10 ジャンル}";
         var pre = Precondition(state, "R-003", "C-004", input);
         if (pre != null)
@@ -268,6 +273,7 @@ public static class Checks
 
     private static CheckResult C005(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-005");
         const string input = "GET /Store/Details/1";
         var pre = Precondition(state, "R-004", "C-005", input);
         if (pre != null)
@@ -296,6 +302,7 @@ public static class Checks
 
     private static CheckResult C006(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-006");
         const string input = "プロセスを再起動し、同じ DB で /Store と注文行の保持を観測する";
         var pre = Precondition(state, "R-005", "C-006", input);
         if (pre != null)
@@ -381,6 +388,7 @@ public static class Checks
 
     private static CheckResult C007(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-007");
         const string input = "GET /Store/Browse?genre=Rock";
         var pre = Precondition(state, "R-006", "C-007", input);
         if (pre != null)
@@ -414,6 +422,7 @@ public static class Checks
 
     private static CheckResult C008(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-008");
         const string input = "GET /Store/Browse?genre=NoSuchGenreAtAll";
         var pre = Precondition(state, "R-007", "C-008", input);
         if (pre != null)
@@ -432,6 +441,7 @@ public static class Checks
 
     private static CheckResult C009(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-009");
         const string input = "GET /Store/Details/2";
         var pre = Precondition(state, "R-008", "C-009", input);
         if (pre != null)
@@ -466,6 +476,7 @@ public static class Checks
 
     private static CheckResult C010(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-010");
         const string input = "GET /Store/Details/99999";
         var pre = Precondition(state, "R-009", "C-010", input);
         if (pre != null)
@@ -484,6 +495,7 @@ public static class Checks
 
     private static CheckResult C011(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-011");
         const string input = "GET /";
         var pre = Precondition(state, "R-010", "C-011", input);
         if (pre != null)
@@ -514,6 +526,7 @@ public static class Checks
 
     private static CheckResult C012(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-012");
         const string input = "GET /ShoppingCart/AddToCart/1";
         var pre = Precondition(state, "R-011", "C-012", input);
         if (pre != null)
@@ -534,6 +547,7 @@ public static class Checks
 
     private static CheckResult C013(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-013");
         const string input = "GET /ShoppingCart/AddToCart/1 を 2 回 → GET /ShoppingCart";
         var pre = Precondition(state, "R-012", "C-013", input);
         if (pre != null)
@@ -553,6 +567,7 @@ public static class Checks
 
     private static CheckResult C014(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-014");
         const string input = "GET /ShoppingCart/AddToCart/1 を 3 回 → GET /ShoppingCart";
         var pre = Precondition(state, "R-013", "C-014", input);
         if (pre != null)
@@ -580,6 +595,7 @@ public static class Checks
 
     private static CheckResult C015(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-015");
         const string input = "数量 2 の明細に POST /ShoppingCart/RemoveFromCart";
         var pre = Precondition(state, "R-014", "C-015", input);
         if (pre != null)
@@ -593,6 +609,9 @@ public static class Checks
             return Fault(state, "R-014", "C-015", input, scenario, state.Transcript("cart"));
         }
 
+        if (state.EvaluationVersion is "1.5.0" or "1.6.0" && (!Scenarios.RemovalPrecondition(scenario.LinesAfterTwoAdds, 2)
+            || scenario.RemoveFromTwo == null))
+            return RemovalUnknown(state, "R-014", "C-015", input, "Quantity-two cart line with a positive current record ID was not established, or no removal request was observed.");
         var itemCount = ExtractItemCount(scenario.RemoveFromTwo.Body);
         var expected = state.Catalog.ById(1).Price;
         var browser = state.BrowserCartReview?.For("C-015");
@@ -617,6 +636,7 @@ public static class Checks
 
     private static CheckResult C016(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state,"C-016");
         const string input = "数量 1 の明細に POST /ShoppingCart/RemoveFromCart";
         var pre = Precondition(state, "R-015", "C-016", input);
         if (pre != null)
@@ -630,6 +650,9 @@ public static class Checks
             return Fault(state, "R-015", "C-016", input, scenario, state.Transcript("cart"));
         }
 
+        if (state.EvaluationVersion is "1.5.0" or "1.6.0" && (!Scenarios.RemovalPrecondition(scenario.LinesAfterRemoveFromTwo, 1)
+            || scenario.RemoveFromOne == null))
+            return RemovalUnknown(state, "R-015", "C-016", input, "Quantity-one cart line with a positive current record ID was not established, or no removal request was observed.");
         var itemCount = ExtractItemCount(scenario.RemoveFromOne.Body);
         var browser = state.BrowserCartReview?.For("C-016");
         var ok = itemCount == 0
@@ -650,8 +673,21 @@ public static class Checks
         return result;
     }
 
+    private static CheckResult RemovalUnknown(RunState state, string requirementId, string checkId, string input, string reason)
+    {
+        var browser = state.BrowserCartReview?.For(checkId);
+        // A separately established browser failure is still a finite fact. A
+        // browser pass alone cannot establish the missing server JSON predicate.
+        var finiteBrowserFailure = browser?.Complete == true && !browser.Pass;
+        var result = Make(state, requirementId, checkId, input, finiteBrowserFailure ? Judgement.Fail : Judgement.Blocked,
+            "HTTP removal not assessed: " + reason + (browser == null ? "" : "\n" + browser.Detail), state.Transcript("cart"));
+        result.UnknownObservations.Add("HTTP removal JSON/state predicate not observed because its prerequisite or request is absent.");
+        return result;
+    }
+
     private static CheckResult C017(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-017");
         const string input = "AddToCart/1 を 2 回、AddToCart/2 を 1 回 → GET /ShoppingCart";
         var pre = Precondition(state, "R-016", "C-017", input);
         if (pre != null)
@@ -682,6 +718,7 @@ public static class Checks
 
     private static CheckResult C018(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-018");
         const string input = "セッション A で AddToCart/1 → セッション B で GET /ShoppingCart";
         var pre = Precondition(state, "R-017", "C-018", input);
         if (pre != null)
@@ -708,6 +745,7 @@ public static class Checks
 
     private static CheckResult C019(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-019");
         const string input = "POST /Checkout/AddressAndPayment（promoCode=FREE、かご 2 行）";
         var pre = Precondition(state, "R-018", "C-019", input);
         if (pre != null)
@@ -731,6 +769,7 @@ public static class Checks
 
     private static CheckResult C020(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-020");
         const string input = "注文確定後に同じセッションで AddToCart/2 → POST /Checkout/AddressAndPayment";
         var pre = Precondition(state, "R-019", "C-020", input);
         if (pre != null)
@@ -760,6 +799,7 @@ public static class Checks
 
     private static CheckResult C021(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-021");
         const string input = "注文確定後に GET /ShoppingCart";
         var pre = Precondition(state, "R-020", "C-021", input);
         if (pre != null)
@@ -779,6 +819,7 @@ public static class Checks
 
     private static CheckResult C022(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-022");
         const string input = "GET /Checkout/Complete/{注文番号}（注文したセッション）";
         var pre = Precondition(state, "R-021", "C-022", input);
         if (pre != null)
@@ -804,6 +845,7 @@ public static class Checks
 
     private static CheckResult C023(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-023");
         const string input = "GET /Checkout/Complete/{注文番号}（別セッション）";
         var pre = Precondition(state, "R-022", "C-023", input);
         if (pre != null)
@@ -832,6 +874,7 @@ public static class Checks
 
     private static CheckResult C024(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-024");
         const string input = "POST /Checkout/AddressAndPayment（promoCode=NOT_FREE）";
         var pre = Precondition(state, "R-023", "C-024", input);
         if (pre != null)
@@ -875,6 +918,7 @@ public static class Checks
 
     private static CheckResult C025(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-025");
         const string input = "POST /Checkout/AddressAndPayment（FirstName 空、promoCode=FREE）";
         var pre = Precondition(state, "R-024", "C-025", input);
         if (pre != null)
@@ -926,6 +970,7 @@ public static class Checks
 
     private static CheckResult C026(RunState state)
     {
+        if (state.EvaluationVersion == "1.6.0") return Attribution16.Check(state, "C-026");
         const string input = "ログインせずに GET /Checkout/AddressAndPayment と POST /Checkout/AddressAndPayment";
         var pre = Precondition(state, "R-025", "C-026", input);
         if (pre != null)
@@ -1059,6 +1104,15 @@ public static class Checks
 
         if (scenario.LegacyUnresolved.Count > 0)
         {
+            if (state.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0" && scenario.LegacyReferences.Count > 0)
+            {
+                var confirmed = Make(state, "R-029", "C-030", input, Judgement.Fail,
+                    "Confirmed legacy dependency: " + string.Join(", ", scenario.LegacyReferences)
+                    + "; additional unresolved inputs: " + string.Join(", ", scenario.LegacyUnresolved),
+                    string.Join(Environment.NewLine, scenario.LegacyReferences.Concat(scenario.LegacyUnresolved)));
+                confirmed.ObservationFaults.AddRange(scenario.LegacyUnresolved);
+                return confirmed;
+            }
             return Make(state, "R-029", "C-030", input, Judgement.Error,
                 "旧実装依存を判定できません: " + string.Join(", ", scenario.LegacyUnresolved),
                 string.Join(Environment.NewLine, scenario.LegacyUnresolved));

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <NoWarn>$(NoWarn);CS7022</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Keep local stale build products excluded when acceptance uses a separate
+         BaseIntermediateOutputPath. -->
+    <Compile Remove="obj/**;bin/**" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OfflineReferenceDirectory)' == ''">
+    <ProjectReference Include="../Education.Evaluator/Education.Evaluator.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OfflineReferenceDirectory)' != ''">
+    <!-- Compile the actual evaluator sources against local frozen dependency
+         DLLs when NuGet is unavailable. Never run the old evaluator binary. -->
+    <Compile Include="../Education.Evaluator/Program.cs" Link="Evaluator/Program.cs" Condition="'$(EvaluatorAssemblyPath)' == ''" />
+    <Compile Include="../Education.Evaluator/AppHost.cs" Link="Evaluator/AppHost.cs" Condition="'$(EvaluatorAssemblyPath)' == ''" />
+    <Reference Include="Education.Evaluator" Condition="'$(EvaluatorAssemblyPath)' != ''"><HintPath>$(EvaluatorAssemblyPath)</HintPath></Reference>
+    <Reference Include="AngleSharp"><HintPath>$(OfflineReferenceDirectory)/AngleSharp.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Data.Sqlite"><HintPath>$(OfflineReferenceDirectory)/Microsoft.Data.Sqlite.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.core"><HintPath>$(OfflineReferenceDirectory)/SQLitePCLRaw.core.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.batteries_v2"><HintPath>$(OfflineReferenceDirectory)/SQLitePCLRaw.batteries_v2.dll</HintPath></Reference>
+    <Reference Include="SQLitePCLRaw.provider.e_sqlite3"><HintPath>$(OfflineReferenceDirectory)/SQLitePCLRaw.provider.e_sqlite3.dll</HintPath></Reference>
+    <Content Include="$(OfflineReferenceDirectory)/runtimes/win-x64/native/e_sqlite3.dll" Link="e_sqlite3.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(OfflineReferenceDirectory)/runtimes/win-x64/native/e_sqlite3.dll')" />
+  </ItemGroup>
+</Project>

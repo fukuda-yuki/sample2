@@ -10,6 +10,17 @@ from research import next_phase, pair_execution
 
 
 class SharingRecoveryTests(unittest.TestCase):
+    def test_phase_remote_tag_must_resolve_to_exact_commit(self):
+        phase = {'source_commit': 'a' * 40}
+        remote = {'tag_name': 'scoped-tag', 'target_commitish': phase['source_commit'], 'draft': False}
+        with patch.object(sharing.catalog_delivery, 'gh', return_value='{"object":{"type":"commit","sha":"' + 'a' * 40 + '"}}'):
+            self.assertEqual(sharing.phase_remote_identity(remote, 'scoped-tag', phase)['tag_commit'], 'a' * 40)
+        with patch.object(sharing.catalog_delivery, 'gh', return_value='{"object":{"type":"commit","sha":"' + 'b' * 40 + '"}}'):
+            with self.assertRaises(ValueError): sharing.phase_remote_identity(remote, 'scoped-tag', phase)
+        with patch.object(sharing.catalog_delivery, 'gh') as lookup:
+            with self.assertRaises(ValueError): sharing.phase_remote_identity({**remote, 'target_commitish': 'wrong'}, 'scoped-tag', phase)
+            lookup.assert_not_called()
+
     def test_bundle_specific_release_tags_separate_technical_and_research(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'bundle.json'
@@ -25,6 +36,13 @@ class SharingRecoveryTests(unittest.TestCase):
             with self.assertRaises(ValueError): sharing.release_prefix(path, technical)
 
     def test_normal_stage_package_restore_offline_extract_and_owned_cleanup(self):
+        self.local_pipeline()
+
+    def test_new_phase_byte_pipeline_uses_separate_tag_and_gate_recorder(self):
+        self.local_pipeline(phase={'phase_sha256': 'a' * 64,
+            'source_commit': 'explicit-synthetic-new-phase', 'phase_id': 'synthetic-no-model'})
+
+    def local_pipeline(self, phase=None):
         """Real local byte pipeline; only the external transport is simulated."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -71,11 +89,13 @@ class SharingRecoveryTests(unittest.TestCase):
                 return {'run_id': rid, 'scoring': {'state': 'scored'},
                     'verdict': 'blocked', 'quality': None, 'fixture': True}
             dispatch = {'plan_sha256': util.sha256_file(bundle_path), 'cohort': 'runs/_technical-sharing-test',
-                'runtime': 'explicit-no-worker-fixture'}
+                'runtime': 'explicit-no-worker-fixture',
+                **({'phase_sha256': phase['phase_sha256']} if phase else {})}
             pair_execution.execute_pair(dispatch, pair['cases'], batch, repo=root,
                 prepare=prepare, implement=implement, postprocess=postprocess)
             work = root / 'artifacts/continuity-sharing-v1/technical-fixture'
-            sharing.stage(root, bundle_path, 1, work)
+            kwargs = {'phase': phase, 'context': sharing.pair_context} if phase else {}
+            sharing.stage(root, bundle_path, 1, work, **kwargs)
             staged = util.read_json(work / 'public/MANIFEST.json')
             omitted = [entry for entry in staged['excluded'] if
                 entry['path'].endswith(('submitted.sqlite3', 'submitted.db'))]
@@ -94,6 +114,9 @@ class SharingRecoveryTests(unittest.TestCase):
             remote = root / 'simulated-remote'
             remote.mkdir()
             def transfer(package, tag, commit):
+                if phase:
+                    self.assertIn(phase['phase_sha256'][:12], tag)
+                    self.assertEqual(commit, phase['source_commit'])
                 asset = sharing.catalog_delivery.verify_package(package)
                 names = [p['name'] for p in asset['parts']] + ['pair.manifest.json', 'public-review.json', 'scan.json']
                 for name in names: shutil.copyfile(package / name, remote / name)
@@ -102,7 +125,10 @@ class SharingRecoveryTests(unittest.TestCase):
                 shutil.copyfile(remote / url.rsplit('/', 1)[-1], target)
             # This canary is synthetic, never a call to the real credential path.
             with patch('research.catalog_share.known_secret', return_value=b'explicit-synthetic-scan-canary'):
-                result = sharing.share(root, bundle_path, 1, work, review, transfer=transfer, fetch=fetch)
+                recorded = []
+                if phase:
+                    kwargs['record_gate'] = lambda batch, number, path: recorded.append(util.read_json(path))
+                result = sharing.share(root, bundle_path, 1, work, review, transfer=transfer, fetch=fetch, **kwargs)
             self.assertTrue(result['originals_unchanged'])
             extracted = util.read_json(work / 'before-upload-extraction.json')
             self.assertEqual(len(extracted['runs']), 2)
@@ -113,7 +139,13 @@ class SharingRecoveryTests(unittest.TestCase):
             self.assertFalse((work / 'public').exists())
             self.assertFalse((work / 'package').exists())
             for rid, hashes in original.items(): self.assertEqual(sharing.catalog_share.inventory(batch / rid), hashes)
-            self.assertIn(1, pair_execution.state(batch / '_control/pair-journal.jsonl')['gates'])
+            if phase:
+                self.assertEqual(len(recorded), 1)
+                self.assertEqual(recorded[0]['phase_sha256'], phase['phase_sha256'])
+                self.assertNotIn(1, pair_execution.state(batch / '_control/pair-journal.jsonl')['gates'])
+                self.assertEqual(staged['execution_phase'], phase)
+            else:
+                self.assertIn(1, pair_execution.state(batch / '_control/pair-journal.jsonl')['gates'])
             stages = util.read_lines(work / 'public-gate-timing.jsonl')
             completed = [e for e in stages if e['event'] == 'stage_completed']
             self.assertEqual([e['stage'] for e in completed], ['package_including_compression',

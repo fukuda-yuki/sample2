@@ -1,0 +1,117 @@
+"""Explicit new measurement ledger; never overwrite an old frozen ledger.
+
+Public task/source contracts retain their original identities. Only the new
+measurement version, disclosed interpretation and stale descriptive text change.
+"""
+import argparse
+import copy
+import json
+from pathlib import Path
+
+from outer.harness import util
+from .saved_reassessment import requirement_inventory
+
+
+def revised(original):
+    result = copy.deepcopy(original)
+    old = result['specVersion']
+    if old == 'education-1.0.0':
+        result['specVersion'] = 'education-1.1.0'
+        changes = [
+            'SQLite Students.EnrollmentDate and Departments.StartDate compare calendar values: '
+            'YYYY-MM-DD or exactly midnight YYYY-MM-DD HH:mm:ss / YYYY-MM-DDTHH:mm:ss '
+            'with optional zero-only fractional seconds; '
+            'invalid dates, other times, offsets, timezones and arbitrary coercions are rejected.',
+            'Visible date markers must remain exactly YYYY-MM-DD; DB equivalence does not relax UI.',
+            'Create identity is the unique database post-minus-pre ID, never a matching name.',
+            'Owned operation HTTP500 is a finite product failure; downstream unobserved operations '
+            'and independent observer failures remain partial coverage with no complete quality.'
+        ]
+    elif old == '1.3.0':
+        result['specVersion'] = '1.4.0'
+        by_id = {r['id']: r for r in result['requirements']}
+        by_id['R-013']['basisDetail'] = ('ShoppingCart total is the sum of quantity times source-defined '
+            'effective unit price, rounded per unit to cents. Variant prices are frozen independently '
+            'in catalog.json/migration-oracle.json; no universal 8.99 assumption applies.')
+        texts = {'C-014': 'Three copies of album 1 display 3 * its independently frozen effective unit price.',
+            'C-015': 'Ordinary removal from quantity 2 leaves one line of quantity 1 and total equal '
+                'to that album\'s independently frozen effective unit price; visible Cart (N) updates.',
+            'C-017': 'Two copies of album 1 and one copy of album 2 produce two lines, quantity 3, '
+                'and total 2 * effectivePrice(1) + effectivePrice(2).'}
+        for req in result['requirements']:
+            for check in req['checks']:
+                if check['id'] in texts: check['observation'] = texts[check['id']]
+        result['knownLimits'] = [x for x in result.get('knownLimits', [])
+            if not (x.startswith('C-006（') or x.startswith('注文合計（Order.Total）'))]
+        result['knownLimits'].append('C-031 uses read-only SQLite to observe specified original rows '
+            'and checkout quantities/unit prices/Order.Total at declared restart stages; '
+            'this is finite coverage, not all database operations or universal persistence.')
+        changes = ['Legacy names in data folders/comments are mentions, not actual dependencies. '
+            'Actual project/assembly/launch evidence is required; unreadable/unresolved scans stay unknown.',
+            'Source-derived effective prices replace stale fixed-price descriptions; check IDs, '
+            'severities, original requirement inventory and frozen source/oracle assets are unchanged.',
+            'Owned operation HTTP500 preserves a finite product failure independently of observer faults; '
+            'unperformed removals remain unknown and cannot yield complete quality.']
+    elif old == '1.4.0':
+        result['specVersion'] = '1.5.0'
+        if 'measurementRevision' in original:
+            result['priorMeasurementRevision'] = copy.deepcopy(original['measurementRevision'])
+        changes = [
+            'C-015 requires a single album-1 row of quantity 2 and a positive record ID before '
+            'the HTTP removal request; C-016 requires the current post-C-015 single row of '
+            'quantity 1 and its actual positive record ID. Missing preconditions are blocked, '
+            'not removal failures; no synthetic id=0 removal request is sent.',
+            'Owned AddToCart HTTP500 remains a finite independently bound product failure; '
+            'unperformed removal operations stay unknown and quality stays null when incomplete.',
+            'Browser observations do not manufacture an unobserved HTTP JSON result; independently '
+            'confirmed browser failures may be retained alongside HTTP observation faults.',
+            'Requirement/check IDs, severities, weights and frozen source/oracle assets are unchanged; '
+            'prior 1.4 evaluation outputs and evaluation semantics remain separate.'
+        ]
+    elif old == '1.5.0':
+        result['specVersion'] = '1.6.0'
+        history = copy.deepcopy(original.get('measurementRevisionHistory', []))
+        if not history and original.get('priorMeasurementRevision'):
+            history.append(copy.deepcopy(original['priorMeasurementRevision']))
+        if original.get('measurementRevision'):
+            history.append(copy.deepcopy(original['measurementRevision']))
+        result['measurementRevisionHistory'] = history
+        changes = [
+            'C-014 observes the three-copy total independently of a failed prior removal; '
+            'cart/session contamination is not an arithmetic counterexample.',
+            'The public decimal-point/two-fraction-digits contract permits an unambiguous '
+            'currency-symbol prefix or suffix around that numeric amount. A missing marker or '
+            'wrong numeric amount remains a product failure; unsupported ambiguous parsing '
+            'must not invent a value or pass.',
+            'Checkout, restart, ownership and migration predicates distinguish independently '
+            'observed finite failures from missing cart/order prerequisites. Existing-data '
+            'preservation and actual stored arithmetic are independent of a missing purchase workflow.',
+            'Unknown HTTP/order predicates remain explicit unknown scope even alongside a known '
+            'failure, and incomplete observations keep quality null. Observed valid-checkout '
+            'HTTP failure and invalid-input contract violations remain failures.',
+            'Requirement/check IDs, severities, weights, migration contract and frozen oracle '
+            'assets are unchanged; old versions and saved evaluation outputs are preserved separately.'
+        ]
+    else:
+        raise ValueError('Supported ledger sources are Education1.0 and Music1.3/1.4/1.5')
+    result['measurementRevision'] = {'sourceSpecVersion': old,
+        'scope': 'new evaluation of same saved artifact, not historical labels or new acquisition',
+        'changes': changes, 'humanReview': 'not_run'}
+    if requirement_inventory(original) != requirement_inventory(result):
+        raise AssertionError('Requirement inventory changed')
+    return result
+
+
+def write(source, destination):
+    source, destination = Path(source).resolve(), Path(destination).resolve()
+    if source == destination: raise ValueError('Old ledger cannot be overwritten')
+    original = util.read_json(source)
+    util.write_new_json(destination, revised(original))
+    return util.sha256_file(destination)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('source'); parser.add_argument('destination')
+    args = parser.parse_args()
+    print(write(args.source, args.destination))

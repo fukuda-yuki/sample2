@@ -90,6 +90,9 @@ class Gateway(ThreadingHTTPServer):
         self.lock = threading.Lock()
         self.failed = threading.Event()
         self.stopping = threading.Event()
+        self.admission_lock = threading.Lock()
+        self.admission_closed = threading.Event()
+        self.admission_receipt = None
         self.socket_lock = threading.Lock()
         self.active_sockets = set()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -110,6 +113,10 @@ class Gateway(ThreadingHTTPServer):
 
     def cancel_and_shutdown(self):
         """Stop upstream traffic and let each handler durably close its journal."""
+        # Emergency cancellation must not wait behind a blocked POST/fsync.
+        # It supplies no admission ACK: close sockets now; incomplete sends
+        # retain unknown evidence. Runtime verifies container exit separately.
+        self.admission_closed.set()
         self.stopping.set()
         self.failed.set()
         with self.socket_lock:
@@ -121,6 +128,21 @@ class Gateway(ThreadingHTTPServer):
                 pass
             connection.close()
         self.shutdown()
+
+    def close_admission(self):
+        """Linearize the fence with the actual upstream POST, not request parsing.
+
+        Existing requests can finish; closing admission alone never cancels a
+        socket. An acknowledgement follows every earlier local send return.
+        """
+        with self.admission_lock:
+            self.admission_closed.set()
+            if self.admission_receipt is None:
+                receipt = {'run_id': self.run_id, 'session_id': self.session_id,
+                           'closed_at': now(), 'admission_closed': True}
+                self.record('control.jsonl', {'reason': 'admission_closed', **receipt})
+                self.admission_receipt = receipt
+            return dict(self.admission_receipt)
 
     def serve_with_signals(self):
         def stop(*_):
@@ -148,7 +170,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         g = self.server
-        if self.path not in ('/v1/chat/completions', '/chat/completions') or g.failed.is_set():
+        if self.path == '/control/stop-admission':
+            # The worker cannot reach the gateway's loopback interface. This
+            # endpoint is exercised only by ownership-checked docker exec.
+            try:
+                self.connection.settimeout(5)
+                size = int(self.headers.get('Content-Length', '0'))
+                if self.client_address[0] != '127.0.0.1' or not 0 < size <= 1024:
+                    raise ValueError()
+                body = json.loads(self.rfile.read(size))
+                if body != {'run_id': g.run_id, 'session_id': g.session_id}:
+                    raise ValueError()
+                receipt = g.close_admission()
+            except (ValueError, TypeError, OSError):
+                self.send_error(403, 'Stop acknowledgement unavailable')
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps(receipt).encode())
+            return
+        if (self.path not in ('/v1/chat/completions', '/chat/completions')
+                or g.failed.is_set() or g.admission_closed.is_set()):
             self.send_error(403, 'Endpoint denied or Run stopped')
             return
         try:
@@ -213,15 +255,18 @@ class Handler(BaseHTTPRequestHandler):
             connection.connect()
             upstream_socket = connection.sock
             g.track_socket(upstream_socket)
-            event['send_evidence'] = 'unknown'
-            g.record('transmission.jsonl', {**event, 'phase': 'send_intent', 'at': now()})
-            connection.request('POST', '/zen/go/v1/chat/completions', raw, {
-                'Authorization': 'Bearer ' + g.secret, 'Content-Type': 'application/json',
-                'Accept': 'text/event-stream', 'User-Agent': 'sample2-verification-machine/1',
-                'x-opencode-session': g.session_id})
-            event['send_evidence'] = 'observed_send'
-            event['transmitted_at'] = now()
-            g.record('transmission.jsonl', {**event, 'phase': 'local_send_returned'})
+            with g.admission_lock:
+                if g.admission_closed.is_set() or g.stopping.is_set() or g.failed.is_set():
+                    raise ConnectionAbortedError()
+                event['send_evidence'] = 'unknown'
+                g.record('transmission.jsonl', {**event, 'phase': 'send_intent', 'at': now()})
+                connection.request('POST', '/zen/go/v1/chat/completions', raw, {
+                    'Authorization': 'Bearer ' + g.secret, 'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream', 'User-Agent': 'sample2-verification-machine/1',
+                    'x-opencode-session': g.session_id})
+                event['send_evidence'] = 'observed_send'
+                event['transmitted_at'] = now()
+                g.record('transmission.jsonl', {**event, 'phase': 'local_send_returned'})
             response = connection.getresponse()
             event['provider_acknowledged'] = True
             event['http_status'] = response.status
@@ -255,9 +300,12 @@ class Handler(BaseHTTPRequestHandler):
             event['status'] = 'completed' if response.status == 200 and event['stream_done'] else 'provider_error'
         except Exception as exc:
             # Never log exception messages: upstream errors can include credentials.
-            event['status'] = 'cancelled' if g.stopping.is_set() else 'transport_error'
+            event['status'] = ('cancelled' if g.stopping.is_set() or
+                g.admission_closed.is_set() and event['send_evidence'] == 'known_no_send'
+                else 'transport_error')
             event['error_type'] = type(exc).__name__
-            g.failed.set()
+            if not (g.admission_closed.is_set() and event['send_evidence'] == 'known_no_send'):
+                g.failed.set()
             if not sent_headers:
                 try:
                     self.send_error(502, 'Upstream transport failed')
@@ -280,7 +328,7 @@ class Handler(BaseHTTPRequestHandler):
             # Parsing also happens after cancellation/transport exceptions and
             # after SecretFilter releases its final tail. DONE alone is not usage.
             event.update(parse_sse(bytes(response_bytes)))
-            if event.get('response_model_id') != g.model:
+            if event['send_evidence'] != 'known_no_send' and event.get('response_model_id') != g.model:
                 event['policy_error'] = 'response_model_mismatch'
                 g.failed.set()
             event['usage_complete'] = (event['status'] == 'completed' and not event['parse_errors']
@@ -292,7 +340,8 @@ class Handler(BaseHTTPRequestHandler):
                 g.failed.set()
             event['response_sha256'] = hashlib.sha256(response_bytes).hexdigest()
             event['ended_at'] = now()
-            if event['status'] != 'completed':
+            if (event['status'] != 'completed' and not
+                    (g.admission_closed.is_set() and event['send_evidence'] == 'known_no_send')):
                 g.failed.set()
             g.record('events.jsonl', event)
             if g.failed.is_set():

@@ -5,7 +5,7 @@ an approved frozen plan and enforce admission. The old catalog driver remains
 unchanged. No assigned dispatched identity is ever sent again, even if absent.
 """
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
@@ -15,7 +15,7 @@ from outer.harness import machine, profiles, run, runtime, util
 
 
 @contextmanager
-def exclusive(control):
+def exclusive(control, *, phase_permit=None):
     """Same byte-range dispatch.lock as the historical driver; no SciPy import."""
     control = Path(control)
     control.mkdir(parents=True, exist_ok=True)
@@ -30,6 +30,44 @@ def exclusive(control):
             import fcntl
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
+            handoff = control / 'phase-handoff.json'
+            successors = [(version, control / ('phase-handoff-v' + str(version) + '.json'))
+                          for version in (2, 3, 4, 5, 6, 7, 8, 9, 10)]
+            supported = {path.name for _, path in successors}
+            if any(path.name not in supported for path in control.glob('phase-handoff-v*.json')):
+                raise ValueError('Unsupported immutable successor handoff')
+            if any(path.exists() for _, path in successors) and not handoff.exists():
+                raise ValueError('Missing immutable predecessor handoff')
+            if handoff.exists():
+                marker = util.read_json(handoff)
+                owner, owner_path = marker.get('phase_sha256'), marker.get('phase_path')
+                parent_marker = handoff
+                for version, successor in successors:
+                    if not successor.exists():
+                        if any(path.exists() for later, path in successors if later > version):
+                            raise ValueError('Missing immutable intermediate handoff')
+                        continue
+                    changed = util.read_json(successor)
+                    baseline, phase = changed.get('previous_handoff', {}), changed.get('new_phase', {})
+                    if (changed.get('kind') != 'central_fixed_wave_successor_handoff_v' + str(version)
+                            or Path(baseline.get('path', '')).resolve() != parent_marker.resolve()
+                            or baseline.get('sha256') != util.sha256_file(parent_marker)
+                            or changed.get('previous_phase_sha256') != owner
+                            or not phase.get('path') or util.sha256_file(phase['path']) != phase.get('sha256')):
+                        raise ValueError('Invalid or changed immutable successor handoff')
+                    successor_phase = util.read_json(phase['path'])
+                    previous = successor_phase.get('predecessor_phase', {})
+                    if (successor_phase.get('kind') != 'source_info_v5_central_fixed_wave_phase_v' + str(version)
+                            or previous.get('sha256') != owner
+                            or not owner_path or Path(previous.get('path', '')).resolve() != Path(owner_path).resolve()
+                            or successor_phase.get('original_bundle') != marker.get('original_bundle')
+                            or changed.get('predecessor_journal') != successor_phase.get('predecessor_journal')
+                            or changed.get('predecessor_gates') != successor_phase.get('predecessor_gates')):
+                        raise ValueError('Successor does not preserve immutable ancestor chain')
+                    owner, owner_path, parent_marker = phase['sha256'], phase['path'], successor
+                if (marker.get('kind') != 'central_fixed_wave_handoff_v1'
+                        or not owner or owner != phase_permit):
+                    raise ValueError('Cohort handed off to central wave dispatcher; legacy entrypoint fenced')
             yield
         finally:
             stream.seek(0)
@@ -136,19 +174,25 @@ def _stop_active(futures, batch, stop):
 
 
 def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
-                 implement=machine.implement, postprocess=machine.postprocess, stop=runtime.request_stop):
+                 implement=machine.implement, postprocess=machine.postprocess, stop=runtime.request_stop,
+                 admit=None, defer_postprocess=False):
     """cases: two {run_id, task, condition, attempt, pair, slot} assignments.
 
     plan: {plan_sha256, cohort, runtime}. Caller checks plan/approval/resources.
     Existing completed receipt recovery is explicit via recover_pair; never
     automatically replay a dispatch or an uncertain postprocessing stage.
     """
-    if concurrency not in (1, 2) or len(cases) != 2:
+    if concurrency not in (1, 2) or len(cases) != 2 or concurrency != plan.get('pair_concurrency', concurrency):
         raise ValueError('Exactly one pair and concurrency 1 or 2 required')
     if len({c['pair'] for c in cases}) != 1 or len({c['run_id'] for c in cases}) != 2:
         raise ValueError('Pair identity or Run identity mismatch')
     if len({c['slot'] for c in cases}) != 2:
         raise ValueError('Duplicate slot')
+    fixed = [c.get('run_instance_id') for c in cases]
+    if plan.get('require_fixed_instances') or any(value is not None for value in fixed):
+        if (len(set(fixed)) != 2 or any(not isinstance(value, str) or len(value) != 32
+                or any(ch not in '0123456789abcdef' for ch in value) for value in fixed)):
+            raise ValueError('Two distinct preassigned instances required')
     batch = Path(batch)
     control = batch / '_control'
     with exclusive(control):
@@ -169,7 +213,7 @@ def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
                 raise ValueError('Existing unassigned directory; never overwrite')
             binding = {**case, 'cohort': plan['cohort'], 'plan_sha256': plan['plan_sha256'],
                        'runtime': plan['runtime'],
-                       'run_instance_id': uuid.uuid4().hex}
+                       'run_instance_id': case.get('run_instance_id') or uuid.uuid4().hex}
             if prepare:
                 manifest = prepare(binding)
             else:
@@ -198,8 +242,12 @@ def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
                     if fault:
                         _stop_active(futures, batch, stop)
                         break
-                    append(journal, {'kind': 'dispatch', **binding})
-                    futures[pool.submit(implement, repo, batch, binding['run_id'])] = binding
+                    # Admission and submission share the caller's stop-latch lock.
+                    # A durable campaign stop therefore precedes or follows a
+                    # dispatch unambiguously, including the serial second peer.
+                    with admit(binding) if admit else nullcontext():
+                        append(journal, {'kind': 'dispatch', **binding})
+                        futures[pool.submit(implement, repo, batch, binding['run_id'])] = binding
                     if concurrency == 1:
                         future = next(iter(futures))
                         receipt, failed = _implementation_result(future, binding, batch)
@@ -221,6 +269,10 @@ def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
         if fault or not all(c['run_id'] in current['implementations'] for c in cases):
             append(journal, {'kind': 'pause', 'pair': pair, 'reason': 'implementation_fault'})
             return {'status': 'held', 'reason': 'implementation_fault'}
+        if defer_postprocess:
+            append(journal, {'kind': 'evaluation_queued', 'pair': pair})
+            return {'status': 'acquired', 'reason': 'evaluation_pending', 'pair': pair,
+                    'runs': [b['run_id'] for b in assignments]}
         return _postprocess(plan, assignments, batch, repo, journal, postprocess)
 
 
@@ -392,13 +444,27 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
 
 
 def _validate_gate(value, current, pair):
+    if value.get('gate_kind') == 'repaired_main_pair_publication_gate_v1':
+        from research import acquisition_sharing
+        return acquisition_sharing.validate_gate(value, current, pair)
+    from research import app_failure_preservation
+    if value.get('gate_kind') == app_failure_preservation.KIND:
+        return app_failure_preservation.validate_gate(value, current, pair)
+    if value.get('gate_kind') is not None:
+        from research import preservation_gate
+        return preservation_gate.validate_gate(value, current, pair)
+    assigned = [d for d in current['dispatch'].values() if d['pair'] == pair]
+    if any(_postprocess_fault(current['results'].get(d['run_id'], {}).get('row', {})) for d in assigned):
+        raise ValueError('Recorded postprocess fault blocks publication gate')
+    return _validate_gate_common(value, current, pair)
+
+
+def _validate_gate_common(value, current, pair):
     assigned = [d for d in current['dispatch'].values() if d['pair'] == pair]
     if len(assigned) != 2 or not all(d['run_id'] in current['results'] for d in assigned):
         raise ValueError('Exactly two terminal results required before the gate')
     if _collection_hold(current, assigned):
         raise ValueError('Recorded collection fault blocks publication gate')
-    if any(_postprocess_fault(current['results'][d['run_id']]['row']) for d in assigned):
-        raise ValueError('Recorded postprocess fault blocks publication gate')
     expected = {d['run_id']: d['run_instance_id'] for d in assigned}
     if (value.get('pair') != pair or value.get('plan_sha256') != assigned[0]['plan_sha256']
             or value.get('cohort') != assigned[0]['cohort'] or value.get('run_instances') != expected):
@@ -436,13 +502,15 @@ def record_pair_gate(batch, pair, receipt):
 
 
 def resume_pair(plan, batch, authorization, *, repo, verify, implement=machine.implement,
-                postprocess=machine.postprocess):
+                postprocess=machine.postprocess, concurrency=1, stop=runtime.request_stop, admit=None):
     """Explicitly authorized unsent-only continuation of an existing reservation.
 
     verify(plan, binding) must recheck frozen inputs/environment/admission.
     Authorization binds current journal bytes and exact reserved instances.
     A dispatched identity is never sent again; recovery of it must finish first.
     """
+    if concurrency not in (1, 2) or concurrency != plan.get('pair_concurrency', concurrency):
+        raise ValueError('Resume must retain frozen pair concurrency 1 or 2')
     batch = Path(batch)
     with exclusive(batch / '_control'):
         journal = batch / '_control/pair-journal.jsonl'
@@ -474,9 +542,47 @@ def resume_pair(plan, batch, authorization, *, repo, verify, implement=machine.i
                     or (root / 'runtime.json').exists()):
                 raise ValueError('Reserved slot is not demonstrably unstarted')
             verify(plan,binding)
-            append(journal, {'kind':'resume_authorized', **binding,'authorization':authorization})
-            append(journal, {'kind':'dispatch', **binding})
+        # Validate every unsent input before dispatching either peer. A one-slot
+        # continuation is explicit; no stopped/dispatched peer is recreated.
+        append(journal, {'kind': 'resume_regime', 'pair': pair,
+            'frozen_concurrency': concurrency, 'unsent_slots': len(unsent),
+            'stopped_peer_not_replayed': len(unsent) == 1})
+        if concurrency == 2 and len(unsent) == 2:
+            fault = False
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = {}
+                try:
+                    for binding in unsent:
+                        for future in list(futures):
+                            if future.done():
+                                prior = futures.pop(future)
+                                receipt, failed = _implementation_result(future, prior, batch)
+                                _record_implementation(journal, prior, receipt, batch)
+                                fault = fault or failed
+                        if fault:
+                            _stop_active(futures, batch, stop)
+                            break
+                        with admit(binding) if admit else nullcontext():
+                            append(journal, {'kind': 'resume_authorized', **binding, 'authorization': authorization})
+                            append(journal, {'kind': 'dispatch', **binding})
+                            futures[pool.submit(implement, repo, batch, binding['run_id'])] = binding
+                    for future in as_completed(futures):
+                        binding = futures[future]
+                        receipt, failed = _implementation_result(future, binding, batch)
+                        _record_implementation(journal, binding, receipt, batch)
+                        fault = fault or failed
+                        if failed: _stop_active(futures, batch, stop)
+                except BaseException:
+                    _stop_active(futures, batch, stop)
+                    raise
+            if fault:
+                return {'status': 'held', 'reason': 'implementation_fault'}
+            return _postprocess(plan, assignments, batch, repo, journal, postprocess)
+        for binding in unsent:
             future=Future()
+            with admit(binding) if admit else nullcontext():
+                append(journal, {'kind':'resume_authorized', **binding,'authorization':authorization})
+                append(journal, {'kind':'dispatch', **binding})
             try: future.set_result(implement(repo,batch,binding['run_id']))
             except Exception as exc: future.set_exception(exc)
             receipt,failed=_implementation_result(future,binding,batch)

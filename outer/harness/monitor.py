@@ -71,7 +71,7 @@ def link(repo, root):
     else:
         util.write_new_json(raw, data)
     monitor_root = Path(os.environ.get('SAMPLE2_MONITOR_ROOT',
-        str(Path.home() / 'Documents/Codex/copilot-agent-observability')))
+        str(Path.home() / 'Documents/Codex/copilot-agent-observability'))).resolve()
     project = monitor_root / 'src/CopilotAgentObservability.ConfigCli/CopilotAgentObservability.ConfigCli.csproj'
     if not project.exists():
         raise RuntimeError('Set SAMPLE2_MONITOR_ROOT to the existing local-agent-monitor checkout')
@@ -80,7 +80,8 @@ def link(repo, root):
                   'ingest-raw', str(raw), '--db', str(database)]
     # The monitor importer is append-only, not idempotent. Never import twice.
     if not database.exists():
-        result = runtime.command(invocation, timeout=300)
+        # dotnet chooses its SDK from cwd/global.json, not --project's path.
+        result = runtime.command(invocation, cwd=monitor_root, timeout=300)
         (directory / 'importer.log').write_text(result.stdout + result.stderr, encoding='utf-8')
     found = []
     with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True)) as db:
@@ -91,7 +92,8 @@ def link(repo, root):
                 found.append(ident)
     normalized = directory / 'normalized-readback.json'
     normalization = runtime.command(['dotnet', 'run', '--project', str(project), '-c', 'Release', '--',
-                                      'normalize-raw', str(database), '--json', str(normalized)], timeout=300)
+                                      'normalize-raw', str(database), '--json', str(normalized)],
+                                    cwd=monitor_root, timeout=300)
     (directory / 'normalizer.log').write_text(normalization.stdout + normalization.stderr, encoding='utf-8')
     rows = util.read_json(normalized)
     totals = usage_totals(events)

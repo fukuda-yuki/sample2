@@ -7,7 +7,7 @@ namespace MusicStore.Evaluator;
 public static class Program
 {
     /// <summary>評価器自身の版。ビルドの同一性は evaluator_sha256 が表す。</summary>
-    public const string EvaluatorVersion = "1.3.0";
+    public const string EvaluatorVersion = "1.6.0";
 
     /// <summary>
     /// 判定の意味（検査集合・合否規則・配点）の既定版。--evaluation-version で上書きできる。
@@ -48,8 +48,8 @@ public static class Program
 
         if (ledger != null)
         {
-            if (new[] { "1.2.0", "1.3.0" }.Contains(ledger.SpecVersion)
-                || new[] { "1.2.0", "1.3.0" }.Contains(options.EvaluationVersion))
+            if (new[] { "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0" }.Contains(ledger.SpecVersion)
+                || new[] { "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0" }.Contains(options.EvaluationVersion))
             {
                 if (ledger.SpecVersion != options.EvaluationVersion)
                     faults.Add("Evaluation version requires its matching ledger; historical contracts must not be relabeled.");
@@ -57,8 +57,8 @@ public static class Program
             if (ledger.Requirements.Any(r => r.Checks.Count == 0)
                 || ledger.AllCheckIds().Distinct().Count() != ledger.AllCheckIds().Count())
                 faults.Add("Every requirement needs unique executable observations; empty coverage cannot pass.");
-            if (ledger.SpecVersion == "1.3.0" && ledger.MigrationContract == null)
-                faults.Add("Migration 1.3.0 requires frozen initial database and independent oracle assets.");
+            if (ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0" && ledger.MigrationContract == null)
+                faults.Add("Migration 1.3.0/1.4.0/1.5.0 requires frozen initial database and independent oracle assets.");
             var missing = ledger.AllCheckIds().Where(id => !Checks.Registry.ContainsKey(id)).ToList();
             if (missing.Count > 0)
             {
@@ -115,8 +115,8 @@ public static class Program
             try
             {
                 browserReview = BrowserCartReview.Load(options.BrowserCartEvidence, artifactHash,
-                    specHash, options.ReviewRunInstanceId, catalog, ledger.SpecVersion == "1.3.0",
-                    ledger.SpecVersion == "1.3.0");
+                    specHash, options.ReviewRunInstanceId, catalog, ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0",
+                    ledger.SpecVersion is "1.3.0" or "1.4.0" or "1.5.0" or "1.6.0", ledger.SpecVersion is "1.4.0" or "1.5.0" or "1.6.0", options.EvaluationVersion);
                 File.Copy(options.BrowserCartEvidence, Path.Combine(evidenceDir, "browser-cart-receipt.json"));
             }
             catch (Exception ex)
@@ -141,7 +141,7 @@ public static class Program
             try
             {
                 state.Migration = MigrationContinuity.Load(ledger.MigrationContract,
-                    Path.GetDirectoryName(options.SpecPath));
+                    Path.GetDirectoryName(options.SpecPath), options.EvaluationVersion);
             }
             catch (Exception ex)
             {
@@ -196,8 +196,8 @@ public static class Program
         foreach (var failure in browserReview?.ProductFailures ?? new())
         {
             var result = results.Single(r => r.CheckId == failure.Key);
-            if (result.Judgement == Judgement.Pass) result.Judgement = Judgement.Fail;
-            result.Observation += "\n" + failure.Value;
+            if(options.EvaluationVersion=="1.6.0")Attribution16.ProductFailure(result,failure.Value);
+            else {result.Judgement = Judgement.Fail;result.Observation += "\n" + failure.Value;}
         }
         var output = BuildOutput(ledger, options, evaluationId, specHash, artifactHash, startedAt, results);
         output.BrowserCartCoverage = browserReview?.Coverage ?? "not_run_http_only";
@@ -210,6 +210,14 @@ public static class Program
         {
             output.EvaluatorFaults.AddRange(browserReview.Faults);
             if (!browserReview.Complete) output.Quality = null;
+        }
+        if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0" && (output.ResearchStatus != "complete" || output.EvaluatorFaults.Count > 0
+            || options.EvaluationVersion is "1.5.0" or "1.6.0" && output.UncheckedScope.Count > 0))
+        {
+            output.ResearchStatus = "incomplete";
+            output.Quality = null;
+            output.Verdict = output.CriticalFailed.Count > 0 ? "fail_critical" : output.FailedCount > 0 ? "fail"
+                : output.EvaluatorFaults.Count > 0 ? "error" : "blocked";
         }
         WriteResults(options, ledger, results, output);
 
@@ -240,7 +248,8 @@ public static class Program
             Console.WriteLine("[evaluator] critical failed: " + string.Join(", ", output.CriticalFailed));
         }
 
-        return output.Verdict == "error" || browserReview != null && !browserReview.Complete ? 2 : 0;
+        return options.EvaluationVersion=="1.6.0" && output.ResearchStatus!="complete"
+            || output.Verdict == "error" || browserReview != null && !browserReview.Complete ? 2 : 0;
     }
 
     /// <summary>
@@ -331,6 +340,7 @@ public static class Program
         state.Host.Start();
         var (ready, detail) = state.Host.WaitReady(TimeSpan.FromSeconds(60));
         state.AppReady = ready;
+        if(options.EvaluationVersion=="1.6.0") {state.InitialReadinessObserved=true;state.InitialAppReady=ready;}
         state.AppStartDetail = detail;
         if (!ready)
         {
@@ -365,7 +375,7 @@ public static class Program
 
     private static void WriteEvidence(RunState state, string evidenceDir)
     {
-        foreach (var name in new[] { "browse", "redirect", "cart", "order", "other", "invalid", "invalid-missing", "invalid-fields", "isolation-a", "isolation-b", "restart" })
+        foreach (var name in new[] { "browse", "redirect", "cart", "cart-total", "order", "other", "invalid", "invalid-missing", "invalid-fields", "invalid-fields-FirstName", "invalid-fields-LastName", "invalid-fields-Address", "invalid-fields-City", "invalid-fields-State", "invalid-fields-PostalCode", "invalid-fields-Country", "invalid-fields-Phone", "invalid-fields-Email", "isolation-a", "isolation-b", "restart" })
         {
             var transcript = state.Transcript(name);
             if (!string.IsNullOrWhiteSpace(transcript))
@@ -404,7 +414,11 @@ public static class Program
         {
             var own = results.Where(r => r.RequirementId == requirement.Id).ToList();
             var judgement = Judgement.Pass;
-            if (own.Any(r => r.Judgement == Judgement.Error))
+            if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0" && own.Any(r => r.Judgement == Judgement.Fail))
+            {
+                judgement = Judgement.Fail;
+            }
+            else if (own.Any(r => r.Judgement == Judgement.Error))
             {
                 judgement = Judgement.Error;
             }
@@ -457,12 +471,18 @@ public static class Program
 
         output.RequirementCount = ledger.Requirements.Count;
         output.EvaluatorFaults.AddRange(results.Where(r => r.Judgement == Judgement.Error).Select(r => r.CheckId + ": " + r.Observation).Distinct());
+        if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0")
+            output.EvaluatorFaults.AddRange(results.SelectMany(r => (r.ObservationFaults ?? new()).Select(f => r.CheckId + ": " + f)).Distinct());
+        if (options.EvaluationVersion is "1.5.0" or "1.6.0")
+            output.UncheckedScope.AddRange(results.SelectMany(r => (r.UnknownObservations ?? new()).Select(f => r.CheckId + ": " + f)).Distinct());
 
-        if (output.ErrorCount > 0)
+        if (output.ErrorCount > 0 || options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0" && output.EvaluatorFaults.Count > 0)
         {
             // 評価側の障害があるときは品質点を返さない。0 に置き換えない。
             output.Verdict = "error";
             output.Quality = null;
+            if (options.EvaluationVersion is "1.4.0" or "1.5.0" or "1.6.0" && output.FailedCount > 0)
+                output.Verdict = output.CriticalFailed.Count > 0 ? "fail_critical" : "fail";
         }
         else
         {
@@ -485,6 +505,12 @@ public static class Program
             }
         }
 
+        if (options.EvaluationVersion=="1.6.0" && (output.UncheckedScope.Count>0 || output.EvaluatorFaults.Count>0))
+        {
+            output.ResearchStatus="incomplete";
+            output.Quality=null;
+            output.Verdict=output.CriticalFailed.Count>0?"fail_critical":output.FailedCount>0?"fail":output.EvaluatorFaults.Count>0?"error":"blocked";
+        }
         return output;
     }
 

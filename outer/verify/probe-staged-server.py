@@ -19,7 +19,7 @@ import time
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from outer.harness import gateway, live_usage, profiles, runtime, staged_input, util
+from outer.harness import gateway, live_usage, profiles, runtime, staged_input, staged_runtime, util
 
 
 def probe(executable, *, gateway_barrier=False):
@@ -33,7 +33,7 @@ def probe(executable, *, gateway_barrier=False):
         (root/'inputs/prompt.txt').write_text(initial)
         policy = {'suffixes':['.cs'], 'excluded_directories':['obj','bin']}
         _,_,partition = staged_input.split_sections([{'id':'a','text':initial},{'id':'b','text':additional}],['a'],['b'])
-        boundary_contract={'kind':'synthetic-provider-response-barrier','snapshot_policy_sha256':staged_input.digest(policy)}
+        boundary_contract={'kind':'synthetic-provider-response-barrier','snapshot_policy':policy,'snapshot_policy_sha256':staged_input.digest(policy)}
         if gateway_barrier: boundary_contract['transport']='opencode-server-response-barrier-v1'
         controller = staged_input.create(scratch/'controller', run_id='synthetic', run_instance_id='synthetic-instance',
             task='toy',condition='staged-toy',workspace=root/'workspace',worker_roots=[root/'inputs',root/'state'],
@@ -104,6 +104,7 @@ def probe(executable, *, gateway_barrier=False):
                 {'permission':p,'pattern':'*','action':'deny'} for p in ('question','plan_enter','plan_exit')]})['id']
             controller.bind_session(session)
             before=staged_input.snapshot(root/'workspace',policy)
+            controller.checkpoint('initial',{'native_session_id':session})
             client=subprocess.Popen([str(executable),'run','--attach',address,'--dir',str(root/'workspace'),
                 '--session',session,'--pure','--format','json','--model','sample2/'+model],
                 cwd=root/'workspace',env=env,stdin=subprocess.PIPE,stdout=output,stderr=client_error)
@@ -132,6 +133,7 @@ def probe(executable, *, gateway_barrier=False):
                 'barrier_id':barrier['barrier_id'] if barrier else 'synthetic-response-1',
                 'next_request_blocked':True,'active_tools':[],'children_exited':True,
                 'completed_tool_call_ids':[terminals[0]['callID']]})
+            controller.checkpoint('before-additional',{'fence':barrier,'native_session_id':session})
             def send(payload,remaining):
                 proxy.arm_stage({k:payload[k] for k in ('run_id','run_instance_id','delivery_id','contract_sha256','additional_sha256','native_session_id','barrier_id')})
                 answer=api('/session/'+session+'/message',{'noReply':True,'parts':[{'type':'text','text':payload['text']}],
@@ -149,11 +151,28 @@ def probe(executable, *, gateway_barrier=False):
                 ack=next(e for e in controller.events() if e['kind']=='acknowledged')
                 proxy.release_stage_barrier(barrier['barrier_id'],ack['native_message_id'])
             else: release.set()
+            delivery_snapshot=after
+            if gateway_barrier:
+                class HostTransport:
+                    def children(self):
+                        rows=[tuple(map(int,line.split())) for line in subprocess.check_output(['ps','-eo','pid=,ppid='],text=True).splitlines()]
+                        return [pid for pid,parent in rows if parent==native.pid]
+                    def release(self,*args,**kwargs):proxy.release_stage_barrier(*args,**kwargs)
+                post=False
+                while client.poll() is None and not post:
+                    if controller.remaining()<5:raise TimeoutError('Synthetic post-input boundary not observed')
+                    held=proxy.inspect_stage_barrier()
+                    if held and held['phase']=='after_additional':
+                        rows,errors=live_usage.journal(root/'evidence/agent.jsonl')
+                        if not errors:
+                            after,post=staged_runtime.observe_boundary(controller,HostTransport(),held,rows,after,after_delivery=True)
+                    time.sleep(.02)
             client.wait(timeout=controller.remaining())
             if client.returncode: raise RuntimeError('Attached native CLI failed')
             final=staged_input.snapshot(root/'workspace',policy)
             native.terminate(); native.wait(timeout=10)
             proxy.shutdown(); proxy.server_close()
+            controller.checkpoint('final',{'reason':'synthetic_completed'})
             controller.finish('synthetic_completed',stop_confirmed=True)
             manifest=util.read_json(root/'manifest.json'); manifest['stop_confirmed']=True;util.write_json_atomic(root/'manifest.json',manifest)
             # Synthetic prerequisite for exercising the actual collector, never
@@ -168,7 +187,7 @@ def probe(executable, *, gateway_barrier=False):
                 'additional_absent_first_request':not gateway.check_additional_input(requests[0],additional)['locations'],
                 'additional_in_next_request':gateway.check_additional_input(requests[1],additional)['verified'],
                 'initial_history_in_next_request':gateway.check_initial_input(requests[1],initial)['verified'],
-                'implementation_changed_after_delivery':after['sha256']!=final['sha256'],
+                'implementation_changed_after_delivery':delivery_snapshot['sha256']!=final['sha256'],
                 'native_children_observed_at_boundary':len(children),
                 'final_file':(root/'workspace/Program.cs').read_text().strip(),
                 'observed_tokens':normalized['observed_tokens'],'gateway_additional_input_reached':normalized['input_reached'],

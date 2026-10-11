@@ -183,6 +183,7 @@ def staged_evidence(root, manifest, events, native_sessions):
             errors.append('stage_unbound_arm')
         if arms and boundaries and arms[0]['barrier_id'] != boundaries[0]['fence']['barrier_id']:
             errors.append('stage_boundary_binding_mismatch')
+        barriers=[]
         if contract['boundary_contract'].get('transport') == 'opencode-server-response-barrier-v1':
             barriers, faults = journal(raw/'response-barriers.jsonl'); errors += faults
             held = [r for r in barriers if r.get('kind') == 'held']
@@ -247,7 +248,20 @@ def staged_evidence(root, manifest, events, native_sessions):
                 first_transmitted = dict(first_observed, request_id=event['request_id'],
                     request_sha256=event['request_sha256'], locations=proof['locations'], send_evidence='observed_send')
         if len(intents) > 1: errors.append('stage_duplicate_intent')
+        from . import staged_artifacts
+        artifacts=staged_artifacts.summary(controller,(state.get('terminal') or {}).get('reason'))
+        if state.get('terminal') and state['terminal'].get('checkpoints')!=artifacts:
+            errors.append('stage_checkpoint_terminal_mismatch')
+        post=artifacts['after-additional']
+        if post.get('archive'):
+            fence=post['binding']['fence']
+            if not first_observed or fence.get('first_additional_request_id')!=first_observed['request_id']:
+                errors.append('stage_checkpoint_before_observed_input')
+            found=[b for b in barriers if b.get('kind')=='released' and b['barrier_id']==fence['barrier_id']]
+            if len(found)!=1 or found[0].get('capture_complete') is not True:
+                errors.append('stage_checkpoint_release_unverified')
         value = {**state, 'native_session_ids': sessions,
+            'checkpoints':artifacts,
             'native_acknowledged': any(e['kind'] == 'acknowledged' for e in ledger),
             'first_observed_request': first_observed, 'first_transmitted_request': first_transmitted,
             'additional_input_reached': bool(first_transmitted) and not errors,

@@ -2,7 +2,7 @@
 
 単一条件 `staged-explore` に、初回から通算の時間枠内で追加文を1回だけ渡す経路を追加する。
 同じ Run UUID・workspace・native session を使い、元sourceとDBへのアクセスを保持する。
-これは実装候補であり、Docker上の受入、実モデルでのlive受入、研究上の実行承認は未確認。
+実Docker上の人工provider統合は確認済み。実モデルでのlive受入と研究上の実行承認は未確認。
 要求分割・対象file範囲・件数・予算・再試行回数を値入りの研究計画として作成していない。
 [限定評価器修正](limited-evaluator-review.md)は別の変更で、既存保存物の原判定は変更しない。
 
@@ -56,14 +56,32 @@ gatewayのみcontroller領域をread-onlyで参照し、本文を独立に照合
 実装fileのscopeは実行計画のsuffix/excluded-directory一覧で固定する。symlinkを拒否し、build合格や
 採点合格を条件にしない。toolが失敗していても実装fileが変われば候補となる。read-only toolでは
 snapshotと保留解除を記録する。複数toolを含む応答で変更が起きた場合、最初の変更を個別toolへ
-帰属できないためunknownとして停止し、都合のよい後続境界へ進めない。未完了tool・子processが
-残る間は投入せず、元のdeadlineで停止する。追加文なしのrequestが投入境界を越える場合も拒否する。
+帰属できないためunknownとして停止し、都合のよい後続境界へ進めない。未完了toolのeventは元のdeadline内で待つ。tool terminal後にも子processが
+残る場合はunknownで停止し、子processの終了を待って後続時点へ境界をずらさない。追加文なしのrequestが投入境界を越える場合も拒否する。
 
-`runtime` が既存containerの所有権・mount・Run UUIDを確認してnative APIを操作する。
+`runtime` は起動直前にも承認済みcampaign/epoch・実際のdispatch journal・partition/transportを照合する。
+直接のRun開始もこの照合を迂回できず、campaign STOP中は拒否する。
+既存containerの所有権・mount・Run UUIDを確認してnative APIを操作する。
 既存のmodel ID、provider、tool権限、question deny、LSP/compaction設定、入力分離を維持する。
 段階間に回収・採点を行わず、最終停止後に既存の回収・採点部品へ戻る。未到達でも初回入力と
 usage/停止証拠が完備する終端は、追加到達をfalseのまま保持する。観測障害を到達成功へ変換しない。
 私有archiveにはcontroller原本も含める。public公開allowlistは広げない。
+
+## 復元可能な私有checkpoint
+
+初期workspace/input manifest、追加送信前、追加文を含むrequest以降の最初の実装変更後、最終停止後の
+4時点を区別する。段階checkpointは最終submissionの固定・回収・採点ではない。
+既存のfile選択/DB sidecar規則を使い、正規化せずbyte列・tree manifest・直前checkpointとの差分を
+`_controller/staged-input/checkpoint-archive` へ保存する。複写前後のworkspace hashを再照合し、
+取得開始/終了時刻・所要時間・byte数・receipt/archive hashをledgerへ結ぶ。
+初回のinput manifestと既存Run archiveのinputsを保持し、source/DBを隠さない。
+DBのcheckpoint/修復は行わず、非空sidecarや複写中変更を検出した場合はnullと理由を残して停止する。
+
+追加後もgatewayはtoolを含む応答の終端を保留し、最初の追加包含request IDに結び付いた変更を
+保存してから保留を解除する。その後の上書き・削除にかかわらず前後の内容をprivate archiveから復元できる。
+追加後に変更がない、配送に到達しない、並行tool/子processで境界が不明、snapshotが失敗した場合は
+追加後archiveをnullと理由で残す。finalを追加後checkpointの代用にしない。
+新しいarchiveも私有Run保存の対象であり、Git/public exportへ原本を追加しない。
 
 ## 明示計画と停止・再開
 
@@ -79,11 +97,27 @@ usage/停止証拠が完備する終端は、追加到達をfalseのまま保持
 純粋因果効果とは扱えない。この経路を採る明示実行計画と、その計画hashに対する実際の実行指示が必要。
 本実装依頼を実取得の承認に読み替えない。
 
-## 残る検証
+## Docker人工provider受入と残る検証
 
-通常テストはcontroller、gateway、SSE chunk分割、ACK消失、重複/外来ID/停止、失敗toolの変更、
-並行toolのunknown、子process待機、予算非reset、未到達保持、producerの漏洩検査、単一条件と旧経路を検証する。
-実バイナリ試験は有限の組込みwriteだけであり、任意のbash/並行toolや長時間tool、Windows Dockerの
-process/mount/loopback、container UIDによるcontroller file読込みを受入済みとはしない。
-Docker adapterは人工transport/command fixtureで検証した。実Docker・実モデル試験、課金API、
-実保存物の再採点は実施していない。安全な継続のlive受入を済み扱いせず、PRはDraftを維持する。
+```text
+python outer/verify/probe-staged-docker.py --opencode /absolute/path/to/opencode-1.17.11 --output /private/new-fixture-directory
+```
+
+このopt-in probeは固定digestのPython baseと既に取得した固定版binaryを使う有限のfixture imageを作る。
+providerはgateway container内のloopbackで定型SSEを返し、実provider credentialを読まない。
+人工Runのために置換するのはcampaign承認validatorとgateway stdin secretだけ。
+実 `runtime.start`、DockerTransport、read-only/non-root/internal-networkのisolation probe、
+container所有権、停止、network回収、gateway、live_usage、private checkpoint/復元を通す。
+承認validatorを置換する前に、未承認の直接起動がDocker割当前に拒否されることも検査する。
+Docker client設定はfixture専用の空ディレクトリへ分離し、hostのproxy/認証設定を変更・継承しない。
+
+通常の同一file継続、並行write、detached子processを残すbash、および追加後の同じ曖昧ケースを扱う。
+曖昧ケースは保留中にunknownで停止し、再送せず、観測usageとfinalを保持する。
+途中停止した応答はstream未完・観測不完備のままであり、成功usageへ書き換えない。
+実Docker試験で検出したevent到着順の競合、非rootで読むgatewayコードのmode、直接起動の承認照合を修正した。
+
+通常テストはcheckpoint復元・上書き/削除・CRLF byte保持・DB sidecar保留・receipt改変拒否、
+SSE chunk分割、ACK消失、重複/外来ID/停止、失敗tool、予算非reset、未到達、producer漏洩、
+単一条件と旧2条件の回帰を検証する。fixture workerに.NET SDKは含めず、production .NET image全体、
+任意のtool動作、Windows Docker、実provider/liveモデルは受入済みとしない。
+実モデル送信、課金API、保存物の再採点は行わない。Ready変更は親のレビュー判断に委ねる。

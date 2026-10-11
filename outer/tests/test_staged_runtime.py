@@ -58,8 +58,9 @@ class BoundaryTests(StageFixture):
         self.transport.release.assert_not_called();self.transport.send.assert_not_called()
         self.events[0]['part']['callID']='call';self.barrier['tool_call_ids']=['call']
         self.transport.children.return_value=[123]
-        self.assertEqual((self.before,False),self.observe())
+        with self.assertRaisesRegex(ValueError,'child lifetime'): self.observe()
         self.transport.send.assert_not_called()
+        self.assertEqual('live_children_at_tool_terminal',self.controller.events()[-1]['reason'])
 
     def test_lost_ack_never_releases_model_loop(self):
         self.setup_boundary();(self.root/'workspace/Program.cs').write_text('synthetic change')
@@ -72,6 +73,11 @@ class BoundaryTests(StageFixture):
         self.setup_boundary();self.events[0]['sessionID']='foreign'
         with self.assertRaises(ValueError):self.observe()
         self.transport.send.assert_not_called()
+
+    def test_gateway_barrier_before_first_native_event_waits_without_dispatch(self):
+        self.setup_boundary();self.events=[]
+        self.assertEqual((self.before,False),self.observe())
+        self.transport.send.assert_not_called();self.transport.release.assert_not_called()
 
     def test_docker_api_requires_owned_mount_and_sends_future_body_only_on_stdin(self):
         self.setup_boundary(); owner=Mock()
@@ -138,6 +144,10 @@ class ProducerTests(unittest.TestCase):
             # the native server is loopback-only with the original pinned model.
             process=Mock();process.poll.return_value=0;process.returncode=0
             fake_docker=Mock(return_value=Mock(stdout='network-id',returncode=0))
+            with patch.object(runtime,'docker') as refused:
+                with self.assertRaisesRegex(ValueError,'approved campaign'):
+                    runtime.start(REPO,root/'runs',manifest['run_id'])
+                refused.assert_not_called()
             def execute(*args):
                 args[2].bind_session('native');return 0,'completed'
             with patch.object(runtime,'docker',fake_docker),patch.object(runtime,'image_id'),\
@@ -148,7 +158,8 @@ class ProducerTests(unittest.TestCase):
                 # Empty image map is adequate for producer tests; add synthetic
                 # names only for the mocked Docker command-construction fixture.
                 condition['runtime_lock']['images']={'worker':'synthetic-worker','gateway':'synthetic-gateway'}
-                with patch.object(profiles,'validate_run',return_value=condition):runtime.start(REPO,root/'runs',manifest['run_id'])
+                with patch.object(profiles,'validate_run',return_value=condition),patch.object(staged_runtime,'validate_authorization'):
+                    runtime.start(REPO,root/'runs',manifest['run_id'])
             calls=[list(c.args) for c in fake_docker.call_args_list if c.args[0]=='create']
             worker=next(c for c in calls if 'synthetic-worker' in c);proxy=next(c for c in calls if 'synthetic-gateway' in c)
             self.assertIn('serve',worker);self.assertIn('127.0.0.1',worker)
@@ -206,3 +217,106 @@ class GatewayBarrierTests(StageFixture):
         self.assertFalse(thread.is_alive());self.assertIsInstance(self.faults[0],TimeoutError)
         with self.assertRaises(ValueError):self.proxy.release_stage_barrier(barrier['barrier_id'])
         self.assertEqual(['held'],[r['kind'] for r in util.read_lines(self.root/'usage/raw/response-barriers.jsonl')])
+
+class CheckpointTests(StageFixture):
+    def test_both_boundaries_restore_after_overwrite_and_deletion_and_final_is_distinct(self):
+        from harness import preserve,staged_artifacts
+        self.controller.start();self.controller.bind_session('native')
+        self.controller.checkpoint('initial',{'native_session_id':'native'})
+        workspace=self.root/'workspace'
+        (workspace/'Program.cs').write_bytes(b'// first\r\n')
+        (workspace/'deleted.txt').write_bytes(b'original bytes')
+        before=self.controller.checkpoint('before-additional',{'request_id':'before-request','tool_call_id':'before-tool'})
+        (workspace/'Program.cs').write_bytes(b'// after additional\r\n')
+        (workspace/'deleted.txt').unlink();(workspace/'added.txt').write_bytes(b'new bytes')
+        after=self.controller.checkpoint('after-additional',{'request_id':'after-request','tool_call_id':'after-tool'})
+        (workspace/'Program.cs').unlink();(workspace/'added.txt').write_bytes(b'final overwrite')
+        self.controller.checkpoint('final',{'reason':'completed'})
+        self.controller.finish('completed',stop_confirmed=True)
+        archived=self.controller.root/'checkpoint-archive'
+        for label,receipt,expected in [('before',before,b'// first\r\n'),('after',after,b'// after additional\r\n')]:
+            target=Path(self.tmp.name)/('restored-'+label)
+            preserve.restore(archived,receipt['archive'],target)
+            self.assertEqual(expected,(target/'workspace/Program.cs').read_bytes())
+            if label=='before':self.assertEqual(b'original bytes',(target/'workspace/deleted.txt').read_bytes())
+            else:
+                self.assertFalse((target/'workspace/deleted.txt').exists())
+                tree=util.read_json(target/'tree.json')
+                self.assertEqual(['deleted.txt'],tree['difference']['removed'])
+                self.assertEqual(['added.txt'],tree['difference']['added'])
+                self.assertEqual(['Program.cs'],tree['difference']['changed'])
+        summary=staged_artifacts.summary(self.controller,'completed')
+        self.assertNotEqual(summary['after-additional']['archive'],summary['final']['archive'])
+        self.assertEqual({'initial','before-additional','after-additional','final'},set(summary))
+
+    def test_unreached_post_checkpoint_remains_null_even_when_final_has_changes(self):
+        self.controller.start();self.controller.bind_session('native')
+        (self.root/'workspace/Program.cs').write_text('// final only')
+        self.controller.checkpoint('final',{'reason':'early_completion'})
+        result=self.controller.finish('early_completion',stop_confirmed=True)['terminal']['checkpoints']
+        self.assertIsNone(result['after-additional']['archive'])
+        self.assertEqual('additional_input_not_acknowledged',result['after-additional']['reason'])
+        self.assertIsNotNone(result['final']['archive'])
+        self.assertEqual('boundary_never_reached',result['before-additional']['reason'])
+
+    def test_unsealed_db_checkpoint_holds_without_mutating_or_hiding_database(self):
+        self.controller.contract['artifact_collection_policy']=util.STATIC_DB_COLLECTION_POLICY
+        self.controller.start();self.controller.bind_session('native')
+        (self.root/'workspace/data.sqlite').write_bytes(b'synthetic database')
+        (self.root/'workspace/data.sqlite-wal').write_bytes(b'nonempty unsealed sidecar')
+        original=util.tree_hashes(self.root/'workspace')
+        with self.assertRaisesRegex(ValueError,'checkpoint unavailable'):self.controller.checkpoint('before-additional',{})
+        self.assertEqual(original,util.tree_hashes(self.root/'workspace'))
+        result=self.controller.finish('checkpoint_failed',stop_confirmed=True)['terminal']['checkpoints']
+        self.assertIsNone(result['before-additional']['archive'])
+        self.assertEqual('checkpoint_failed:ValueError',result['before-additional']['reason'])
+
+    def test_receipt_tamper_is_not_replaced_by_a_final_snapshot(self):
+        from harness import staged_artifacts
+        self.controller.start();self.controller.bind_session('native')
+        self.controller.checkpoint('before-additional',{})
+        receipt=self.controller.root/'checkpoints/before-additional/receipt.json'
+        util.write_json_atomic(receipt,{**util.read_json(receipt),'bytes':999})
+        with self.assertRaisesRegex(ValueError,'receipt changed'):staged_artifacts.summary(self.controller,'completed')
+
+class ActivationTests(unittest.TestCase):
+    def test_matching_approved_dispatch_and_partition_are_required_at_run_entry(self):
+        from research import campaign_initialization,live_pilot,pair_execution
+        with tempfile.TemporaryDirectory() as temporary:
+            base=Path(temporary);root=base/'epoch/data/pair-1/R'
+            for name in ('workspace','state','inputs'): (root/name).mkdir(parents=True)
+            condition=profiles.resolve(REPO,'MS1-001','explore')
+            condition['intervention']['method']='staged-explore';condition['migration_request']='Synthetic initial.\nSynthetic later.\n'
+            policy={'suffixes':['.cs'],'excluded_directories':['obj']}
+            plan=dict(kind='staged_request_partition_v1',request_sha256=util.sha256_bytes(condition['migration_request'].encode()),
+                sections=[dict(id='a',text='Synthetic initial.\n'),dict(id='b',text='Synthetic later.\n')],
+                initial_ids=['a'],additional_ids=['b'],boundary_contract=dict(transport='opencode-server-response-barrier-v1',
+                    snapshot_policy=policy,snapshot_policy_sha256=staged.digest(policy)))
+            initial,later,partition=staged.request_partition(condition['migration_request'],plan)
+            prompt,_=profiles.prepare_prompt({**condition,'migration_request':initial},root/'inputs')
+            partition.update(request_initial_sha256=partition['initial_sha256'],initial_sha256=util.sha256_bytes(prompt.encode()))
+            controller=staged.create(root/'_controller/staged-input',run_id='R',run_instance_id='instance',task='MS1-001',
+                condition='staged-explore',workspace=root/'workspace',worker_roots=[root/'inputs',root/'state'],
+                initial_prompt=prompt,additional_prompt=later,budget_seconds=30,boundary_contract=plan['boundary_contract'],partition=partition)
+            util.write_new_json(base/'partition.json',plan);util.write_new_json(base/'config.json',{'root':str(base/'campaign')})
+            util.write_new_json(base/'epoch.json',{})
+            assignment=dict(run_id='R',run_instance_id='instance',task='MS1-001',condition='staged-explore',pair=1)
+            epoch=dict(campaign_config=live_pilot.reference(base/'config.json'),cases_per_assignment=1,
+                assignments=[dict(cases=[assignment])],batch=str(base/'epoch/data'),
+                runtime_by_task={'MS1-001':condition['runtime']['id']},settings={'model_id':condition['runtime']['model_id']},
+                staged_inputs={'MS1-001':live_pilot.reference(base/'partition.json')})
+            manifest=dict(run_id='R',run_instance_id='instance',task_id='MS1-001',assignment=assignment,prompt_sha256='input',condition_sha256='condition',
+                acquisition=dict(epoch=live_pilot.reference(base/'epoch.json'),campaign_config=epoch['campaign_config']))
+            dispatch=dict(run_id='R',run_instance_id='instance',input_sha256='input',condition_sha256='condition')
+            # Upstream approval/genesis/epoch checking is exercised by the
+            # campaign suite; here vary the final native dispatch binding.
+            with patch.object(campaign_initialization,'verify_epoch',return_value=epoch),patch.object(pair_execution,'state',return_value={'dispatch':{'R':dispatch}}):
+                staged_runtime.validate_authorization(REPO,root,manifest,controller,condition)
+                dispatch['run_instance_id']='foreign'
+                with self.assertRaisesRegex(ValueError,'admitted dispatch'):staged_runtime.validate_authorization(REPO,root,manifest,controller,condition)
+                dispatch['run_instance_id']='instance'
+                (base/'campaign').mkdir();(base/'campaign/STOP').write_text('synthetic stop')
+                with self.assertRaisesRegex(ValueError,'open campaign'):staged_runtime.validate_authorization(REPO,root,manifest,controller,condition)
+                (base/'campaign/STOP').unlink()
+                controller.contract['boundary_contract']={**controller.contract['boundary_contract'],'transport':'unapproved'}
+                with self.assertRaisesRegex(ValueError,'transport/partition'):staged_runtime.validate_authorization(REPO,root,manifest,controller,condition)

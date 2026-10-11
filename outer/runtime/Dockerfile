@@ -31,7 +31,7 @@ WORKDIR /work
 USER 1000:1000
 
 FROM python:3.12-slim-bookworm AS gateway
-COPY outer/harness/gateway.py /app/gateway.py
+COPY --chmod=0555 outer/harness/gateway.py /app/gateway.py
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 1000:1000
 ENTRYPOINT ["python3", "/app/gateway.py"]

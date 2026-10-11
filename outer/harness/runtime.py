@@ -450,7 +450,10 @@ def _start(repo, runs_dir, run_id):
                 or stage.contract['boundary_contract'].get('transport') != 'opencode-server-response-barrier-v1'
                 or condition['runtime']['opencode_version'] != '1.17.11'):
             raise ValueError('Unsupported staged transport or Run budget binding')
+        if stage.contract['artifact_collection_policy'] != util.resolve_collection_policy(condition.get('collection_policy')):
+            raise ValueError('Staged artifact collection policy differs from fixed condition')
         stage.audit_mounts()
+        staged_runtime.validate_authorization(repo,root,manifest,stage,condition)
     elif condition['intervention']['method'] == 'staged-explore':
         raise ValueError('Staged condition requires its frozen controller contract')
     lock = condition['runtime_lock']
@@ -579,6 +582,10 @@ def _start(repo, runs_dir, run_id):
             if (root / 'usage/raw/failure.jsonl').exists():
                 reason = 'provider_failure'
     except Exception as exc:
+        if stage:
+            try:
+                if any(e['kind']=='boundary_unknown' for e in stage.events()): reason='boundary_unknown'
+            except (OSError,ValueError): pass
         util.write_new_json(root / 'evidence/runtime-error.json', {'type': type(exc).__name__, 'message': str(exc)})
     finally:
         try:
@@ -597,12 +604,17 @@ def _start(repo, runs_dir, run_id):
         state['stop_confirmed'] = stopped
         util.write_json_atomic(root / 'runtime.json', state)
         if stage:
+            stage_errors=[]
             try:
-                stage.finish(reason,stop_confirmed=stopped)
+                if stopped:stage.checkpoint('final',{'reason':reason,'stop_confirmed':True})
                 util.write_new_json(stage.root/'final-snapshot.json',staged_input.snapshot(
                     stage.contract['workspace'],stage.contract['boundary_contract']['snapshot_policy']))
             except (OSError,ValueError,KeyError) as exc:
-                util.write_new_json(root/'evidence/staged-terminal-error.json',{'type':type(exc).__name__})
+                stage_errors.append({'operation':'final_checkpoint','type':type(exc).__name__})
+            try:stage.finish(reason,stop_confirmed=stopped)
+            except (OSError,ValueError,KeyError) as exc:
+                stage_errors.append({'operation':'terminal_ledger','type':type(exc).__name__})
+            if stage_errors:util.write_new_json(root/'evidence/staged-terminal-error.json',{'errors':stage_errors})
         manifest.update(ended_at=run.now(), duration_seconds=round(time.monotonic() - started, 3),
                         end_reason=reason if stopped else 'stop_unconfirmed', exit_code=exit_code,
                         stop_confirmed=stopped, stop_method='container_exit', stop_evidence=state)
@@ -674,6 +686,9 @@ def request_stop(root):
             if manifest.get('staged_input'):
                 controller = staged_input.Controller(Path(manifest['staged_input']['contract_path']).parent)
                 if not controller.status()['terminal']:
+                    if stopped and not (controller.root/'checkpoints/final/receipt.json').exists():
+                        try:controller.checkpoint('final',{'reason':'operator_stop_recovered','stop_confirmed':True})
+                        except (OSError,ValueError):pass
                     controller.finish('operator_stop_recovered',stop_confirmed=stopped)
             from . import live_usage
             live_usage.update_manifest_evidence(root)

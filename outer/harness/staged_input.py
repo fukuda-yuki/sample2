@@ -72,7 +72,7 @@ def snapshot(workspace, policy):
 
 
 def create(directory, *, run_id, run_instance_id, task, condition, workspace, worker_roots,
-           initial_prompt, additional_prompt, budget_seconds, boundary_contract, partition):
+           initial_prompt, additional_prompt, budget_seconds, boundary_contract, partition, artifact_collection_policy=None):
     directory, workspace = Path(directory).resolve(), Path(workspace).resolve(strict=True)
     roots = [workspace, *(Path(p).resolve(strict=True) for p in worker_roots)]
     if any(directory.is_relative_to(p) or p.is_relative_to(directory) for p in roots):
@@ -91,6 +91,7 @@ def create(directory, *, run_id, run_instance_id, task, condition, workspace, wo
         'run_instance_id': run_instance_id, 'task': task, 'condition': condition, 'workspace': str(workspace),
         'worker_roots': [str(p) for p in roots], 'budget_seconds': budget_seconds,
         'boundary_contract': boundary_contract, 'partition': partition, 'delivery_id': uuid.uuid4().hex,
+        'artifact_collection_policy':util.resolve_collection_policy(artifact_collection_policy),
         'initial_sha256': util.sha256_file(directory/'initial.txt'),
         'additional_sha256': util.sha256_file(directory/'additional.txt')}
     util.write_new_json(directory/'contract.json', contract)
@@ -199,9 +200,18 @@ class Controller:
                 raise ValueError('Native session must be bound once within the original budget')
             self._append('native_session', {'native_session_id': native_session_id})
 
-    def unknown_boundary(self, reason):
+    def unknown_boundary(self, reason, *, phase=None):
         with ownership.lease(self.root):
-            self._append('boundary_unknown', {'reason': reason})
+            self._append('boundary_unknown', {'reason': reason,'phase':phase})
+
+    def checkpoint(self,label,binding):
+        from . import staged_artifacts
+        with ownership.lease(self.root):
+            receipt=staged_artifacts.capture(self,label,binding)
+            self._append('checkpoint',{'label':label,'receipt_sha256':util.sha256_file(self.root/'checkpoints'/label/'receipt.json'),
+                'archive':receipt['archive'],'reason':receipt['reason']})
+            if receipt['archive'] is None:raise ValueError('Private checkpoint unavailable: '+label)
+            return receipt
 
     def unchanged_boundary(self, before, after, fence):
         with ownership.lease(self.root):
@@ -256,6 +266,9 @@ class Controller:
                 raise ValueError('No replay: one reached boundary and one additional send only')
             if (self.root/'stop-request.json').exists() or not self.remaining():
                 raise ValueError('Stopped or expired before additional input')
+            if self.contract['boundary_contract'].get('transport') == 'opencode-server-response-barrier-v1':
+                checkpoints=[e for e in events if e['kind']=='checkpoint' and e['label']=='before-additional' and e['archive']]
+                if len(checkpoints)!=1:raise ValueError('Restorable pre-input checkpoint required before dispatch')
             payload = {k: self.contract[k] for k in ('run_id', 'run_instance_id', 'workspace', 'delivery_id')}
             payload.update(native_session_id=boundaries[0]['native_session_id'],
                 contract_sha256=self.contract_sha256, additional_sha256=self.contract['additional_sha256'],
@@ -292,7 +305,9 @@ class Controller:
         with ownership.lease(self.root):
             if any(e['kind'] == 'terminal' for e in self.events()):
                 raise ValueError('Terminal evidence is immutable')
-            self._append('terminal', {'reason': reason, 'stop_confirmed': stop_confirmed is True})
+            from . import staged_artifacts
+            self._append('terminal', {'reason': reason, 'stop_confirmed': stop_confirmed is True,
+                'checkpoints':staged_artifacts.summary(self,reason)})
         return self.status()
 
     def status(self):

@@ -52,6 +52,8 @@ clean commit、承認hash、入力計画、固定資材の検証後に、空の 
 known preparation failureのreceiptと送信不存在の証拠が揃わなければ、新UUIDも発行せず保留する。
 成功・失敗・未到達を理由に送信後の取得を取り直さず、全試行資源を保持する。
 追加入力の到達状態は `normalized.staged_input` にあり、初回到達と追加未到達を区別する。
+そのcheckpointsには初期/送信前/追加後最初の変更/最終の私有archiveまたはnullと理由を残す。
+Run開始時にも承認済みepoch・partitionとdispatch journalを再照合し、直接起動による迂回を拒否する。
 この状態を集計するときは、未到達Runを分母から黙って落とさない。
 
 ## misc に渡す最小追加項目

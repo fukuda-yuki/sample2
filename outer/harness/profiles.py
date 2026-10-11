@@ -242,7 +242,8 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
             run_instance_id=manifest['run_instance_id'], task=task_id, condition=intervention,
             workspace=root/'workspace', worker_roots=[root/'inputs',root/'state'],
             initial_prompt=prompt, additional_prompt=additional, budget_seconds=condition['budget']['value'],
-            boundary_contract=staged_plan['boundary_contract'], partition=partition)
+            boundary_contract=staged_plan['boundary_contract'], partition=partition,
+            artifact_collection_policy=condition.get('collection_policy'))
         controller.bind_run(root)
         manifest = run.load_manifest(runs_dir, manifest['run_id'])
     return manifest

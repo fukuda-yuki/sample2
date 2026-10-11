@@ -141,6 +141,8 @@ class Gateway(ThreadingHTTPServer):
         self.stage_barrier = None
         self.stage_barrier_event = threading.Event()
         self.stage_busy_request = None
+        self.stage_capture_complete = False
+        self.stage_native_message_id = None
         if staged_input:
             directory = Path(staged_input)
             contract_raw = (directory/'contract.json').read_bytes()
@@ -164,7 +166,7 @@ class Gateway(ThreadingHTTPServer):
         with self.admission_lock:
             return dict(self.stage_barrier) if self.stage_barrier else None
 
-    def release_stage_barrier(self, barrier_id, native_message_id=None):
+    def release_stage_barrier(self, barrier_id, native_message_id=None, capture_complete=False):
         with self.admission_lock:
             if (not self.stage_barrier or self.stage_barrier['barrier_id'] != barrier_id
                     or self.stage_barrier_event.is_set()
@@ -172,8 +174,14 @@ class Gateway(ThreadingHTTPServer):
                 raise ValueError('No matching open response barrier')
             if self.stage_arm and not native_message_id:
                 raise ValueError('Native input acknowledgement required before releasing an armed barrier')
+            if self.stage_native_message_id and native_message_id != self.stage_native_message_id:
+                raise ValueError('Native acknowledgement changed at later boundary')
+            if capture_complete and self.stage_barrier.get('phase') != 'after_additional':
+                raise ValueError('Post-input checkpoint cannot precede an observed additional request')
             self.record('response-barriers.jsonl', {'kind':'released', 'at':now(),
-                **self.stage_barrier, 'native_message_id':native_message_id})
+                **self.stage_barrier, 'native_message_id':native_message_id,'capture_complete':capture_complete})
+            if native_message_id:self.stage_native_message_id=native_message_id
+            if capture_complete:self.stage_capture_complete=True
             self.stage_busy_request = None
             self.stage_barrier_event.set()
 
@@ -186,7 +194,9 @@ class Gateway(ThreadingHTTPServer):
             self.stage_barrier_event.clear()
             self.stage_barrier = {'barrier_id':uuid.uuid4().hex, 'request_id':event['request_id'],
                 'request_sha256':event['request_sha256'], 'tool_call_ids':ids,
-                'run_id':self.run_id, 'run_instance_id':self.session_id}
+                'run_id':self.run_id, 'run_instance_id':self.session_id,
+                'phase':'after_additional' if self.stage_first_request else 'before_additional',
+                'first_additional_request_id':self.stage_first_request}
             self.record('response-barriers.jsonl', {'kind':'held','at':now(),**self.stage_barrier})
         if (not self.stage_barrier_event.wait(self.stage['budget_seconds'])
                 or self.stopping.is_set() or self.admission_closed.is_set()):
@@ -295,7 +305,7 @@ class Handler(BaseHTTPRequestHandler):
                 if body.get('run_id')!=g.run_id or body.get('run_instance_id')!=g.session_id: raise ValueError()
                 if body.get('action')=='inspect': result=g.inspect_stage_barrier()
                 elif body.get('action')=='release':
-                    g.release_stage_barrier(body['barrier_id'],body.get('native_message_id')); result={'released':True}
+                    g.release_stage_barrier(body['barrier_id'],body.get('native_message_id'),body.get('capture_complete',False)); result={'released':True}
                 else: raise ValueError()
             except (ValueError,TypeError,OSError,KeyError):
                 self.send_error(403,'Staged barrier unavailable');return
@@ -400,7 +410,7 @@ class Handler(BaseHTTPRequestHandler):
             with g.admission_lock:
                 if g.admission_closed.is_set() or g.stopping.is_set() or g.failed.is_set():
                     raise ConnectionAbortedError()
-                if g.uses_response_barrier() and g.stage_first_request is None:
+                if g.uses_response_barrier() and not g.stage_capture_complete:
                     if g.stage_busy_request is not None:
                         raise ValueError('Concurrent request crossed the staged response fence')
                     g.stage_busy_request = rid
@@ -421,8 +431,7 @@ class Handler(BaseHTTPRequestHandler):
                             'contract_sha256': g.stage['contract_sha256'], 'first_observed': g.stage_first_request is None}
                         if g.stage_first_request is None:
                             g.stage_first_request = rid
-                            g.stage_busy_request = None
-                if g.uses_response_barrier() and g.stage_first_request is None:
+                if g.uses_response_barrier() and not g.stage_capture_complete:
                     response_fence = ResponseEndFence()
                 event['send_evidence'] = 'unknown'
                 g.record('transmission.jsonl', {**event, 'phase': 'send_intent', 'at': now()})

@@ -5,14 +5,21 @@ use docker-exec stdin: later text never enters argv, environment or worker files
 No retry is performed after any initial or additional dispatch intent.
 """
 import json
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 import subprocess
+import threading
 import time
 
 from . import live_usage, staged_input, util
 from .security import child_environment
 
 PORT = 40961
+
+
+class ObservationPending(RuntimeError):
+    """Retry only the tree observation under the same held response barrier."""
+
 API = """import json,sys,urllib.request
 v=json.load(sys.stdin)
 r=urllib.request.Request(v['url'], data=json.dumps(v['body']).encode() if v['body'] is not None else None,
@@ -23,14 +30,15 @@ CHILDREN = """import json,os,pathlib
 rows=[]
 for p in pathlib.Path('/proc').glob('[0-9]*/stat'):
  try:
-  s=p.read_text();tail=s[s.rfind(')')+2:].split();rows.append((int(p.parent.name),int(tail[1]),tail[0]))
+  s=p.read_text();tail=s[s.rfind(')')+2:].split();rows.append((int(p.parent.name),int(tail[1]),tail[0],int(tail[19])))
  except (OSError,ValueError): pass
 parents={1};found=set()
 while True:
- new={pid for pid,ppid,state in rows if ppid in parents and pid!=os.getpid() and state!='Z'}-found
+ new={pid for pid,ppid,state,start in rows if ppid in parents and pid!=os.getpid() and state!='Z'}-found
  if not new:break
  found|=new;parents|=new
-print(json.dumps(sorted(found)))
+print(json.dumps([dict(pid=pid,parent_pid=ppid,state=state,start_ticks=start,clock_ticks=os.sysconf('SC_CLK_TCK'))
+ for pid,ppid,state,start in sorted(rows) if pid in found]))
 """
 
 
@@ -117,6 +125,54 @@ class DockerTransport:
             timeout=max(.1,min(5.,self.controller.remaining())))
         return json.loads(result.stdout)
 
+    @contextmanager
+    def frozen(self):
+        """Freeze only this owned worker, including surviving tool descendants.
+
+        The gateway's response fence stays held. The original Run clock keeps
+        running, and the native server resumes before any additional API call.
+        """
+        children = self.children()
+        self.owned('worker')
+        paused = False
+        resume_done=threading.Event();resume_lock=threading.Lock();release={};watchdog=None
+        def resume(reason):
+            with resume_lock:
+                if release:return
+                item=self.runtime._owned_container(self.state,'worker')
+                if item and item['State'].get('Paused'):
+                    self.runtime.docker('unpause',self.state['worker'],timeout=5)
+                    item=self.runtime._owned_container(self.state,'worker')
+                    if item and item['State'].get('Paused'):raise RuntimeError('Owned worker resume unconfirmed')
+                release.update(reason=reason,released_at_unix=self.controller.clock(),
+                               released_at_monotonic=self.controller.monotonic(),paused=False)
+        def limit_pause(seconds):
+            if not resume_done.wait(seconds):
+                try:resume('pause_limit')
+                except Exception:pass  # finally retries; failure is never a resume ACK.
+        try:
+            self.runtime.docker('pause',self.state['worker'],timeout=max(.1,min(5.,self.controller.remaining())))
+            paused = True
+            item = self.runtime._owned_container(self.state,'worker')
+            if not item or item['State'].get('Paused') is not True:
+                raise RuntimeError('Owned worker pause unconfirmed')
+            proof = {'worker':self.state['worker'],'run_instance_id':self.state['run_instance_id'],
+                     'paused':True,'children_observed':children,'at_unix':self.controller.clock(),
+                     'paused_at_monotonic':self.controller.monotonic(),
+                     'reason':'stable_group_observation','pause_limit_seconds':min(5.,self.controller.remaining())}
+            self.controller._append('worker_paused',proof)
+            watchdog=threading.Thread(target=limit_pause,args=(proof['pause_limit_seconds'],),daemon=True)
+            watchdog.start()
+            yield proof
+        finally:
+            # Even a failed pause command can have taken effect before its
+            # timeout. Inspect exact ownership before attempting to release it.
+            resume_done.set()
+            resume('observation_finished')
+            if watchdog:watchdog.join(6)
+            if paused:self.controller._append('worker_resumed',{'worker':self.state['worker'],
+                'run_instance_id':self.state['run_instance_id'],**release})
+
     def send(self, payload, remaining):
         self.api('gateway','/control/staged-input',{k:payload[k] for k in
             ('run_id','run_instance_id','delivery_id','contract_sha256','additional_sha256','native_session_id','barrier_id')})
@@ -144,14 +200,49 @@ def observe_boundary(controller, transport, barrier, events, before, *, after_de
     ids = [p['callID'] for p in parts]
     if len(ids) != len(set(ids)): raise ValueError('Duplicate native terminal tool event')
     if set(ids) != set(barrier['tool_call_ids']): return before, False
-    if transport.children():
+    grouped = staged_input.group_boundary(contract['boundary_contract'])
+    if not grouped and transport.children():
         # A completed tool with a surviving child has no attributable stable
         # terminal snapshot. Waiting for it would silently move the boundary.
         controller.unknown_boundary('live_children_at_tool_terminal',phase='after_additional' if after_delivery else 'before_additional')
         raise ValueError('Native child lifetime ambiguous at terminal tool boundary')
-    after = staged_input.snapshot(contract['workspace'],contract['boundary_contract']['snapshot_policy'])
-    changed = before['sha256'] != after['sha256']
-    if changed and len(parts) != 1:
+    parts = sorted(parts,key=lambda p:barrier['tool_call_ids'].index(p['callID']))
+    ids = [p['callID'] for p in parts]
+    if grouped:
+        controller._append('group_terminal_observed',{'barrier_id':barrier['barrier_id'],
+            'request_id':barrier['request_id'],'tools':[{'tool_call_id':p['callID'],
+            'message_id':p['messageID'],'native_session_id':p['sessionID'],
+            'status':p['state']['status'],'native_time':p['state'].get('time'),
+            'time_reason':None if p['state'].get('time') else 'native_time_unavailable'} for p in parts]})
+    with transport.frozen() if grouped else nullcontext(None) as pause:
+        snapshot_started=controller.clock()
+        try:after = staged_input.snapshot(contract['workspace'],contract['boundary_contract']['snapshot_policy'])
+        except OSError as error:
+            if not grouped:raise
+            raise ObservationPending('Implementation tree temporarily unavailable') from error
+        if grouped:
+            # If the pause limit released the worker during this tree read,
+            # re-observe in the same barrier, never infer a stable boundary.
+            if controller.monotonic()-pause['paused_at_monotonic']>=pause.get('pause_limit_seconds',5.):
+                raise ObservationPending('Implementation observation exceeded owned pause interval')
+            controller._append('implementation_observed',{'barrier_id':barrier['barrier_id'],
+                'started_at_unix':snapshot_started,'ended_at_unix':controller.clock(),
+                'before_sha256':before['sha256'],'after_sha256':after['sha256']})
+        changed = before['sha256'] != after['sha256']
+        if changed and grouped:
+            fence={**barrier,'native_session_id':session,'next_request_blocked':True,'active_tools':[],
+                   'completed_tool_call_ids':ids,'worker_pause':pause}
+            binding={'fence':fence,'native_session_id':session,'before':before,'after':after,
+                     'tools':[{'tool_call_id':p['callID'],'message_id':p['messageID'],
+                               'tool_status':p['state']['status']} for p in parts]}
+            if after_delivery:
+                if barrier.get('phase')!='after_additional' or not barrier.get('first_additional_request_id'):
+                    raise ValueError('Post-input checkpoint lacks observed request binding')
+                controller.checkpoint('after-additional',binding)
+            else:
+                controller.boundary(parts,before,after,fence)
+                controller.checkpoint('before-additional',binding)
+    if changed and not grouped and len(parts) != 1:
         # Simultaneous tools cannot be individually attributed by a global file
         # diff. Retain this ambiguity instead of moving to a later boundary.
         controller.unknown_boundary('parallel_mutation',phase='after_additional' if after_delivery else 'before_additional')
@@ -160,17 +251,19 @@ def observe_boundary(controller, transport, barrier, events, before, *, after_de
         if after_delivery:
             if barrier.get('phase')!='after_additional' or not barrier.get('first_additional_request_id'):
                 raise ValueError('Post-input checkpoint lacks observed request binding')
-            controller.checkpoint('after-additional',{'fence':barrier,'native_session_id':session,
-                'tool_call_id':parts[0]['callID'],'message_id':parts[0]['messageID'],
-                'before':before,'after':after,'tool_status':parts[0]['state']['status']})
+            if not grouped:
+                controller.checkpoint('after-additional',{'fence':barrier,'native_session_id':session,
+                    'tool_call_id':parts[0]['callID'],'message_id':parts[0]['messageID'],
+                    'before':before,'after':after,'tool_status':parts[0]['state']['status']})
             ack=next(e for e in controller.events() if e['kind']=='acknowledged')
             transport.release(barrier['barrier_id'],ack['native_message_id'],capture_complete=True)
             return after,True
-        controller.boundary(parts[0],before,after,{**barrier,'native_session_id':session,
-            'next_request_blocked':True,'active_tools':[],'children_exited':True,
-            'completed_tool_call_ids':ids})
-        controller.checkpoint('before-additional',{'fence':barrier,'native_session_id':session,
-            'tool_call_id':parts[0]['callID'],'message_id':parts[0]['messageID'],'before':before,'after':after})
+        if not grouped:
+            controller.boundary(parts[0],before,after,{**barrier,'native_session_id':session,
+                'next_request_blocked':True,'active_tools':[],'children_exited':True,
+                'completed_tool_call_ids':ids})
+            controller.checkpoint('before-additional',{'fence':barrier,'native_session_id':session,
+                'tool_call_id':parts[0]['callID'],'message_id':parts[0]['messageID'],'before':before,'after':after})
         controller.dispatch(transport.send)
         acks=[e for e in controller.events() if e['kind']=='acknowledged']
         if len(acks)!=1: raise RuntimeError('Additional delivery uncertain; retain and stop without resend')
@@ -204,11 +297,14 @@ def execute(root, state, controller, condition, runtime, *, transport=None):
     with (root/'evidence/agent.jsonl').open('xb') as output, (root/'inputs/prompt.txt').open('rb') as prompt:
         client=subprocess.Popen(command,stdin=prompt,stdout=output,stderr=subprocess.STDOUT,env=child_environment())
         try:
-            delivered=False;captured=False;handled=set()
+            delivered=False;captured=False;handled=set();waiting=set()
             while client.poll() is None:
                 if (root/'stop-request.json').exists():
                     controller.stop('operator_stop');return None,'operator_stop'
-                if not controller.remaining(): return None,'timeout'
+                if not controller.remaining():
+                    if waiting-handled:controller.unknown_boundary('terminal_or_snapshot_unconfirmed_at_deadline',
+                        phase='after_additional' if delivered else 'before_additional')
+                    return None,'timeout'
                 if (root/'usage/raw/failure.jsonl').exists(): return None,'provider_failure'
                 if not captured:
                     barrier=transport.barrier()
@@ -217,10 +313,15 @@ def execute(root, state, controller, condition, runtime, *, transport=None):
                         # A writer may currently be halfway through the last line.
                         if not errors:
                             prior=before
-                            before,reached=observe_boundary(controller,transport,barrier,events,before,after_delivery=delivered)
+                            try:before,reached=observe_boundary(controller,transport,barrier,events,before,after_delivery=delivered)
+                            except ObservationPending:reached=False
                             if delivered:captured=reached
                             else:delivered=reached
                             if reached or before is not prior: handled.add(barrier['barrier_id'])
+                            elif barrier['barrier_id'] not in waiting:
+                                controller._append('boundary_wait',{'barrier_id':barrier['barrier_id'],
+                                    'reason':'terminal_or_snapshot_pending','phase':barrier.get('phase')})
+                                waiting.add(barrier['barrier_id'])
                 time.sleep(.05)
             return client.returncode,'completed' if client.returncode==0 else 'agent_error'
         finally:

@@ -55,6 +55,24 @@ class NetworkCleanupTests(unittest.TestCase):
         with patch.object(runtime, 'docker', side_effect=self.docker): r = runtime.cleanup_network(self.root)
         self.assertFalse(r['confirmed']); self.assertEqual(self.removed, [])
 
+    def test_disappearing_foreign_run_is_relisted_but_unknown_inspection_still_holds(self):
+        self.containers=[{'id':'other','name':'/another-run','state':{'Running':False},'labels':{},'networks':{}}]
+        failed=False
+        def race(*args,**kwargs):
+            nonlocal failed
+            if args[0]=='inspect' and not failed:
+                failed=True;self.containers=[]
+                raise runtime.DockerCommandError('inspect',RuntimeError('synthetic concurrent removal'))
+            return self.docker(*args,**kwargs)
+        with patch.object(runtime,'docker',side_effect=race):result=runtime.cleanup_network(self.root)
+        self.assertTrue(result['confirmed']);self.assertEqual(len(result['container_observation_retries']),1)
+        self.present=True;self.removed=[];self.containers=[{}]
+        def outage(*args,**kwargs):
+            if args[0]=='inspect':raise runtime.DockerCommandError('inspect',RuntimeError('synthetic outage'))
+            return self.docker(*args,**kwargs)
+        with patch.object(runtime,'docker',side_effect=outage):result=runtime.cleanup_network(self.root)
+        self.assertFalse(result['confirmed']);self.assertEqual(self.removed,[])
+
     def test_foreign_network_or_active_endpoint_is_never_removed(self):
         for field, value in [('Id','replaced-id'), ('Internal',False), ('Containers',{'foreign':{}}),
                              ('Labels',{'sample2.run':'run','sample2.instance':'other-instance'})]:

@@ -235,6 +235,37 @@ class CampaignTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'one condition'):
             fresh.validate(self.plan, REPO)
 
+    def test_single_condition_four_runs_and_one_evaluator_explicit(self):
+        self.plan['kind']=fresh.SINGLE_KIND
+        self.plan['assignments'][0]['cases']=self.plan['assignments'][0]['cases'][:1]
+        self.plan['bounds']['max_runs']=1;self.plan['pair_concurrency']=4
+        config=self.initialize()
+        self.assertEqual(config['policy']['active_model_runs'],4)
+        self.assertEqual(config['policy']['evaluation_workers'],1)
+        for lanes in (0,5,True):
+            with self.assertRaises(ValueError):fresh.validate(dict(self.plan,pair_concurrency=lanes),REPO)
+
+    def test_resource_origin_is_measured_and_genesis_bound_without_adopted_slots(self):
+        self.plan['kind']=fresh.SINGLE_KIND
+        self.plan['assignments'][0]['cases']=self.plan['assignments'][0]['cases'][:1]
+        self.plan['bounds']['max_runs']=1
+        path=self.root/'technical/manifest.json'
+        util.write_new_json(path,dict(run_instance_id='technical',stop_confirmed=True,
+            network_cleanup={'confirmed':True},started_at='2026-10-01T00:00:00+00:00',
+            ended_at='2026-10-01T00:00:02+00:00',duration_seconds=2))
+        util.append_line(path.parent/'usage/raw/started.jsonl',dict(request_id='unknown'))
+        origin=self.root/'technical-origin.json'
+        util.write_new_json(origin,dict(kind='technical_acceptance_resources_v1',
+            started_at='2026-10-01T00:00:00+00:00',runs=[dict(manifest=live_pilot.reference(path),
+                raw_usage=util.tree_hashes(path.parent/'usage/raw'))]))
+        self.plan['resource_origin']=live_pilot.reference(origin)
+        config=self.initialize();fresh.verify_config(config,REPO)
+        self.assertEqual(config['usage']['requests'],1);self.assertEqual(config['accepted_slots'],[])
+        self.assertEqual(config['reserved_pair_attempts'],0)
+        self.assertEqual(config['started_at'],'2026-10-01T00:00:00+00:00')
+        util.append_line(path.parent/'usage/raw/events.jsonl',dict(request_id='unknown',usage=None))
+        with self.assertRaises(ValueError):fresh.verify_config(config,REPO)
+
 
     def test_staged_partition_requires_exact_request_and_explicit_zero_postdispatch_retry(self):
         from outer.harness import staged_input
@@ -257,6 +288,10 @@ class CampaignTests(unittest.TestCase):
         for retry in (dict(known_pre_dispatch_retries=2,after_dispatch_retries=0),
                       dict(known_pre_dispatch_retries=1,after_dispatch_retries=1)):
             with self.assertRaises(ValueError):fresh.validate(dict(self.plan,staged_retry=retry),REPO)
+        retry=dict(retry_budget='shared_reserved_attempts',technical_failure_policy='sealed_infrastructure_failure_v1')
+        fresh.validate(dict(self.plan,staged_retry=retry),REPO)
+        with self.assertRaises(ValueError):
+            fresh.validate(dict(self.plan,staged_retry=dict(retry,technical_failure_policy='any_failure')),REPO)
         partition['sections'][0]['text']+='unapproved requirement'
         util.write_json_atomic(path,partition)
         with self.assertRaises(ValueError):fresh.validate(self.plan,REPO)
@@ -274,6 +309,7 @@ class CampaignTests(unittest.TestCase):
         util.write_new_json(batch/'pipeline-acquisition.json',saved)
         attempts=[dict(slot=1,record=str(record))]
         self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+
         util.write_new_json(batch/'staged-preparation-failure.json',dict(kind='known_pre_dispatch_preparation_failure',binding=binding))
         self.assertEqual(([1],set()),pipeline.pending_acquisition_slots(config,attempts,set()))
         self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts*2,set()))
@@ -287,6 +323,52 @@ class CampaignTests(unittest.TestCase):
         util.write_json_atomic(batch/'pipeline-acquisition.json',saved)
         util.write_new_json(batch/'synthetic-run/manifest.json',dict(started_at='synthetic-start'))
         self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+
+    def test_shared_retry_uses_fresh_uuids_past_three_failures_and_retains_all_usage(self):
+        from outer.harness import staged_input
+        self.plan.update(kind=fresh.SINGLE_KIND,pair_concurrency=4)
+        self.plan['bounds'].update(max_runs=1,max_pair_attempts=5)
+        case=self.plan['assignments'][0]['cases'][0]
+        case.update(condition='staged-explore',run_id=run.run_id_for(case['task'],'staged-explore',1))
+        self.plan['assignments'][0]['cases']=[case]
+        request=profiles.task_profile(REPO,case['task'],self.plan['task_revision'])['migration_request']
+        policy={'suffixes':['.cs'],'excluded_directories':['obj','bin']};at=len(request)//2
+        partition=dict(kind='staged_request_partition_v1',request_sha256=util.sha256_bytes(request.encode()),
+            sections=[dict(id='a',text=request[:at]),dict(id='b',text=request[at:])],initial_ids=['a'],additional_ids=['b'],
+            boundary_contract=dict(transport='opencode-server-response-barrier-v1',boundary_policy=staged_input.GROUP_BOUNDARY,
+                snapshot_policy=policy,snapshot_policy_sha256=staged_input.digest(policy)))
+        path=self.root/'partition.json';util.write_new_json(path,partition)
+        self.plan.update(staged_inputs={case['task']:live_pilot.reference(path)},
+            staged_retry=dict(technical_failure_policy='sealed_infrastructure_failure_v1',retry_budget='shared_reserved_attempts'))
+        config=self.initialize();self.setup_engine()
+        normal=pipeline.live_pilot.execute_owned_pair_scope.side_effect
+        def acquire(repo,epoch,phase_path,**kwargs):
+            result=normal(repo,epoch,phase_path,**kwargs)
+            if self.calls<=4:
+                batch=Path(phase_path).parent;phase=util.read_json(phase_path);binding=phase['assignments'][0]['cases'][0]
+                root=batch/binding['run_id'];manifest=util.read_json(root/'manifest.json')
+                util.write_json_atomic(root/'manifest.json',dict(manifest,end_reason='provider_failure',
+                    stop_confirmed=True,network_cleanup={'confirmed':True}))
+                events=root/'usage/raw/events.jsonl';events.unlink()
+                util.append_line(events,dict(run_id=binding['run_id'],session_id=binding['run_instance_id'],
+                    request_id='r',status='provider_error',http_status=503,usage=None))
+                util.append_line(root/'usage/raw/failure.jsonl',dict(request_id='r'))
+                journal=batch/'_control/pair-journal.jsonl'
+                pipeline.pair_execution.append(journal,dict(kind='pair_reserved',assignments=[binding]))
+                pipeline.pair_execution.append(journal,dict(kind='dispatch',**binding))
+                return dict(reason='technical_failure')
+            return result
+        pipeline.live_pilot.execute_owned_pair_scope.side_effect=acquire
+        config_path=Path(config['root'])/'config.json';pipeline.run_pipeline(REPO,config_path)
+        self.assertEqual(self.calls,5);self.assertEqual(len(set(self.uuids)),5)
+        events=pipeline.pair_execution.events(Path(config['root'])/'events.jsonl')
+        final=events[-1];self.assertEqual(final['kind'],'complete')
+        self.assertEqual(final['usage']['requests'],5);self.assertEqual(final['usage']['observed_tokens'],5)
+        self.assertEqual(len(final['usage']['unknown_usage_requests']),4)
+        self.assertEqual(final['usage']['accumulated_run_seconds'],10)
+        self.assertEqual([e['quality'] for e in events if e['kind']=='accepted'],[{'staged-explore':0}])
+        pipeline.run_pipeline(REPO,config_path);self.assertEqual(self.calls,5)
+
 
 
 if __name__ == '__main__': unittest.main()

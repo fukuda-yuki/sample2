@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import threading
 import time
 
@@ -611,10 +612,12 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
             manifest=profiles.create(repo,batch,binding['task'],binding['condition'],binding['attempt'],
                 phase['runtime'],run_instance_id=binding['run_instance_id'],assignment=binding,
                 task_revision=plan['task_revision'], **model_options)
-        except Exception:
+        except Exception as exc:
             if 'staged_inputs' in plan:
                 util.write_new_json(batch/'staged-preparation-failure.json',
-                    dict(binding=binding,kind='known_pre_dispatch_preparation_failure',at=run.now()))
+                    dict(binding=binding,kind='known_pre_dispatch_preparation_failure',at=run.now(),
+                         technical_retry_classification='preparation_io_failure' if isinstance(exc,
+                             (OSError,subprocess.TimeoutExpired,runtime.DockerCommandError)) else 'unclassified_preparation_failure'))
             raise
         attempt_path = batch/'pipeline-attempt.json'
         if attempt_path.is_file():

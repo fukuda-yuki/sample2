@@ -23,8 +23,18 @@ def command(args, *, cwd=None, timeout=120, check=True):
     return result
 
 
+class DockerCommandError(RuntimeError):
+    """Typed infrastructure evidence; never classify arbitrary error prose."""
+    def __init__(self, operation, error):
+        super().__init__(str(error))
+        self.operation = operation
+        self.error_type = type(error).__name__
+
+
 def docker(*args, **kwargs):
-    return command(['docker', *map(str, args)], **kwargs)
+    try: return command(['docker', *map(str, args)], **kwargs)
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+        raise DockerCommandError(str(args[0]),error) from error
 
 
 def image_id(name):
@@ -262,6 +272,8 @@ def _stop_owned_role(state, role):
     name = state[role]
     item = _owned_container(state, role)
     if item:
+        if item['State'].get('Paused'):
+            docker('unpause',name,timeout=10,check=False)
         docker('stop', '--time', '10', name, timeout=40, check=False)
         item = _owned_container(state, role)
         return bool(item and not item['State']['Running'])
@@ -372,11 +384,20 @@ def cleanup_network(root, *, evidence_dir=None):
         networks = docker('network', 'ls', '--format', '{{json .}}', timeout=30)
         present = [json.loads(line) for line in networks.stdout.splitlines() if line.strip()]
         found = any(n['Name'] == name for n in present)
-        ids = docker('ps', '-aq', timeout=30).stdout.split()
         containers = []
-        if ids:
+        for observation in range(3):
+            ids = docker('ps', '-aq', timeout=30).stdout.split()
+            if not ids:break
             fmt = '{"id":{{json .Id}},"name":{{json .Name}},"state":{{json .State}},"labels":{{json .Config.Labels}},"networks":{{json .NetworkSettings.Networks}}}'
-            containers = [json.loads(line) for line in docker('inspect', *ids, '--format', fmt).stdout.splitlines() if line.strip()]
+            try:
+                containers = [json.loads(line) for line in docker('inspect', *ids, '--format', fmt).stdout.splitlines() if line.strip()]
+                break
+            except DockerCommandError:
+                # A concurrent owned Run may remove its stopped containers
+                # between ps and inspect. Re-list; never infer absent ownership
+                # from failed inspection or use its partial stdout.
+                receipt.setdefault('container_observation_retries',[]).append(dict(at=run.now(),attempt=observation+1))
+                if observation==2:raise
         expected = {state['worker'], state['gateway']}
         for item in containers:
             owned = item['name'].lstrip('/') in expected
@@ -492,6 +513,7 @@ def _start(repo, runs_dir, run_id):
     exit_code = None
     gateway_process = None
     worker_process = None
+    infrastructure_phase = 'allocation'
     try:
         if stage: stage.start()
         state['network_id'] = docker('network', 'create', '--internal', '--label', 'sample2.run=' + run_id,
@@ -554,6 +576,7 @@ def _start(repo, runs_dir, run_id):
                 worker_process = subprocess.Popen(['docker', 'start', '-a', state['worker']],
                     env=child_environment(), stdout=log, stderr=subprocess.STDOUT)
                 if stage:
+                    infrastructure_phase = 'native_execution'
                     exit_code, reason = staged_runtime.execute(root,state,stage,condition,sys.modules[__name__])
                 else:
                     while worker_process.poll() is None:
@@ -582,12 +605,25 @@ def _start(repo, runs_dir, run_id):
             if (root / 'usage/raw/failure.jsonl').exists():
                 reason = 'provider_failure'
     except Exception as exc:
+        if (root/'stop-request.json').exists():reason='operator_stop'
+        if stage and isinstance(exc,DockerCommandError) and infrastructure_phase == 'allocation':
+            util.write_new_json(root/'evidence/infrastructure-failure.json',dict(
+                kind='owned_docker_allocation_failure_v1',run_id=run_id,run_instance_id=manifest['run_instance_id'],
+                phase=infrastructure_phase,operation=exc.operation,error_type=exc.error_type,at=run.now()))
         if stage:
             try:
                 if any(e['kind']=='boundary_unknown' for e in stage.events()): reason='boundary_unknown'
             except (OSError,ValueError): pass
         util.write_new_json(root / 'evidence/runtime-error.json', {'type': type(exc).__name__, 'message': str(exc)})
     finally:
+        if stage and reason=='agent_error':
+            try:
+                item=_owned_container(state,'worker')
+                if item and item['State'].get('OOMKilled') is True:
+                    util.write_new_json(root/'evidence/infrastructure-failure.json',dict(
+                        kind='owned_worker_oom_v1',run_id=run_id,run_instance_id=manifest['run_instance_id'],
+                        worker=state['worker'],exit_code=item['State'].get('ExitCode'),oom_killed=True,at=run.now()))
+            except (OSError,RuntimeError,ValueError):pass  # No proof means no automatic retry.
         try:
             stopped = stop_owned(root)
         except Exception as exc:

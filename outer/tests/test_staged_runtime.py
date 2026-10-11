@@ -1,5 +1,6 @@
 """Boundary adapter fixtures: no Docker process, credentials or model calls."""
 import copy
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import shutil
@@ -94,6 +95,95 @@ class BoundaryTests(StageFixture):
             owner._owned_container.return_value['Mounts'][0]['Source']=str(self.root/'foreign')
             with self.assertRaises(ValueError):transport.api('worker','/session')
             self.assertEqual(1,child.call_count)
+
+class GroupBoundaryTests(StageFixture):
+    setup_boundary=BoundaryTests.setup_boundary
+    observe=BoundaryTests.observe
+    def setup_group(self, ids=('a','b')):
+        self.setup_boundary(ids,children=[123])
+        self.controller.contract['boundary_contract'].update(boundary_policy=staged.GROUP_BOUNDARY,
+            transport='opencode-server-response-barrier-v1')
+        self.paused=False
+        @contextmanager
+        def freeze():
+            self.paused=True
+            try:yield {'paused':True,'run_instance_id':'instance','children_observed':[123],
+                       'at_unix':self.controller.clock(),'paused_at_monotonic':self.controller.monotonic(),'pause_limit_seconds':5.}
+            finally:self.paused=False
+        self.transport.frozen=freeze
+        def send(*args):
+            self.assertFalse(self.paused,'Native API must resume before additional input')
+            return self.ack(*args)
+        self.transport.send.side_effect=send
+
+    def test_parallel_error_and_live_children_record_group_and_continue_once(self):
+        self.setup_group();self.events[1]['part']['state']['status']='error'
+        (self.root/'workspace/Program.cs').write_text('synthetic group mutation')
+        self.assertTrue(self.observe()[1]);self.transport.send.assert_called_once()
+        boundary=next(e for e in self.controller.events() if e['kind']=='boundary_observed')
+        self.assertEqual([t['tool_call_id'] for t in boundary['tools']],['a','b'])
+        self.assertEqual(boundary['attribution'],'response_tool_group')
+        self.assertNotIn('tool_call_id',boundary)
+        self.assertEqual(boundary['fence']['worker_pause']['children_observed'],[123])
+        with self.assertRaises(ValueError):self.observe()
+        self.transport.send.assert_called_once()
+
+    def test_missing_archive_is_observation_missingness_not_delivery_failure(self):
+        self.setup_group();(self.root/'workspace/Program.cs').write_text('synthetic group mutation')
+        self.controller.contract['artifact_collection_policy']=util.STATIC_DB_COLLECTION_POLICY
+        (self.root/'workspace/example.sqlite').write_bytes(b'synthetic database')
+        (self.root/'workspace/example.sqlite-wal').write_bytes(b'unsealed database sidecar')
+        self.assertTrue(self.observe()[1]);self.transport.send.assert_called_once()
+        receipt=util.read_json(self.controller.root/'checkpoints/before-additional/receipt.json')
+        self.assertIsNone(receipt['archive']);self.assertTrue(receipt['reason'].startswith('checkpoint_failed:'))
+        self.assertEqual((self.root/'workspace/example.sqlite-wal').read_bytes(),b'unsealed database sidecar')
+
+    def test_stop_during_pause_cannot_send_after_resume(self):
+        self.setup_group();(self.root/'workspace/Program.cs').write_text('synthetic group mutation')
+        original=self.controller.checkpoint
+        def stop(*args):
+            result=original(*args);self.controller.stop('synthetic stop');return result
+        with patch.object(self.controller,'checkpoint',side_effect=stop),self.assertRaisesRegex(ValueError,'Stopped'):
+            self.observe()
+        self.assertFalse(self.paused);self.transport.send.assert_not_called();self.transport.release.assert_not_called()
+
+    def test_owned_pause_failure_after_command_still_unpauses(self):
+        self.setup_group();owner=Mock();state={'worker':'owned','run_instance_id':'instance'}
+        owner._owned_container.return_value={'State':{'Running':True,'Paused':True}}
+        transport=staged_runtime.DockerTransport(self.root,state,self.controller,owner,'toy')
+        transport.children=Mock(return_value=[123]);transport.owned=Mock()
+        def docker(op,*args,**kwargs):
+            if op=='pause':raise TimeoutError('synthetic command timeout after pause')
+            owner._owned_container.return_value['State']['Paused']=False
+        owner.docker.side_effect=docker
+        with self.assertRaises(TimeoutError):
+            with transport.frozen():self.fail('Unconfirmed pause must not observe')
+        self.assertEqual([c.args[0] for c in owner.docker.call_args_list],['pause','unpause'])
+
+    def test_pause_time_limit_releases_owned_worker_during_slow_copy(self):
+        self.setup_group();owner=Mock();state={'worker':'owned','run_instance_id':'instance'}
+        owner._owned_container.return_value={'State':{'Running':True,'Paused':False}}
+        transport=staged_runtime.DockerTransport(self.root,state,self.controller,owner,'toy')
+        transport.children=Mock(return_value=[]);transport.owned=Mock()
+        import threading
+        resumed=threading.Event()
+        def docker(op,*args,**kwargs):
+            owner._owned_container.return_value['State']['Paused']=op=='pause'
+            if op=='unpause':resumed.set()
+        owner.docker.side_effect=docker
+        with patch.object(self.controller,'remaining',return_value=.02):
+            with transport.frozen():
+                self.assertTrue(resumed.wait(2))
+        event=self.controller.events()[-1]
+        self.assertEqual(event['kind'],'worker_resumed');self.assertEqual(event['reason'],'pause_limit')
+        self.assertFalse(event['paused'])
+
+    def test_tree_observation_failure_unpauses_without_sending_or_releasing_barrier(self):
+        self.setup_group()
+        with patch.object(staged,'snapshot',side_effect=OSError()),self.assertRaises(staged_runtime.ObservationPending):
+            self.observe()
+        self.assertFalse(self.paused);self.transport.send.assert_not_called();self.transport.release.assert_not_called()
+
 
 class StreamFenceTests(unittest.TestCase):
     def test_every_chunk_split_preserves_bytes_and_withholds_terminal_marker(self):

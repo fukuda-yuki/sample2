@@ -21,7 +21,7 @@ epoch、承認文言、UUID、累積 usage の持込みを拒否する。新し�
 | 計画項目 | 境界 |
 | --- | --- |
 | `kind`, `campaign_id`, `output_root` | 2条件は `approved_acquisition_campaign_v1`、1条件は `approved_single_condition_campaign_v1`。未使用の絶対保存先。source/protected root と祖先・子孫関係を持たない |
-| `pair_count`, `pair_concurrency` | 正の明示件数、既存 engine の1または2ペア並列。評価 worker は既存の1本 |
+| `pair_count`, `pair_concurrency` | 正の明示件数。1条件は1〜4割付、2条件は従来の1〜2ペア並列、合計最大4 Run。評価 worker は1本 |
 | `assignments` | 1始まり連続 `pair` と kind に一致する数の `cases`。case は `task`, `condition`, `pair`, `slot`, `attempt`, `run_id`。2条件は同一task・異なる2条件。1条件は全割付で1つの条件名を使用し、各割付のslotは1。UUIDは各epochで新規生成 |
 | `runtime_by_task`, `task_revision`, `settings` | 指定された既存profileとの一致。既存Go endpointと balance OFF・paid fallback OFF を保持。新入口だけが承認planのmodel IDを `profiles.resolve` へ渡し、指定profileとの一致を要求する。旧呼出しのDeepSeek固定は保持。新モデルprofileの作成・取得は行わず、万能providerへ拡張しない |
 | `bounds` | `live_pilot.BOUNDS` の全キーと `max_pair_attempts`。全て正の整数。max_pairs/max_runs は件数と一致。run/provider秒はruntime profileと一致 |
@@ -30,7 +30,7 @@ epoch、承認文言、UUID、累積 usage の持込みを拒否する。新し�
 clean commit、承認hash、入力計画、固定資材の検証後に、空の accepted/attempted ledger、
 ゼロusage、新しい時間原点・pipeline UUID と config、そのhashを固定するgenesis receiptを作る。初期化時にモデル・評価器を起動しない。
 `run` は承認と genesis を再照合する。実送信には別途その計画の有効な実行指示が必要。
-今回のコード修正の依頼は実送信許可ではない。
+有効なユーザー指示は継承する。実行準備や実装検証だけで未実施の操作を完了扱いにしない。
 
 1条件でも既存の保存上の `pair_count` / `pair` / `max_pairs` / `max_pair_attempts` は
 割付枠を数える。対照Runは生成しない。`max_runs = pair_count`、同時Run数は
@@ -48,13 +48,35 @@ clean commit、承認hash、入力計画、固定資材の検証後に、空の 
 `staged_inputs` は全taskのpartitionファイルへのpath/hash参照。元の最終要求、section全文、
 初回/追加section ID、境界transportとsnapshot policyを固定し、workerへ渡すのは初回分だけ。
 公開リポジトリへ実partition本文や承認receiptを追加しない。
-`staged_retry` は `known_pre_dispatch_retries`（0または1）と `after_dispatch_retries`（0）の明示値。
-known preparation failureのreceiptと送信不存在の証拠が揃わなければ、新UUIDも発行せず保留する。
-成功・失敗・未到達を理由に送信後の取得を取り直さず、全試行資源を保持する。
+旧 `staged_retry` の `known_pre_dispatch_retries`（0または1）と `after_dispatch_retries`（0）は再開互換として保持する。
+新しい共有枠は次の2項目を明示する。
+
+```json
+{"technical_failure_policy":"sealed_infrastructure_failure_v1","retry_budget":"shared_reserved_attempts"}
+```
+
+新policyは割付ごとの回数制限を加えず、全予約を `max_pair_attempts` と累積資源上限で制限する。
+未試行割付を先に投入し、残る予約枠だけ使う。既知の準備失敗と送信不存在、または閉じた原記録で確認できる
+provider HTTP429/5xx・通信例外、送信前のtyped Docker割当障害、所有workerのDocker OOM証拠を再試行候補にする。
+任意の例外文言・品質・build失敗・普通の終了/timeout・追加未到達・中間archive欠測を理由にしない。
+認証エラー、実際の別model応答、所有権不明、原因不明は自動分類しない。
+同一Runへの追加文再送は禁止したまま、新UUIDで初回から実行する。全試行を保存し、旧Runの停止・network回収を再確認する。
+`technical-retry-evidence.json` は原因、Run UUID、原証跡のinventory、usage/欠測を封印し、変更があれば保留する。
+取得済みartifactの評価復旧を先に試し、最初に技術採用できたattemptだけを採用する。既存2条件の再開規則は変えない。
 追加入力の到達状態は `normalized.staged_input` にあり、初回到達と追加未到達を区別する。
 そのcheckpointsには初期/送信前/追加後最初の変更/最終の私有archiveまたはnullと理由を残す。
 Run開始時にも承認済みepoch・partitionとdispatch journalを再照合し、直接起動による迂回を拒否する。
 この状態を集計するときは、未到達Runを分母から黙って落とさない。
+
+## 受入Runを含む共有資源原点
+
+任意の `resource_origin` に、私有receiptへのpath/hash参照を指定できる。receiptは
+`kind: technical_acceptance_resources_v1`、実際の `started_at`、`runs` を持つ。
+各Runは `manifest` のpath/hashと `raw_usage` のtree hashを明示する。停止・network回収済みで、
+UUIDの重複がなく、raw usageとmanifestが不変であることを検証し、既知資源と欠測を通常経路で再集計する。
+その起点からcampaign wallを数え、受入分のrequests/token/run時間を累積上限へ含める。
+受入Runを科学的割付・採用slot・本取得予約数へ足さず、過去の承認・採用判断も継承しない。
+receipt、実Run数、開始時刻、上限値は自動作成・推測せず、凍結計画に結び付く実測入力を必要とする。
 
 ## misc に渡す最小追加項目
 

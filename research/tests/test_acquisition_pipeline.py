@@ -11,6 +11,20 @@ from research import acquisition_readiness as readiness
 
 
 class PipelineTests(unittest.TestCase):
+    def test_four_single_run_acquisitions_overlap_one_evaluator(self):
+        barrier=threading.Barrier(4);lock=threading.Lock();active=0;peak=0;scored=[]
+        def acquire(n):
+            barrier.wait(timeout=3)
+            return {'acquired':True}
+        def evaluate(n,result):
+            nonlocal active,peak
+            with lock:active+=1;peak=max(peak,active)
+            time.sleep(.01)
+            with lock:active-=1;scored.append(n)
+            return {}
+        pipeline.dispatch_pipeline(range(4),acquire,evaluate,lambda *_:None,lambda *_:None,capacity=4)
+        self.assertEqual(sorted(scored),list(range(4)));self.assertEqual(peak,1)
+
     def test_next_acquisition_overlaps_previous_evaluation_and_limits_hold(self):
         evaluation_started = threading.Event()
         third_started = threading.Event()

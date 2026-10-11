@@ -12,6 +12,12 @@ import uuid
 
 from . import ownership, util
 
+GROUP_BOUNDARY = 'response_tool_group_pause_v1'
+
+
+def group_boundary(contract):
+    return contract.get('boundary_policy') == GROUP_BOUNDARY
+
 
 def digest(value):
     return util.sha256_bytes(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode())
@@ -40,7 +46,9 @@ def request_partition(request, plan):
             or plan['request_sha256'] != util.sha256_bytes(request.encode())
             or ''.join(section['text'] for section in plan['sections']) != request
             or plan['boundary_contract'].get('transport') != 'opencode-server-response-barrier-v1'
-            or set(plan['boundary_contract']) != {'transport','snapshot_policy','snapshot_policy_sha256'}
+            or (set(plan['boundary_contract']) != {'transport','snapshot_policy','snapshot_policy_sha256'}
+                and (set(plan['boundary_contract']) != {'transport','snapshot_policy','snapshot_policy_sha256','boundary_policy'}
+                     or not group_boundary(plan['boundary_contract'])))
             or digest(plan['boundary_contract']['snapshot_policy']) != plan['boundary_contract']['snapshot_policy_sha256']):
         raise ValueError('Frozen original request, exhaustive sections and explicit transport/snapshot policy required')
     validate_snapshot_policy(plan['boundary_contract']['snapshot_policy'])
@@ -210,7 +218,8 @@ class Controller:
             receipt=staged_artifacts.capture(self,label,binding)
             self._append('checkpoint',{'label':label,'receipt_sha256':util.sha256_file(self.root/'checkpoints'/label/'receipt.json'),
                 'archive':receipt['archive'],'reason':receipt['reason']})
-            if receipt['archive'] is None:raise ValueError('Private checkpoint unavailable: '+label)
+            if receipt['archive'] is None and not group_boundary(self.contract['boundary_contract']):
+                raise ValueError('Private checkpoint unavailable: '+label)
             return receipt
 
     def unchanged_boundary(self, before, after, fence):
@@ -223,22 +232,29 @@ class Controller:
         with ownership.lease(self.root):
             events = self.events()
             session = next((e['native_session_id'] for e in events if e['kind'] == 'native_session'), None)
+            grouped = group_boundary(self.contract['boundary_contract'])
+            tools = tool if grouped else [tool]
             if (any(e['kind'] in ('boundary_observed', 'boundary_unknown', 'send_intent', 'terminal') for e in events)
                     or (self.root/'stop-request.json').exists() or not self.remaining()):
                 raise ValueError('Boundary closed, stopped or out of budget')
-            if (not session or tool.get('sessionID') != session or tool.get('state', {}).get('status') not in ('completed', 'error')
-                    or not tool.get('callID') or not tool.get('messageID')
+            if (not session or not tools or any(t.get('sessionID') != session
+                    or t.get('state', {}).get('status') not in ('completed', 'error')
+                    or not t.get('callID') or not t.get('messageID') for t in tools)
                     or fence.get('native_session_id') != session or fence.get('run_instance_id') != self.contract['run_instance_id']
                     or fence.get('next_request_blocked') is not True or fence.get('active_tools') != []
-                    or fence.get('children_exited') is not True or not fence.get('barrier_id')):
+                    or (not grouped and fence.get('children_exited') is not True) or not fence.get('barrier_id')):
                 self._append('boundary_unknown', {'reason': 'terminal_or_fence_unverified'})
                 raise ValueError('Owned terminal tool and pre-request quiescence fence required')
             if self.contract['boundary_contract'].get('transport') == 'opencode-server-response-barrier-v1':
-                if (fence.get('tool_call_ids') != [tool['callID']]
-                        or fence.get('completed_tool_call_ids') != [tool['callID']]
+                if (fence.get('tool_call_ids') != [t['callID'] for t in tools]
+                        or fence.get('completed_tool_call_ids') != [t['callID'] for t in tools]
+                        or len({t['callID'] for t in tools}) != len(tools)
                         or not fence.get('request_id') or not fence.get('request_sha256')):
                     self._append('boundary_unknown', {'reason': 'response_tool_identity_unverified'})
                     raise ValueError('Single attributed response tool required')
+            if grouped and (fence.get('worker_pause',{}).get('paused') is not True
+                    or fence['worker_pause'].get('run_instance_id') != self.contract['run_instance_id']):
+                raise ValueError('Owned worker pause required for response-group observation')
             if (before['workspace'] != self.contract['workspace'] or after['workspace'] != before['workspace']
                     or before['policy_sha256'] != after['policy_sha256']
                     or before['policy_sha256'] != self.contract['boundary_contract']['snapshot_policy_sha256']
@@ -247,8 +263,11 @@ class Controller:
                 raise ValueError('Implementation snapshot binding mismatch')
             changed = sorted(k for k in before['files'].keys() | after['files'].keys() if before['files'].get(k) != after['files'].get(k))
             if not changed: return False
-            self._append('boundary_observed', {'tool_call_id': tool['callID'], 'message_id': tool['messageID'],
-                'tool_status': tool['state']['status'], 'native_session_id': session, 'fence': fence,
+            details = ({'tools':[{'tool_call_id':t['callID'],'message_id':t['messageID'],
+                        'tool_status':t['state']['status']} for t in tools], 'attribution':'response_tool_group'}
+                       if grouped else {'tool_call_id':tool['callID'],'message_id':tool['messageID'],
+                                        'tool_status':tool['state']['status']})
+            self._append('boundary_observed', {**details, 'native_session_id': session, 'fence': fence,
                 'before': before, 'after': after, 'changed_files': changed})
             return True
 
@@ -267,7 +286,8 @@ class Controller:
             if (self.root/'stop-request.json').exists() or not self.remaining():
                 raise ValueError('Stopped or expired before additional input')
             if self.contract['boundary_contract'].get('transport') == 'opencode-server-response-barrier-v1':
-                checkpoints=[e for e in events if e['kind']=='checkpoint' and e['label']=='before-additional' and e['archive']]
+                checkpoints=[e for e in events if e['kind']=='checkpoint' and e['label']=='before-additional'
+                    and (e['archive'] or group_boundary(self.contract['boundary_contract']))]
                 if len(checkpoints)!=1:raise ValueError('Restorable pre-input checkpoint required before dispatch')
             payload = {k: self.contract[k] for k in ('run_id', 'run_instance_id', 'workspace', 'delivery_id')}
             payload.update(native_session_id=boundaries[0]['native_session_id'],

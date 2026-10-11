@@ -34,17 +34,23 @@ def read_approved(plan_ref, approval_ref):
 
 
 def validate(plan, repo):
-    extra = set(plan)-FIELDS
+    extra = set(plan)-FIELDS-{'resource_origin'}
     if (not FIELDS <= set(plan) or extra not in (set(), STAGED_FIELDS)
             or plan.get('kind') not in (KIND, SINGLE_KIND)):
         raise ValueError('Explicit fresh campaign fields required; no inherited template/history')
     width = 1 if plan['kind'] == SINGLE_KIND else 2
+    if 'resource_origin' in plan:
+        if width != 1:raise ValueError('Technical resource origin is limited to single-condition campaigns')
+        from research import resource_origin
+        resource_origin.read(plan['resource_origin'])
     if extra:
         retry = plan['staged_retry']
-        if (width != 1 or set(retry) != {'known_pre_dispatch_retries','after_dispatch_retries'}
-                or type(retry['known_pre_dispatch_retries']) is not int
-                or retry['known_pre_dispatch_retries'] not in (0,1)
-                or type(retry['after_dispatch_retries']) is not int or retry['after_dispatch_retries'] != 0):
+        legacy = (set(retry)=={'known_pre_dispatch_retries','after_dispatch_retries'}
+            and type(retry['known_pre_dispatch_retries']) is int and retry['known_pre_dispatch_retries'] in (0,1)
+            and type(retry['after_dispatch_retries']) is int and retry['after_dispatch_retries']==0)
+        shared = retry == {'technical_failure_policy':'sealed_infrastructure_failure_v1',
+                           'retry_budget':'shared_reserved_attempts'}
+        if width != 1 or not (legacy or shared):
             raise ValueError('Explicit bounded staged retry policy required')
     profiles.identifier(plan['campaign_id'])
     root = live_pilot.safe_path(plan['output_root'])
@@ -55,8 +61,9 @@ def validate(plan, repo):
         if live_pilot.within(root, old) or live_pilot.within(old, root):
             raise ValueError('Campaign output overlaps source/protected root')
     n = plan['pair_count']
-    if type(n) is not int or n < 1 or plan['pair_concurrency'] not in (1, 2) or type(plan['pair_concurrency']) is not int:
-        raise ValueError('Positive explicit pair count and one or two pair lanes required')
+    if (type(n) is not int or n < 1 or type(plan['pair_concurrency']) is not int
+            or plan['pair_concurrency'] not in range(1, 4//width+1)):
+        raise ValueError('Positive explicit assignment count and at most four model Runs required')
     bounds = plan['bounds']
     if set(bounds) != BOUNDS or any(type(v) is not int or v <= 0 for v in bounds.values()):
         raise ValueError('Explicit positive finite budgets required')
@@ -162,6 +169,10 @@ def initialize(repo, plan_path, approval_path):
         policy=dict(active_model_pairs=plan['pair_concurrency'],
                     active_model_runs=(1 if plan['kind'] == SINGLE_KIND else 2)*plan['pair_concurrency'],
                     evaluation_workers=1, quality_selection=False, intermediate_publication=False), at=run.now())
+    if 'resource_origin' in plan:
+        from research import resource_origin
+        config['resource_origin']=copy.deepcopy(plan['resource_origin'])
+        config['started_at'],config['usage']=resource_origin.read(plan['resource_origin'])
     root.mkdir(parents=True, exist_ok=False)
     util.write_new_json(root/'config.json', config)
     util.write_new_json(root/'genesis.json', dict(config=live_pilot.reference(root/'config.json')))
@@ -172,6 +183,12 @@ def verify_config(config, repo):
     plan = read_approved(config['campaign_plan'], config['campaign_approval'])
     root = validate(plan, repo)
     genesis = util.read_json(root/'genesis.json')
+    initial_usage=dict(requests=0, observed_tokens=0, accumulated_run_seconds=0.,dispatched_runs=0,unknown_usage_requests=[])
+    if 'resource_origin' in plan:
+        from research import resource_origin
+        origin,initial_usage=resource_origin.read(plan['resource_origin'])
+        if config.get('resource_origin')!=plan['resource_origin'] or config['started_at']!=origin:
+            raise ValueError('Shared technical resource origin changed')
     if (live_pilot.checked(genesis['config']) != root/'config.json'
             or util.read_json(root/'config.json') != config):
         raise ValueError('Campaign genesis changed; resume must preserve time and state')
@@ -180,10 +197,10 @@ def verify_config(config, repo):
             or config['bounds'] != plan['bounds']
             or config['policy']['active_model_pairs'] != plan['pair_concurrency']
             or config['policy']['active_model_runs'] != (1 if plan['kind'] == SINGLE_KIND else 2)*plan['pair_concurrency']
+            or config['policy'].get('evaluation_workers') != 1
             or config['policy'].get('quality_selection') is not False
             or config['accepted_slots'] or config['attempted_slots'] or config['reserved_pair_attempts']
-            or config['usage'] != dict(requests=0, observed_tokens=0, accumulated_run_seconds=0.,
-                                      dispatched_runs=0, unknown_usage_requests=[])):
+            or config['usage'] != initial_usage):
         raise ValueError('Fresh campaign config differs from approved plan/genesis')
     live_pilot.verify_pins(repo, config['source_pins'])
     return plan

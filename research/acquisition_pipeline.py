@@ -1,4 +1,4 @@
-"""Two acquisition lanes and one independent evaluation/archive lane.
+"""Approved acquisition lanes and one independent evaluation/archive lane.
 
 The inherited ledger is snapshotted once. Current inputs, owned resources,
 usage, evaluation and archives remain checked; publication/history traversal
@@ -49,10 +49,15 @@ def dispatch_pipeline(items, acquire, evaluate, acquired, evaluated, *, capacity
 
 
 def usage_for(batch):
+    return usage_for_manifests(Path(batch).glob('*/manifest.json'))
+
+
+def usage_for_manifests(paths):
+    """Count every known token component once; incomplete request totals stay unknown."""
     result = dict(requests=0, observed_tokens=0, accumulated_run_seconds=0.,
                   dispatched_runs=0, unknown_usage_requests=[], missing_duration_runs=[])
     identities = set()
-    for path in Path(batch).glob('*/manifest.json'):
+    for path in paths:
         manifest = util.read_json(path)
         identity = manifest['run_instance_id']
         if identity in identities: raise ValueError('Duplicate Run UUID in usage inventory')
@@ -80,12 +85,16 @@ def usage_for(batch):
                 request_id=request_id, status='missing_terminal_event', observed_tokens=None))
         for row in rows:
             usage = row.get('usage')
-            if isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0
-                                              for k in ('input_tokens', 'output_tokens')):
-                result['observed_tokens'] += usage['input_tokens'] + usage['output_tokens']
-            else:
+            components = {key: usage[key] if isinstance(usage, dict)
+                and type(usage.get(key)) is int and usage[key] >= 0 else None
+                for key in ('input_tokens','output_tokens')}
+            known = sum(value for value in components.values() if value is not None)
+            result['observed_tokens'] += known
+            missing = [key for key,value in components.items() if value is None]
+            if missing:
                 result['unknown_usage_requests'].append(dict(run_instance_id=manifest['run_instance_id'],
-                    request_id=row.get('request_id'), status=row.get('status'), observed_tokens=None))
+                    request_id=row.get('request_id'), status=row.get('status'), observed_tokens=None,
+                    **components, observed_tokens_lower_bound=known, missing_usage_fields=missing))
     return result
 
 
@@ -96,10 +105,12 @@ class Budget:
         self.active = {}
         self.finished = {}
         self.total = copy.deepcopy(config['usage'])
+        if self.total.get('unknown_usage_requests'):
+            self.total['observed_tokens_are_lower_bound'] = True
 
     def check(self, identity, current):
         with self.lock:
-            self.active[identity] = current
+            if identity is not None:self.active[identity] = current
             for field, bound in (('requests','request_count'), ('observed_tokens','observed_tokens'),
                                  ('accumulated_run_seconds','accumulated_run_seconds')):
                 value = self.total[field] + sum(x.get(field, 0) for x in self.active.values())
@@ -125,7 +136,7 @@ class Budget:
 
 
 class PairWatch(live_pilot.PilotWatch):
-    """Each fault stops its own two Runs, while shared budget remains cumulative."""
+    """Each fault stops its owned assignment; shared budget remains cumulative."""
     def __init__(self, plan, digest, budget, identity):
         super().__init__(plan, digest)
         self.budget, self.identity = budget, identity
@@ -340,7 +351,18 @@ def pending_acquisition_slots(config, attempts, accepted):
                     safe = safe and all(not util.read_json(p).get('started_at') for p in batch.glob('*/manifest.json'))
                 except (OSError,ValueError,KeyError,TypeError): safe = False
                 count = sum(a['slot'] == attempt['slot'] for a in attempts)
-                if not safe or count > retry['known_pre_dispatch_retries']: held.add(attempt['slot'])
+                shared = retry.get('retry_budget') == 'shared_reserved_attempts'
+                if safe:
+                    if shared and preparation.get('technical_retry_classification') != 'preparation_io_failure':
+                        held.add(attempt['slot'])
+                    if not shared and count > retry['known_pre_dispatch_retries']: held.add(attempt['slot'])
+                else:
+                    from research import technical_retry
+                    eligible = (retry.get('technical_failure_policy') == technical_retry.POLICY
+                        and shared
+                        and technical_retry.eligible(batch, saved))
+                    if eligible: confirm_owned_stopped(batch)
+                    else: held.add(attempt['slot'])
             continue
         output = batch/'pipeline-evaluation.json'
         decision = util.read_json(output) if output.exists() else {}
@@ -426,17 +448,20 @@ def run_pipeline(repo, config_path):
                     if result['accepted']:
                         accepted.add(a['slot']); event('accepted', slot=a['slot'], record=live_pilot.reference(batch/'pipeline-evaluation.json'))
             while len(accepted) < config.get('pair_count', 100):
+                budget.check(None,{})
                 number = 1 + len(list((root/'epochs').glob('*/plan.json')))
                 epoch = create_epoch(repo, config, number); plan = util.read_json(epoch)
                 pending, held = pending_acquisition_slots(config, attempts, accepted)
                 if held: event('saved_evaluation_held', slots=sorted(held), model_resend=False)
                 if not pending: raise RuntimeError('Saved evaluation recovery required; no model resend')
                 historical = set(config['attempted_slots']) | {a['slot'] for a in attempts}
-                if reserved_count + len(pending) > config['bounds']['max_pair_attempts']:
-                    raise RuntimeError('Attempt budget exhausted')
+                remaining = config['bounds']['max_pair_attempts'] - reserved_count
+                if remaining <= 0: raise RuntimeError('Attempt budget exhausted')
+                pending = pending[:remaining]
                 consecutive_faults = 0
                 def acquire(slot):
                     nonlocal reserved_count
+                    budget.check(None,{})
                     phase_path = Path(plan['batch'])/f'pair-{slot}'/'phase.json'
                     batch = phase_path.parent
                     attempt = dict(slot=slot, attempt=uuid.uuid4().hex, epoch=live_pilot.reference(epoch),
@@ -466,6 +491,10 @@ def run_pipeline(repo, config_path):
                     value = dict(acquired=acquired, slot=slot, attempt=attempt['attempt'], record=str(record),
                         usage=usage, reason=reason, runs=attempt_runs(batch, attempt),
                         fault=watch.fault, error=error, at=run.now())
+                    retry = config.get('template',{}).get('staged_retry',{})
+                    if not acquired and retry.get('technical_failure_policy') == 'sealed_infrastructure_failure_v1':
+                        from research import technical_retry
+                        value['technical_retry_evidence'] = technical_retry.seal(batch, usage)
                     util.write_new_json(batch/'pipeline-acquisition.json', value)
                     return value
                 def acquired(slot, result):
@@ -473,7 +502,9 @@ def run_pipeline(repo, config_path):
                     event('acquired' if result['acquired'] else 'technical_failure', slot=slot,
                         record=result['record'], fault=result['fault'], error=result['error'])
                     consecutive_faults = 0 if result['acquired'] else consecutive_faults+1
-                    if consecutive_faults >= 3: raise RuntimeError('Repeated acquisition faults need repair')
+                    if (consecutive_faults >= 3 and config.get('template',{}).get('staged_retry',{}).get(
+                            'retry_budget') != 'shared_reserved_attempts'):
+                        raise RuntimeError('Repeated acquisition faults need repair')
                 def evaluated(slot, result):
                     if not result['accepted']:
                         event('evaluation_fault', slot=slot, error=result.get('error'))

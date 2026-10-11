@@ -29,6 +29,10 @@ class Provider(BaseHTTPRequestHandler):
             calls=[tool(0,'bash',{'command':'python3 -c '+shlex.quote(program),'description':'Synthetic detached child lifetime fixture'})]
         elif count<=2:
             calls=[tool(0,'write',{'filePath':'/workspace/Program.cs','content':'// synthetic stage '+str(count)+'\n'})]
+            if 'archive-failure' in scenario:
+                command=("printf synthetic > /workspace/example.sqlite; printf unsealed > /workspace/example.sqlite-wal"
+                         if count==1 else 'rm /workspace/example.sqlite-wal')
+                calls.append(tool(1,'bash',{'command':command,'description':'Synthetic static DB sidecar observation'}))
             if count==ambiguous_at and 'parallel' in scenario:
                 calls.append(tool(1,'write',{'filePath':'/workspace/Other.cs','content':'// simultaneous synthetic mutation\n'}))
         delta={'role':'assistant','tool_calls':calls} if calls else {'role':'assistant','content':'Synthetic completion.'}

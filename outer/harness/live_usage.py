@@ -198,18 +198,34 @@ def staged_evidence(root, manifest, events, native_sessions):
                     errors.append('stage_response_barrier_release')
             if boundaries:
                 fence = boundaries[0]['fence']
+                grouped = staged_input.group_boundary(contract['boundary_contract'])
+                tool_proofs = boundaries[0].get('tools',[]) if grouped else [boundaries[0]]
+                tool_ids = [t['tool_call_id'] for t in tool_proofs]
                 originals = [h for h in held if h['barrier_id']==fence['barrier_id']]
                 if (len(originals)!=1 or any(fence.get(k)!=v for k,v in originals[0].items() if k not in ('kind','at'))
-                        or fence.get('tool_call_ids') != [boundaries[0]['tool_call_id']]
+                        or not tool_ids or fence.get('tool_call_ids') != tool_ids
                         or fence.get('completed_tool_call_ids') != fence.get('tool_call_ids')):
                     errors.append('stage_response_barrier_boundary')
                 native,_ = journal(root/'evidence/agent.jsonl')
-                terminals = [r.get('part',{}) for r in native if r.get('type')=='tool_use'
-                    and r.get('part',{}).get('callID')==boundaries[0]['tool_call_id']]
-                if (len(terminals)!=1 or terminals[0].get('sessionID') not in sessions
-                        or terminals[0].get('messageID')!=boundaries[0]['message_id']
-                        or terminals[0].get('state',{}).get('status')!=boundaries[0]['tool_status']):
-                    errors.append('stage_native_tool_boundary')
+                for tool in tool_proofs:
+                    terminals = [r.get('part',{}) for r in native if r.get('type')=='tool_use'
+                        and r.get('part',{}).get('callID')==tool['tool_call_id']]
+                    if (len(terminals)!=1 or terminals[0].get('sessionID') not in sessions
+                            or terminals[0].get('messageID')!=tool['message_id']
+                            or terminals[0].get('state',{}).get('status')!=tool['tool_status']):
+                        errors.append('stage_native_tool_boundary')
+                if grouped:
+                    pause=fence.get('worker_pause',{})
+                    starts=[e for e in ledger if e['kind']=='worker_paused' and
+                            all(e.get(k)==v for k,v in pause.items())]
+                    ends=[e for e in ledger if e['kind']=='worker_resumed' and
+                          e.get('worker')==pause.get('worker') and
+                          e['sequence']>boundaries[0]['sequence'] and
+                          (not intents or e['sequence']<intents[0]['sequence'])]
+                    if (pause.get('paused') is not True or pause.get('run_instance_id')!=contract['run_instance_id']
+                            or len(starts)!=1 or starts[0]['sequence']>=boundaries[0]['sequence']
+                            or len(ends)!=1 or ends[0].get('paused') is not False):
+                        errors.append('stage_owned_pause_boundary')
                 proof_events = [e for e in events if e['request_id']==fence.get('request_id')]
                 if len(proof_events)!=1 or proof_events[0]['request_sha256']!=fence.get('request_sha256'):
                     errors.append('stage_boundary_request_original')

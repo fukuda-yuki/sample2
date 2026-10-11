@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from outer.harness import gateway, profiles, runtime, util
 
 
-def probe(executable):
+def probe(executable, *, observe_boundary=False):
     repo = Path(__file__).resolve().parents[2]
     executable = Path(executable).resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix='staged-cli-fixture-') as directory:
@@ -42,6 +42,8 @@ def probe(executable):
         initial = 'Synthetic initial requirement. Create the fixture implementation.'
         followup = 'Synthetic additional requirement. Keep the same implementation.'
         requests = []
+        tool_observed = threading.Event()
+        boundary_observation = {}
         class Fixture(BaseHTTPRequestHandler):
             def log_message(self, *_): pass
             def do_POST(self):
@@ -63,8 +65,17 @@ def probe(executable):
                 item['choices'] = [{'index': 0, 'delta': {},
                                     'finish_reason': 'tool_calls' if first else 'stop'}]
                 item['usage'] = {'prompt_tokens': 10, 'completion_tokens': 2, 'total_tokens': 12}
-                self.wfile.write(('data: '+json.dumps(item)+'\n\ndata: [DONE]\n\n').encode())
+                self.wfile.write(('data: '+json.dumps(item)+'\n\n').encode())
                 self.wfile.flush()
+                if first and observe_boundary:
+                    # Observe the existing non-attach CLI only. Do not inject,
+                    # cancel, modify native state or adopt a different boundary.
+                    start = time.monotonic()
+                    boundary_observation['tool_terminal_before_response_eof'] = tool_observed.wait(5)
+                    if tool_observed.is_set(): time.sleep(.25)
+                    boundary_observation['requests_before_first_response_eof'] = len(requests)
+                    boundary_observation['held_response_seconds'] = time.monotonic()-start
+                self.wfile.write(b'data: [DONE]\n\n'); self.wfile.flush()
         server = ThreadingHTTPServer(('127.0.0.1', 0), Fixture)
         thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
         condition = profiles.resolve(repo, 'MS1-001', 'explore')
@@ -76,11 +87,30 @@ def probe(executable):
         # One deadline from the first invocation; never reset for continuation.
         deadline = time.monotonic()+90
         def invoke(text, extra):
-            result = subprocess.run(command+extra, input=text, text=True, capture_output=True,
-                cwd=workspace, env=env, timeout=max(.001, deadline-time.monotonic()))
-            if result.returncode:
-                raise RuntimeError('Synthetic CLI failed: '+result.stderr[-2000:])
-            return [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
+            with tempfile.TemporaryDirectory(dir=root) as capture_dir:
+                output_path = Path(capture_dir)/'stdout.jsonl'
+                error_path = Path(capture_dir)/'stderr.txt'
+                stdout = output_path.open('wb'); stderr = error_path.open('wb')
+                process = subprocess.Popen(command+extra, stdin=subprocess.PIPE, stdout=stdout,
+                    stderr=stderr, cwd=workspace, env=env)
+                process.stdin.write(text.encode()); process.stdin.close()
+                try:
+                    while process.poll() is None:
+                        lines = output_path.read_text().splitlines()
+                        for line in lines:
+                            try: event = json.loads(line)
+                            except ValueError: continue
+                            if event.get('type') == 'tool_use' and event.get('part',{}).get('state',{}).get('status') in ('completed','error'):
+                                tool_observed.set()
+                        if time.monotonic() >= deadline: raise TimeoutError('Original probe budget exhausted')
+                        time.sleep(.02)
+                    output = output_path.read_text(); error = error_path.read_text()
+                    if process.returncode: raise RuntimeError('Synthetic CLI failed: '+error[-2000:])
+                    return [json.loads(line) for line in output.splitlines() if line.startswith('{')]
+                finally:
+                    if process.poll() is None: process.kill()
+                    process.wait(timeout=5)
+                    stdout.close(); stderr.close()
         try:
             first = invoke(initial, [])
             sessions = {e['sessionID'] for e in first if 'sessionID' in e}
@@ -106,6 +136,7 @@ def probe(executable):
                     gateway.check_initial_input(requests[observed[0]], initial)['verified'],
                 request_count=len(requests), tool_boundary_injection_verified=False,
                 live_acceptance=False)
+            if observe_boundary: result['boundary_observation'] = boundary_observation
             result['passed'] = all(result[k] for k in ('same_native_session', 'workspace_change_observed',
                 'completed_write_event', 'followup_absent_before_dispatch',
                 'initial_prompt_retained_on_continuation')) and bool(observed) and observed[0] == before
@@ -117,7 +148,8 @@ def probe(executable):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--opencode', required=True, help='Local frozen binary; this probe never installs it')
+    parser.add_argument('--observe-boundary', action='store_true', help='Hold synthetic first response EOF to inspect current CLI ordering; never inject')
     args = parser.parse_args()
-    result = probe(args.opencode)
+    result = probe(args.opencode, observe_boundary=args.observe_boundary)
     print(json.dumps(result, indent=2))
     raise SystemExit(0 if result['passed'] else 1)

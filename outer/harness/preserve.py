@@ -255,6 +255,11 @@ def pack_run(archive, run_root, references=(), include=()):
                   'telemetry-link.json', 'state', 'stop-request.json', 'stop-result.json', 'evaluation-work']
         names += [p.name for p in root.glob('pipeline-error-*.json')]
         required += ['profiles', 'evaluation-assets', 'context.json', 'runtime.json', 'state', 'telemetry-link.json']
+        if manifest.get('staged_input'):
+            # Private archive, like the existing raw requests and native state.
+            # Never drop the only copy of the planned later input/intent ledger.
+            names += ['_controller']
+            required += ['_controller']
     sources = {name: root / name for name in names if (root / name).exists()}
     metadata = {'kind': 'run', 'run_id': manifest['run_id'],
                 'missing': [name for name in required if name not in sources],

@@ -11,7 +11,7 @@ import tarfile
 import time
 import uuid
 
-from . import profiles, run, util, ownership, catalog_input
+from . import profiles, run, util, ownership, catalog_input, staged_input, staged_runtime
 from .security import child_environment
 
 
@@ -436,6 +436,23 @@ def _start(repo, runs_dir, run_id):
     manifest = run.load_manifest(runs_dir, run_id)
     if manifest['started_at']:
         raise ValueError('Run already started')
+    stage = None
+    if manifest.get('staged_input'):
+        ref = manifest['staged_input']
+        path = root/'_controller/staged-input/contract.json'
+        if (Path(ref['contract_path']).resolve() != path.resolve()
+                or util.sha256_file(path) != ref['contract_sha256']
+                or condition['intervention']['method'] != 'staged-explore'):
+            raise ValueError('Staged contract/condition mismatch')
+        stage = staged_input.Controller(path.parent)
+        if (stage.contract['run_instance_id'] != manifest['run_instance_id']
+                or stage.contract['budget_seconds'] != condition['budget']['value']
+                or stage.contract['boundary_contract'].get('transport') != 'opencode-server-response-barrier-v1'
+                or condition['runtime']['opencode_version'] != '1.17.11'):
+            raise ValueError('Unsupported staged transport or Run budget binding')
+        stage.audit_mounts()
+    elif condition['intervention']['method'] == 'staged-explore':
+        raise ValueError('Staged condition requires its frozen controller contract')
     lock = condition['runtime_lock']
     for digest in lock['images'].values():
         image_id(digest)
@@ -460,6 +477,10 @@ def _start(repo, runs_dir, run_id):
                     '--upstream-timeout', str(condition['runtime'].get('provider_timeout_seconds', 120))]
     if catalog or stdin_prompt:
         gateway_args += ['--expected-prompt', '/contract/prompt.txt']
+    if stage:
+        at = gateway_args.index(lock['images']['gateway'])
+        gateway_args[at:at] = mount(stage.root, '/stage', True)
+        gateway_args += ['--staged-input', '/stage']
     manifest.update(started_at=run.now(), runner={'id': 'opencode', 'version': lock['opencode_version']},
                     synthetic=False, model_called=False)
     run.save_manifest(runs_dir, run_id, manifest)
@@ -469,6 +490,7 @@ def _start(repo, runs_dir, run_id):
     gateway_process = None
     worker_process = None
     try:
+        if stage: stage.start()
         state['network_id'] = docker('network', 'create', '--internal', '--label', 'sample2.run=' + run_id,
             '--label', 'sample2.instance=' + manifest['run_instance_id'], private).stdout.strip()
         util.write_json_atomic(root / 'runtime.json', state)
@@ -507,7 +529,11 @@ def _start(repo, runs_dir, run_id):
                     '--pure', '--format', 'json', '--title', run_id,
                     '--model', 'sample2/' + condition['runtime']['model_id'],
                     '--file', '/input/prompt.txt']
-            if catalog:
+            if stage:
+                at = args.index(lock['images']['worker'])
+                args = args[:at+1] + ['opencode','serve','--pure','--hostname','127.0.0.1',
+                                     '--port',str(staged_runtime.PORT)]
+            elif catalog:
                 at = args.index(lock['images']['worker'])
                 args = args[:at+1] + ['python3', '-c', catalog_input.WORKER_PREFLIGHT,
                                      'sample2/' + condition['runtime']['model_id']]
@@ -521,23 +547,26 @@ def _start(repo, runs_dir, run_id):
             docker(*args)
             state['worker_started_at'] = run.now()
             util.write_json_atomic(root / 'runtime.json', state)
-            with (root / 'evidence/agent.jsonl').open('xb') as log:
+            with (root / ('evidence/native-server.log' if stage else 'evidence/agent.jsonl')).open('xb') as log:
                 worker_process = subprocess.Popen(['docker', 'start', '-a', state['worker']],
                     env=child_environment(), stdout=log, stderr=subprocess.STDOUT)
-                while worker_process.poll() is None:
-                    if (root / 'usage/raw/failure.jsonl').exists():
-                        reason = 'provider_failure'
-                        break
-                    if (root / 'stop-request.json').exists():
-                        reason = 'operator_stop'
-                        break
-                    if time.monotonic() - started >= condition['budget']['value']:
-                        reason = 'timeout'
-                        break
-                    time.sleep(1)
+                if stage:
+                    exit_code, reason = staged_runtime.execute(root,state,stage,condition,sys.modules[__name__])
                 else:
-                    exit_code = worker_process.returncode
-                    reason = 'completed' if exit_code == 0 else 'agent_error'
+                    while worker_process.poll() is None:
+                        if (root / 'usage/raw/failure.jsonl').exists():
+                            reason = 'provider_failure'
+                            break
+                        if (root / 'stop-request.json').exists():
+                            reason = 'operator_stop'
+                            break
+                        if time.monotonic() - started >= condition['budget']['value']:
+                            reason = 'timeout'
+                            break
+                        time.sleep(1)
+                    else:
+                        exit_code = worker_process.returncode
+                        reason = 'completed' if exit_code == 0 else 'agent_error'
             # Drain already dispatched auxiliary requests before stopping the gateway.
             drain_deadline = min(time.monotonic() + 120, started + condition['budget']['value'])
             from .live_usage import journal
@@ -567,6 +596,13 @@ def _start(repo, runs_dir, run_id):
         state['stopped_at'] = run.now()
         state['stop_confirmed'] = stopped
         util.write_json_atomic(root / 'runtime.json', state)
+        if stage:
+            try:
+                stage.finish(reason,stop_confirmed=stopped)
+                util.write_new_json(stage.root/'final-snapshot.json',staged_input.snapshot(
+                    stage.contract['workspace'],stage.contract['boundary_contract']['snapshot_policy']))
+            except (OSError,ValueError,KeyError) as exc:
+                util.write_new_json(root/'evidence/staged-terminal-error.json',{'type':type(exc).__name__})
         manifest.update(ended_at=run.now(), duration_seconds=round(time.monotonic() - started, 3),
                         end_reason=reason if stopped else 'stop_unconfirmed', exit_code=exit_code,
                         stop_confirmed=stopped, stop_method='container_exit', stop_evidence=state)
@@ -604,7 +640,9 @@ def request_stop(root):
                 'network_cleanup': receipt}
     try:
         util.write_json_atomic(root / 'stop-request.json', {'requested_at': run.now()})
-    except OSError:
+        if manifest.get('staged_input'):
+            staged_input.Controller(Path(manifest['staged_input']['contract_path']).parent).stop('operator_stop')
+    except (OSError,ValueError,KeyError):
         # The controller cannot observe a missing marker. Physical shutdown is
         # still necessary, even while it owns its lease; never call this saved.
         stop_owned(root)
@@ -633,6 +671,10 @@ def request_stop(root):
                             stop_method='container_exit',
                             end_reason='operator_stop' if stopped else 'stop_unconfirmed')
             run.save_manifest(root.parent, root.name, manifest)
+            if manifest.get('staged_input'):
+                controller = staged_input.Controller(Path(manifest['staged_input']['contract_path']).parent)
+                if not controller.status()['terminal']:
+                    controller.finish('operator_stop_recovered',stop_confirmed=stopped)
             from . import live_usage
             live_usage.update_manifest_evidence(root)
             record_cleanup(root)

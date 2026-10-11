@@ -392,6 +392,24 @@ class PlanBoundaries(unittest.TestCase):
         with patch.object(pilot.profiles,'validate_run'),patch.object(pilot.runtime,'docker',return_value=subprocess.CompletedProcess([],1,'','')):
             with self.assertRaisesRegex(RuntimeError,'unobservable'): pilot.validate_owned_terminal(root,b)
 
+    def test_staged_early_completion_is_retained_without_claiming_additional_delivery(self):
+        _,_,binding,root=self.terminal()
+        manifest=util.read_json(root/'manifest.json');manifest['staged_input']={'contract_path':'synthetic'}
+        util.write_json_atomic(root/'manifest.json',manifest)
+        normalized=util.read_json(root/'usage/normalized.json')
+        normalized.update(input_reached=False,staged_input=dict(issues=[],additional_input_reached=False,
+            terminal=dict(stop_confirmed=True,reason='completed')))
+        util.write_json_atomic(root/'usage/normalized.json',normalized)
+        util.write_new_json(root/'usage/context-evidence.json',dict(first_request_prompt_reached=True))
+        with patch.object(pilot.profiles,'validate_run'):
+            proof=pilot.validate_owned_terminal(root,binding,observe_resources=False)
+        self.assertEqual('ses_finite_fixture',proof['native_session_id'])
+        self.assertFalse(util.read_json(root/'usage/normalized.json')['input_reached'])
+        normalized['staged_input']['issues']=['synthetic_missing_evidence']
+        util.write_json_atomic(root/'usage/normalized.json',normalized)
+        with patch.object(pilot.profiles,'validate_run'):
+            with self.assertRaises(ValueError):pilot.validate_owned_terminal(root,binding,observe_resources=False)
+
     def test_missing_native_input_and_tampered_raw_or_snapshot_rejected(self):
         watch,batch,b,root=self.terminal()
         for relative,change in [

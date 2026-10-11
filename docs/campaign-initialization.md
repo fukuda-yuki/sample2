@@ -37,12 +37,22 @@ clean commit、承認hash、入力計画、固定資材の検証後に、空の 
 `pair_concurrency`（同時割付枠数）となる。2条件の件数・保存形式は従来どおり。
 単一条件のtemplate・観測phase・予約bindingには `cases_per_assignment: 1` を記録し、
 再開時に幅の変更を拒否する。未送信・技術障害・低品質と全試行資源は既存receiptへ保持する。
-この追加kindは段階入力を実装したという意味ではない。要求分割と継続輸送の契約は
-[固定CLIの能力確認](staged-input-capability.md)を参照する。
+`staged-explore` の追加入力は明示partitionと固定server/API経路を使用する。
+要求分割・証跡・未受入の範囲は[固定CLIの能力確認](staged-input-capability.md)を参照する。
 
-新 campaign では旧評価除外 receipt による再取得を許可しない。技術障害だけを fresh UUID で
+新 campaign では旧評価除外 receipt による再取得を許可しない。通常経路は技術障害だけを fresh UUID で
 再試行し、取得できた生成物の評価障害は保存物の復旧へ送る。低品質は保持・採用され、品質に
 基づく取り直しをしない。未知send/中断取得は資源回収を確認するまで停止する。
+
+段階入力は1条件のkindだけで扱い、`staged_inputs` と `staged_retry` の両方を追加する。
+`staged_inputs` は全taskのpartitionファイルへのpath/hash参照。元の最終要求、section全文、
+初回/追加section ID、境界transportとsnapshot policyを固定し、workerへ渡すのは初回分だけ。
+公開リポジトリへ実partition本文や承認receiptを追加しない。
+`staged_retry` は `known_pre_dispatch_retries`（0または1）と `after_dispatch_retries`（0）の明示値。
+known preparation failureのreceiptと送信不存在の証拠が揃わなければ、新UUIDも発行せず保留する。
+成功・失敗・未到達を理由に送信後の取得を取り直さず、全試行資源を保持する。
+追加入力の到達状態は `normalized.staged_input` にあり、初回到達と追加未到達を区別する。
+この状態を集計するときは、未到達Runを分母から黙って落とさない。
 
 ## misc に渡す最小追加項目
 

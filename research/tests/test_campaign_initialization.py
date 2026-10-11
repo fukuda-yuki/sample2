@@ -236,4 +236,57 @@ class CampaignTests(unittest.TestCase):
             fresh.validate(self.plan, REPO)
 
 
+    def test_staged_partition_requires_exact_request_and_explicit_zero_postdispatch_retry(self):
+        from outer.harness import staged_input
+        self.plan['kind']=fresh.SINGLE_KIND;self.plan['bounds']['max_runs']=1
+        case=self.plan['assignments'][0]['cases'][0]
+        case.update(condition='staged-explore',run_id=run.run_id_for(case['task'],'staged-explore',1))
+        self.plan['assignments'][0]['cases']=[case]
+        with self.assertRaisesRegex(ValueError,'explicit request'):fresh.validate(self.plan,REPO)
+        request=profiles.task_profile(REPO,case['task'],self.plan['task_revision'])['migration_request']
+        at=len(request)//2;policy={'suffixes':['.cs'],'excluded_directories':['obj','bin']}
+        partition=dict(kind='staged_request_partition_v1',request_sha256=util.sha256_bytes(request.encode()),
+            sections=[dict(id='a',text=request[:at]),dict(id='b',text=request[at:])],initial_ids=['a'],additional_ids=['b'],
+            boundary_contract=dict(transport='opencode-server-response-barrier-v1',snapshot_policy=policy,
+                                   snapshot_policy_sha256=staged_input.digest(policy)))
+        path=self.root/'synthetic-partition.json';util.write_new_json(path,partition)
+        self.plan.update(staged_inputs={case['task']:live_pilot.reference(path)},
+            staged_retry=dict(known_pre_dispatch_retries=1,after_dispatch_retries=0))
+        fresh.validate(self.plan,REPO)
+        self.assertEqual(self.plan['staged_inputs'],fresh.template(self.plan)['staged_inputs'])
+        for retry in (dict(known_pre_dispatch_retries=2,after_dispatch_retries=0),
+                      dict(known_pre_dispatch_retries=1,after_dispatch_retries=1)):
+            with self.assertRaises(ValueError):fresh.validate(dict(self.plan,staged_retry=retry),REPO)
+        partition['sections'][0]['text']+='unapproved requirement'
+        util.write_json_atomic(path,partition)
+        with self.assertRaises(ValueError):fresh.validate(self.plan,REPO)
+        self.plan['staged_inputs'][case['task']]=live_pilot.reference(path)
+        with self.assertRaisesRegex(ValueError,'Frozen original request'):fresh.validate(self.plan,REPO)
+
+    def test_staged_retry_only_one_proven_preparation_failure_no_dispatch_or_unknown(self):
+        config=dict(template={'staged_retry':dict(known_pre_dispatch_retries=1,after_dispatch_retries=0)},
+                    attempted_slots=[],pair_count=1)
+        batch=self.root/'attempt';batch.mkdir()
+        binding=dict(run_id='synthetic-run',run_instance_id='synthetic-instance',condition='staged-explore',task='toy')
+        phase=batch/'phase.json';util.write_new_json(phase,dict(assignments=[dict(cases=[binding])]))
+        record=batch/'pipeline-attempt.json';util.write_new_json(record,dict(phase=live_pilot.reference(phase)))
+        saved=dict(acquired=False,usage=dict(dispatched_runs=0,requests=0,unknown_usage_requests=[]))
+        util.write_new_json(batch/'pipeline-acquisition.json',saved)
+        attempts=[dict(slot=1,record=str(record))]
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+        util.write_new_json(batch/'staged-preparation-failure.json',dict(kind='known_pre_dispatch_preparation_failure',binding=binding))
+        self.assertEqual(([1],set()),pipeline.pending_acquisition_slots(config,attempts,set()))
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts*2,set()))
+        config['template']['staged_retry']['known_pre_dispatch_retries']=0
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+        config['template']['staged_retry']['known_pre_dispatch_retries']=1
+        for key,value in [('dispatched_runs',1),('requests',1),('unknown_usage_requests',[{'status':'unknown'}])]:
+            changed=copy.deepcopy(saved);changed['usage'][key]=value
+            util.write_json_atomic(batch/'pipeline-acquisition.json',changed)
+            self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+        util.write_json_atomic(batch/'pipeline-acquisition.json',saved)
+        util.write_new_json(batch/'synthetic-run/manifest.json',dict(started_at='synthetic-start'))
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+
+
 if __name__ == '__main__': unittest.main()

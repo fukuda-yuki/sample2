@@ -1,6 +1,7 @@
 """Reconcile gateway originals, input interventions and native execution evidence."""
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 from . import util, run, gateway
@@ -140,6 +141,124 @@ def reconcile(started, ended, run_id, session_id=None):
     return events, sorted(set(issues))
 
 
+def staged_evidence(root, manifest, events, native_sessions):
+    """Bind controller intent, native ACK and independently retained gateway bytes.
+
+    An observed request is not a send, and a native ACK is not provider receipt.
+    Ordinary failure/unreached outcomes are retained without discarding usage.
+    """
+    from . import staged_input
+    root = Path(root); raw = root/'usage/raw'; errors = []
+    reference = manifest.get('staged_input')
+    if not reference:
+        return None, ['undeclared_staged_input'] if (raw/'staged-input.jsonl').exists() else []
+    try:
+        contract_path = Path(reference['contract_path'])
+        if util.sha256_file(contract_path) != reference['contract_sha256']:
+            raise ValueError('Staged contract changed')
+        controller = staged_input.Controller(contract_path.parent)
+        contract = controller.contract; state = controller.status(); ledger = controller.events()
+        if (contract['run_id'], contract['run_instance_id']) != (manifest['run_id'], manifest['run_instance_id']):
+            raise ValueError('Staged Run identity mismatch')
+        if util.sha256_file(root/'inputs/prompt.txt') != contract['initial_sha256']:
+            raise ValueError('Staged initial input mismatch')
+        expected = (controller.root/'additional.txt').read_bytes().decode('utf-8')
+        records, journal_errors = journal(raw/'staged-input.jsonl'); errors += journal_errors
+        arms = [r for r in records if r.get('kind') == 'armed']
+        plans = [r for r in records if r.get('kind') == 'planned']
+        observed = [r for r in records if r.get('kind') == 'request_checked']
+        identity = {'run_id': contract['run_id'], 'run_instance_id': contract['run_instance_id'],
+                    'contract_sha256': reference['contract_sha256'], 'delivery_id': contract['delivery_id']}
+        if len(plans) != 1 or len(arms) > 1 or any(any(r.get(k) != v for k,v in identity.items()) for r in records):
+            errors.append('stage_gateway_binding_mismatch')
+        proof_by_request = {r.get('request_id'): r for r in observed}
+        if len(proof_by_request) != len(observed): errors.append('stage_duplicate_request_proof')
+        intents = [e for e in ledger if e['kind'] == 'send_intent']
+        boundaries = [e for e in ledger if e['kind'] == 'boundary_observed']
+        sessions = [e['native_session_id'] for e in ledger if e['kind'] == 'native_session']
+        if len(sessions) != 1 or native_sessions != sessions:
+            errors.append('stage_native_session_mismatch')
+        if arms and (len(intents) != 1 or len(boundaries) != 1 or arms[0]['native_session_id'] not in sessions
+                     or arms[0]['additional_sha256'] != contract['additional_sha256']):
+            errors.append('stage_unbound_arm')
+        if arms and boundaries and arms[0]['barrier_id'] != boundaries[0]['fence']['barrier_id']:
+            errors.append('stage_boundary_binding_mismatch')
+        if contract['boundary_contract'].get('transport') == 'opencode-server-response-barrier-v1':
+            barriers, faults = journal(raw/'response-barriers.jsonl'); errors += faults
+            held = [r for r in barriers if r.get('kind') == 'held']
+            released = [r for r in barriers if r.get('kind') == 'released']
+            if (len({r['barrier_id'] for r in held}) != len(held)
+                    or len({r['barrier_id'] for r in released}) != len(released)
+                    or any(r.get(k) != contract[k] for r in barriers for k in ('run_id','run_instance_id'))):
+                errors.append('stage_response_barrier_identity')
+            for release in released:
+                originals = [h for h in held if h['barrier_id']==release['barrier_id']]
+                if len(originals)!=1 or any(release.get(k)!=v for k,v in originals[0].items() if k not in ('kind','at')):
+                    errors.append('stage_response_barrier_release')
+            if boundaries:
+                fence = boundaries[0]['fence']
+                originals = [h for h in held if h['barrier_id']==fence['barrier_id']]
+                if (len(originals)!=1 or any(fence.get(k)!=v for k,v in originals[0].items() if k not in ('kind','at'))
+                        or fence.get('tool_call_ids') != [boundaries[0]['tool_call_id']]
+                        or fence.get('completed_tool_call_ids') != fence.get('tool_call_ids')):
+                    errors.append('stage_response_barrier_boundary')
+                native,_ = journal(root/'evidence/agent.jsonl')
+                terminals = [r.get('part',{}) for r in native if r.get('type')=='tool_use'
+                    and r.get('part',{}).get('callID')==boundaries[0]['tool_call_id']]
+                if (len(terminals)!=1 or terminals[0].get('sessionID') not in sessions
+                        or terminals[0].get('messageID')!=boundaries[0]['message_id']
+                        or terminals[0].get('state',{}).get('status')!=boundaries[0]['tool_status']):
+                    errors.append('stage_native_tool_boundary')
+                proof_events = [e for e in events if e['request_id']==fence.get('request_id')]
+                if len(proof_events)!=1 or proof_events[0]['request_sha256']!=fence.get('request_sha256'):
+                    errors.append('stage_boundary_request_original')
+                else:
+                    response_path = raw/proof_events[0]['response_file']
+                    if (Path(proof_events[0]['response_file']).name != proof_events[0]['response_file']
+                            or util.sha256_file(response_path)!=proof_events[0]['response_sha256']
+                            or gateway.response_tool_ids(response_path.read_bytes())!=fence.get('tool_call_ids')):
+                        errors.append('stage_boundary_response_original')
+                acks = [e for e in ledger if e['kind']=='acknowledged']
+                releases = [r for r in released if r['barrier_id']==fence['barrier_id']]
+                if releases and (len(acks)!=1 or releases[0].get('native_message_id')!=acks[0]['native_message_id']):
+                    errors.append('stage_release_without_native_ack')
+        first_observed = first_transmitted = None
+        for event in events:
+            path = raw/event['request_file']
+            if Path(event['request_file']).name != event['request_file'] or util.sha256_file(path) != event['request_sha256']:
+                raise ValueError('Staged request original mismatch')
+            proof = gateway.check_additional_input(util.read_json(path), expected)
+            receipt = proof_by_request.get(event['request_id'])
+            if receipt and (receipt['request_sha256'] != event['request_sha256'] or receipt['receipt'] != proof):
+                errors.append('stage_request_proof_mismatch')
+            sent = event.get('send_evidence') == 'observed_send' or event.get('provider_acknowledged') is True
+            if sent and receipt is None: errors.append('stage_sent_without_input_check')
+            if receipt and receipt.get('rejection'): errors.append('stage_'+receipt['rejection'])
+            if not proof['locations']: continue
+            if not proof['verified']: errors.append('stage_wrong_role_or_duplicate')
+            if not intents or not arms: errors.append('stage_input_before_intent')
+            elif (receipt is None or datetime.fromisoformat(event['started_at']).timestamp() < intents[0]['at_unix']
+                  or records.index(receipt) < records.index(arms[0])):
+                errors.append('stage_input_before_intent')
+            if first_observed is None:
+                first_observed = {'request_id': event['request_id'], 'request_sha256': event['request_sha256'],
+                                  'locations': proof['locations'], 'send_evidence': event.get('send_evidence', 'unknown')}
+            if sent and proof['verified'] and first_transmitted is None:
+                first_transmitted = dict(first_observed, request_id=event['request_id'],
+                    request_sha256=event['request_sha256'], locations=proof['locations'], send_evidence='observed_send')
+        if len(intents) > 1: errors.append('stage_duplicate_intent')
+        value = {**state, 'native_session_ids': sessions,
+            'native_acknowledged': any(e['kind'] == 'acknowledged' for e in ledger),
+            'first_observed_request': first_observed, 'first_transmitted_request': first_transmitted,
+            'additional_input_reached': bool(first_transmitted) and not errors,
+            'controller_ledger_sha256': util.sha256_file(controller.root/'events.jsonl'),
+            'gateway_ledger_sha256': util.sha256_file(raw/'staged-input.jsonl') if (raw/'staged-input.jsonl').exists() else None,
+            'issues': sorted(set(errors)), 'usage_scope': 'all requests from the original Run; never reset per stage'}
+        return value, errors
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return {'additional_input_reached': False, 'evidence_error_type': type(error).__name__}, ['stage_evidence_unverified']
+
+
 def collect(root):
     root = Path(root)
     manifest = util.read_json(root / 'manifest.json')
@@ -223,6 +342,11 @@ def collect(root):
         issues.append('native_agent_completion_unverified')
     if native_steps > len(ends):
         issues.append('native_steps_exceed_gateway_calls')
+    stages, stage_issues = staged_evidence(root, manifest, events, native_sessions)
+    issues += stage_issues
+    if stages is not None:
+        reached = reached and stages['additional_input_reached']
+        util.write_json_atomic(root/'usage/staged-input-evidence.json', stages)
     util.write_json_atomic(root / 'usage/context-evidence.json', {
         'method': context['method'], 'input_reached': reached, 'blocks': matches,
         'first_request_prompt_reached': prompt_reached,
@@ -253,6 +377,7 @@ def collect(root):
         normalized['observed_' + key] = sum(known) if known else None
         normalized[key] = sum(known) if events and len(known) == len(vals) and not issues else None
     normalized['input_reached'] = reached
+    if stages is not None: normalized['staged_input'] = stages
     normalized['inventory_issues'] = sorted(set(issues))
     components = [normalized['observed_input_tokens'], normalized['observed_output_tokens']]
     normalized['observed_tokens'] = sum(v for v in components if v is not None) if any(v is not None for v in components) else None

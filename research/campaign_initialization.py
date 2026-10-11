@@ -19,6 +19,7 @@ FIELDS = {'kind', 'campaign_id', 'output_root', 'pair_count', 'pair_concurrency'
           'protected_roots', 'resource_monitor', 'resource_probe', 'browser_pin',
           'runtime_locks', 'thresholds'}
 BOUNDS = set(live_pilot.BOUNDS) | {'max_pair_attempts'}
+STAGED_FIELDS = {'staged_inputs', 'staged_retry'}
 
 
 def read_approved(plan_ref, approval_ref):
@@ -33,9 +34,18 @@ def read_approved(plan_ref, approval_ref):
 
 
 def validate(plan, repo):
-    if set(plan) != FIELDS or plan.get('kind') not in (KIND, SINGLE_KIND):
+    extra = set(plan)-FIELDS
+    if (not FIELDS <= set(plan) or extra not in (set(), STAGED_FIELDS)
+            or plan.get('kind') not in (KIND, SINGLE_KIND)):
         raise ValueError('Explicit fresh campaign fields required; no inherited template/history')
     width = 1 if plan['kind'] == SINGLE_KIND else 2
+    if extra:
+        retry = plan['staged_retry']
+        if (width != 1 or set(retry) != {'known_pre_dispatch_retries','after_dispatch_retries'}
+                or type(retry['known_pre_dispatch_retries']) is not int
+                or retry['known_pre_dispatch_retries'] not in (0,1)
+                or type(retry['after_dispatch_retries']) is not int or retry['after_dispatch_retries'] != 0):
+            raise ValueError('Explicit bounded staged retry policy required')
     profiles.identifier(plan['campaign_id'])
     root = live_pilot.safe_path(plan['output_root'])
     if not plan['protected_roots']:
@@ -81,10 +91,18 @@ def validate(plan, repo):
             condition = profiles.resolve(repo, case['task'], case['condition'], plan['runtime_by_task'][case['task']],
                                          task_revision=plan['task_revision'], approved_model_id=settings['model_id'])
             runtime = condition['runtime']
+            if (condition['intervention']['method'] == 'staged-explore') != bool(extra):
+                raise ValueError('Staged condition requires explicit request partitions and retry policy')
+            if extra:
+                from outer.harness import staged_input
+                staged_input.request_partition(condition['migration_request'],
+                    util.read_json(live_pilot.checked(plan['staged_inputs'][case['task']])))
             if (runtime['model_id'] != plan['settings']['model_id']
                     or runtime['timeout_seconds'] != bounds['run_seconds']
                     or runtime['provider_timeout_seconds'] != bounds['provider_seconds']):
                 raise ValueError('Approved budget/model differs from pinned runtime profile')
+    if extra and set(plan['staged_inputs']) != tasks:
+        raise ValueError('Exact task/staged partition mapping required')
     if set(plan['runtime_by_task']) != tasks or set(plan['runtime_locks']) != set(plan['runtime_by_task'].values()):
         raise ValueError('Exact task/runtime lock mapping required')
     for task in tasks:
@@ -117,6 +135,7 @@ def template(plan):
     # Preserve historical templates byte-for-byte; single-case mode is explicit.
     if plan['kind'] == SINGLE_KIND:
         result['cases_per_assignment'] = 1
+    for name in STAGED_FIELDS & set(plan): result[name] = copy.deepcopy(plan[name])
     return result
 
 

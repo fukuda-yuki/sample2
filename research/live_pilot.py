@@ -292,8 +292,14 @@ def validate_owned_terminal(root,binding,*,observe_resources=True):
     native_sessions=sorted({e['sessionID'] for e in native if isinstance(e.get('sessionID'),str)})
     native_steps=sum(e.get('type')=='step_finish' for e in native)
     sessions=provenance.get('native_agent_session_ids',[])
+    reached = normalized.get('input_reached') is True
+    if manifest.get('staged_input'):
+        stage = normalized.get('staged_input') or {}
+        context = util.read_json(root/'usage/context-evidence.json')
+        reached = (context.get('first_request_prompt_reached') is True and stage.get('issues') == []
+            and (stage.get('terminal') or {}).get('stop_confirmed') is True)
     if (normalized.get('usage_complete') is not True
-            or normalized.get('input_reached') is not True
+            or not reached
             or normalized.get('run_instance_id')!=binding['run_instance_id']
             or provenance.get('run_id')!=binding['run_id'] or provenance.get('run_instance_id')!=binding['run_instance_id']
             or provenance.get('expected_sessions')!=[binding['run_instance_id']]
@@ -599,9 +605,17 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
         binding={**binding,'phase_sha256':util.sha256_file(phase_path)}
         model_options = ({'approved_model_id': plan['settings']['model_id']}
                          if 'campaign_config' in plan else {})
-        manifest=profiles.create(repo,batch,binding['task'],binding['condition'],binding['attempt'],
-            phase['runtime'],run_instance_id=binding['run_instance_id'],assignment=binding,
-            task_revision=plan['task_revision'], **model_options)
+        if 'staged_inputs' in plan:
+            model_options['staged_plan'] = util.read_json(checked(plan['staged_inputs'][binding['task']]))
+        try:
+            manifest=profiles.create(repo,batch,binding['task'],binding['condition'],binding['attempt'],
+                phase['runtime'],run_instance_id=binding['run_instance_id'],assignment=binding,
+                task_revision=plan['task_revision'], **model_options)
+        except Exception:
+            if 'staged_inputs' in plan:
+                util.write_new_json(batch/'staged-preparation-failure.json',
+                    dict(binding=binding,kind='known_pre_dispatch_preparation_failure',at=run.now()))
+            raise
         attempt_path = batch/'pipeline-attempt.json'
         if attempt_path.is_file():
             attempt = util.read_json(attempt_path)

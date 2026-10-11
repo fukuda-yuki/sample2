@@ -92,6 +92,18 @@ class CampaignTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 fresh.verify_config(dict(config, **{key:value}), REPO)
 
+    def test_observation_runtime_uses_the_existing_campaign_and_epoch_path(self):
+        runtime_id='deepseek-music-observation-v1'
+        old=self.plan['runtime_by_task']['MS1-CONT-A']
+        lock=util.read_json(self.root/'lock.json');lock['runtime_profile_id']=runtime_id
+        util.write_json_atomic(self.root/'lock.json',lock)
+        self.plan['runtime_by_task']['MS1-CONT-A']=runtime_id
+        self.plan['runtime_locks']={runtime_id:live_pilot.reference(self.root/'lock.json')}
+        config=self.initialize('observation')
+        fresh.verify_config(config,REPO)
+        self.assertEqual(config['template']['runtime_by_task'],{'MS1-CONT-A':runtime_id})
+        self.assertNotIn(old,config['template']['runtime_locks'])
+
     def setup_engine(self):
         # The production epoch relocation uses the real prepared runtime path.
         self.patch(pipeline, 'PairWatch', side_effect=lambda *a: Mock(fault=None, finish=Mock(return_value=True)))

@@ -4,6 +4,8 @@
 この入口は既存Run部品による1条件または2条件の割付を扱い、条件・モデル・件数を提案しない。
 旧新100の `initialize(repo, summary_path, root)` と既存 `run config.json` は保持する。
 public Release は取得 admission の条件ではなく、解消済みの gate を追加しない。
+同一specの新観測buildを受入・本取得・保存成果物再評価で共通利用する場合は、
+[観測revisionと共通bundle](observation-reassessment.md)の明示bindingを用いる。
 
 ## 初期化
 

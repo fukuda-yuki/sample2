@@ -75,6 +75,10 @@ Run開始時にも承認済みepoch・partitionとdispatch journalを再照合�
 各Runは `manifest` のpath/hashと `raw_usage` のtree hashを明示する。停止・network回収済みで、
 UUIDの重複がなく、raw usageとmanifestが不変であることを検証し、既知資源と欠測を通常経路で再集計する。
 その起点からcampaign wallを数え、受入分のrequests/token/run時間を累積上限へ含める。
+受入originと全attemptは共通集計を使う。input/outputの各非負整数を個別に一度だけ加算し、
+片側欠測でも既知成分を落とさない。欠測requestの総量は `observed_tokens: null` のまま、
+`input_tokens` / `output_tokens` の既知値またはnull、`observed_tokens_lower_bound` と
+`missing_usage_fields` を併記する。累積上限はこの既知下限に適用し、cached/reasoningを重ねて足さない。
 受入Runを科学的割付・採用slot・本取得予約数へ足さず、過去の承認・採用判断も継承しない。
 receipt、実Run数、開始時刻、上限値は自動作成・推測せず、凍結計画に結び付く実測入力を必要とする。
 

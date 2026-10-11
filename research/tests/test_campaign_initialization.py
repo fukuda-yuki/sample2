@@ -163,6 +163,33 @@ class CampaignTests(unittest.TestCase):
         pipeline.run_pipeline(REPO, path)
         self.assertEqual(self.calls, 2)
 
+    def test_partial_failed_attempt_exhausts_cap_before_fresh_uuid_retry_dispatch(self):
+        self.plan['kind']=fresh.SINGLE_KIND
+        self.plan['assignments'][0]['cases']=self.plan['assignments'][0]['cases'][:1]
+        self.plan['bounds'].update(max_runs=1,observed_tokens=50)
+        config=self.initialize();self.setup_engine()
+        original=pipeline.live_pilot.execute_owned_pair_scope.side_effect
+        def fail_with_partial_usage(repo,epoch,phase_path,**kwargs):
+            result=original(repo,epoch,phase_path,**kwargs)
+            case=util.read_json(phase_path)['assignments'][0]['cases'][0]
+            path=Path(phase_path).parent/case['run_id']/'usage/raw/events.jsonl'
+            path.unlink()
+            util.append_line(path,dict(request_id='r',status='transport_error',
+                usage=dict(input_tokens=100,output_tokens=None)))
+            return result
+        pipeline.live_pilot.execute_owned_pair_scope.side_effect=fail_with_partial_usage
+        path=Path(config['root'])/'config.json'
+        with self.assertRaisesRegex(RuntimeError,'observed_tokens'):pipeline.run_pipeline(REPO,path)
+        self.assertEqual(self.calls,1)
+        events=pipeline.pair_execution.events(Path(config['root'])/'events.jsonl')
+        reservations=[event for event in events if event['kind']=='reserved']
+        self.assertEqual(len(reservations),1)
+        saved=util.read_json(Path(reservations[0]['record']).parent/'pipeline-acquisition.json')
+        self.assertEqual(saved['usage']['observed_tokens'],100)
+        self.assertIsNone(saved['usage']['unknown_usage_requests'][0]['output_tokens'])
+        with self.assertRaisesRegex(RuntimeError,'observed_tokens'):pipeline.run_pipeline(REPO,path)
+        self.assertEqual(self.calls,1)
+
     def test_save_before_accept_event_recovers_and_duplicate_reservation_stops(self):
         config = self.initialize(); scorer = self.setup_engine()
         normal = scorer.side_effect

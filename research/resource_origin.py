@@ -1,7 +1,9 @@
 """Private, hash-bound technical acceptance resources in the same global budget.
 
-This is accounting only: no adopted slots, retry reservations or authorization
-are inherited. The actual origin and closed Run inventory must be supplied.
+The shared acquisition collector retains each known input/output component even
+when its counterpart is missing. This is accounting only: no adopted slots,
+retry reservations or authorization are inherited. The actual origin and closed
+Run inventory must be supplied.
 """
 from datetime import datetime, timezone
 from pathlib import Path

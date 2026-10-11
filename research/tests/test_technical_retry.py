@@ -56,6 +56,15 @@ class TechnicalRetryTests(unittest.TestCase):
                 util.write_json_atomic(self.root/'manifest.json',dict(self.manifest,end_reason=reason))
                 self.assertIsNone(retry.classify(self.batch))
 
+    def test_sealed_partial_usage_keeps_known_component_and_missing_total(self):
+        path=self.root/'usage/raw/events.jsonl';path.unlink()
+        util.append_line(path,dict(self.event,usage=dict(input_tokens=100,output_tokens=None)))
+        saved=self.save();self.assertTrue(retry.eligible(self.batch,saved))
+        self.assertEqual(saved['usage']['observed_tokens'],100)
+        row=saved['usage']['unknown_usage_requests'][0]
+        self.assertEqual(row['input_tokens'],100);self.assertIsNone(row['output_tokens'])
+        self.assertIsNone(row['observed_tokens'])
+
     def test_auth_model_identity_and_unknown_cause_are_not_infrastructure(self):
         path=self.root/'usage/raw/events.jsonl'
         for changes in ({'http_status':401},{'http_status':400},{'session_id':'foreign'},

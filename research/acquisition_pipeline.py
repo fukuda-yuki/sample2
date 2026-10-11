@@ -53,6 +53,7 @@ def usage_for(batch):
 
 
 def usage_for_manifests(paths):
+    """Count every known token component once; incomplete request totals stay unknown."""
     result = dict(requests=0, observed_tokens=0, accumulated_run_seconds=0.,
                   dispatched_runs=0, unknown_usage_requests=[], missing_duration_runs=[])
     identities = set()
@@ -84,12 +85,16 @@ def usage_for_manifests(paths):
                 request_id=request_id, status='missing_terminal_event', observed_tokens=None))
         for row in rows:
             usage = row.get('usage')
-            if isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] >= 0
-                                              for k in ('input_tokens', 'output_tokens')):
-                result['observed_tokens'] += usage['input_tokens'] + usage['output_tokens']
-            else:
+            components = {key: usage[key] if isinstance(usage, dict)
+                and type(usage.get(key)) is int and usage[key] >= 0 else None
+                for key in ('input_tokens','output_tokens')}
+            known = sum(value for value in components.values() if value is not None)
+            result['observed_tokens'] += known
+            missing = [key for key,value in components.items() if value is None]
+            if missing:
                 result['unknown_usage_requests'].append(dict(run_instance_id=manifest['run_instance_id'],
-                    request_id=row.get('request_id'), status=row.get('status'), observed_tokens=None))
+                    request_id=row.get('request_id'), status=row.get('status'), observed_tokens=None,
+                    **components, observed_tokens_lower_bound=known, missing_usage_fields=missing))
     return result
 
 
@@ -100,6 +105,8 @@ class Budget:
         self.active = {}
         self.finished = {}
         self.total = copy.deepcopy(config['usage'])
+        if self.total.get('unknown_usage_requests'):
+            self.total['observed_tokens_are_lower_bound'] = True
 
     def check(self, identity, current):
         with self.lock:

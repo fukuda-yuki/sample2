@@ -234,6 +234,8 @@ def evaluate_pair(repo, attempt):
     process = next_phase_execution.browser_postprocess({'browser': {'record': browser}})
     journal = batch/'_control/pair-journal.jsonl'
     execution = dict(plan_sha256=attempt['epoch']['sha256'], cohort=phase['cohort'], runtime=phase['runtime'])
+    if plan.get('cases_per_assignment') == 1:
+        execution['cases_per_assignment'] = 1
     with pair_execution.exclusive(batch/'_control'):
         current = pair_execution.state(journal)
         assignments = list(current['reserved'].values())

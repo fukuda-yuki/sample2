@@ -293,6 +293,39 @@ class PlanBoundaries(unittest.TestCase):
             with self.assertRaises(FileExistsError): pilot.execute(self.repo,path,approval)
             self.assertEqual(before,util.tree_hashes(base)); self.assertEqual(len(calls),2)
 
+    def test_single_campaign_scope_dispatches_one_run_and_defers_scoring(self):
+        self.plan.update(kind=pilot.MAIN_KIND, cases_per_assignment=1)
+        self.plan['assignments'] = self.plan['assignments'][:1]
+        self.plan['assignments'][0]['cases'] = self.plan['assignments'][0]['cases'][:1]
+        path = self.root/'single-plan.json'; util.write_new_json(path, self.plan)
+        phase = pilot.observer_phase(self.plan, pilot.reference(path), 1)
+        batch = Path(phase['batch']); util.write_new_json(batch/'phase.json', phase)
+        watch = pilot.PilotWatch(self.plan, util.sha256_file(path))
+        Monitor, create, condition = self.controls()
+        calls = []
+        def implement(repo, batch, rid):
+            calls.append(rid)
+            manifest = util.read_json(batch/rid/'manifest.json')
+            return dict(run_id=rid, run_instance_id=manifest['run_instance_id'], stop_confirmed=True)
+        # Approval/genesis validation has its own campaign tests. Exercise the
+        # actual observer derivation, admission, pair journal and session counts.
+        with patch.object(pilot, 'owner_plan', return_value=self.plan), \
+             patch('research.resource_supervisor.ProcessMonitor', Monitor), \
+             patch.object(pilot.profiles, 'create', side_effect=create), \
+             patch.object(pilot.profiles, 'validate_run', side_effect=condition), \
+             patch.object(pilot.next_phase_execution, 'guarded_implementation', side_effect=implement), \
+             patch.object(pilot, 'validate_owned_terminal', side_effect=lambda root,b:dict(native_session_id=b['run_instance_id'])), \
+             patch.object(pilot.next_phase_execution, 'browser_postprocess', return_value=lambda *a:self.fail('No intermediate scoring')):
+            result = pilot.execute_owned_pair_scope(self.repo, path, batch/'phase.json',
+                budget_watch=watch, defer_postprocess=True)
+        self.assertEqual(result['reason'], 'evaluation_pending')
+        self.assertEqual(len(calls), 1)
+        current = pilot.pair_execution.state(batch/'_control/pair-journal.jsonl')
+        self.assertEqual(len(current['dispatch']), 1)
+        self.assertFalse(current['results'])
+        self.assertEqual(len(watch.native_sessions), 1)
+        self.assertIsNone(watch.fault)
+
     def test_unconfirmed_observer_ack_blocks_pilot_complete(self):
         path=self.freeze(); base=Path(self.plan['batch']); batch=base/'pair-1'
         watch=pilot.PilotWatch(self.plan,util.sha256_file(path)); Monitor,create,condition=self.controls()

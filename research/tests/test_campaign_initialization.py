@@ -113,7 +113,9 @@ class CampaignTests(unittest.TestCase):
         self.patch(pipeline.live_pilot, 'execute_owned_pair_scope', side_effect=acquire)
         def score(repo, record):
             attempt = util.read_json(record)
-            output = dict(accepted=True, slot=attempt['slot'], attempt=attempt['attempt'], quality={'explore':0,'preload':0})
+            phase = util.read_json(live_pilot.checked(attempt['phase']))
+            quality = {case['condition']: 0 for pair in phase['assignments'] for case in pair['cases']}
+            output = dict(accepted=True, slot=attempt['slot'], attempt=attempt['attempt'], quality=quality)
             util.write_new_json(Path(record).parent/'pipeline-evaluation.json', output)
             return dict(output, batch=str(Path(record).parent))
         # Relocation remains real in production. Only fixture's locked path is redirected.
@@ -187,6 +189,51 @@ class CampaignTests(unittest.TestCase):
         budget.finish('attempt', usage); budget.finish('attempt', usage)
         self.assertEqual(budget.total['requests'], 2)
         with self.assertRaises(ValueError): budget.finish('attempt', dict(usage, requests=3))
+
+    def test_single_condition_uses_one_run_per_slot_and_preserves_retry_resources(self):
+        self.plan['kind'] = fresh.SINGLE_KIND
+        self.plan['assignments'][0]['cases'] = self.plan['assignments'][0]['cases'][:1]
+        self.plan['bounds']['max_runs'] = 1
+        config = self.initialize()
+        self.assertEqual(config['template']['cases_per_assignment'], 1)
+        self.assertEqual(config['policy']['active_model_runs'], 1)
+        fresh.verify_config(config, REPO)
+        self.setup_engine()
+        path = Path(config['root'])/'config.json'
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(len(set(self.uuids)), 2)
+        events = pipeline.pair_execution.events(Path(config['root'])/'events.jsonl')
+        complete = [e for e in events if e['kind'] == 'complete'][-1]
+        self.assertEqual(complete['usage']['requests'], 2)
+        self.assertEqual(complete['usage']['observed_tokens'], 10)
+        self.assertEqual(complete['usage']['accumulated_run_seconds'], 4)
+        self.assertEqual([e['quality'] for e in events if e['kind'] == 'accepted'], [{'explore': 0}])
+        for event in events:
+            if event['kind'] == 'reserved':
+                receipt = util.read_json(Path(event['record']).parent/'pipeline-acquisition.json')
+                self.assertEqual(len(receipt['runs']), 1)
+                self.assertEqual(receipt['runs'][0]['condition'], 'explore')
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+
+    def test_single_mode_requires_explicit_kind_width_and_matching_budget(self):
+        self.plan['assignments'][0]['cases'] = self.plan['assignments'][0]['cases'][:1]
+        with self.assertRaises(ValueError): fresh.validate(self.plan, REPO)
+        self.plan['kind'] = fresh.SINGLE_KIND
+        with self.assertRaises(ValueError): fresh.validate(self.plan, REPO)
+        self.plan['bounds']['max_runs'] = 1
+        fresh.validate(self.plan, REPO)
+        self.plan['assignments'][0]['cases'] *= 2
+        with self.assertRaises(ValueError): fresh.validate(self.plan, REPO)
+
+    def test_single_mode_cannot_mix_condition_names_across_assignments(self):
+        cases = self.plan['assignments'][0]['cases']
+        self.plan.update(kind=fresh.SINGLE_KIND, pair_count=2,
+            assignments=[dict(pair=i, cases=[dict(case, pair=i, slot=1)])
+                         for i, case in enumerate(cases, 1)])
+        self.plan['bounds'].update(max_pairs=2, max_runs=2)
+        with self.assertRaisesRegex(ValueError, 'one condition'):
+            fresh.validate(self.plan, REPO)
 
 
 if __name__ == '__main__': unittest.main()

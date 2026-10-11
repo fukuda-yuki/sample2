@@ -59,6 +59,38 @@ class PairExecutionTests(unittest.TestCase):
     def test_serial_regression(self):
         self.execute(concurrency=1); self.assertEqual(self.peak,1); self.assertEqual(self.stopped,['A','B'])
 
+    def test_single_case_declared_width_no_dummy_peer_and_no_redispatch(self):
+        self.cases = self.cases[:1]
+        with self.assertRaises(ValueError): self.execute(concurrency=1)
+        self.assertFalse(self.batch.exists())
+        self.plan.update(cases_per_assignment=1, pair_concurrency=1, require_fixed_instances=True)
+        self.cases[0]['run_instance_id'] = '1'*32
+        result = self.execute(concurrency=1, defer_postprocess=True)
+        self.assertEqual(result['runs'], ['A'])
+        self.assertEqual(self.stopped, ['A'])
+        self.assertFalse(self.heavy)
+        current = pair.state(self.batch/'_control/pair-journal.jsonl')
+        self.assertEqual(list(current['reserved']), ['A'])
+        self.assertEqual(current['reserved']['A']['run_instance_id'], '1'*32)
+        self.assertEqual(self.execute(concurrency=1)['reason'], 'dispatched_identity_never_replayed')
+        with self.assertRaisesRegex(ValueError, 'width'):
+            pair._verify_plan({k:v for k,v in self.plan.items() if k != 'cases_per_assignment'}, current)
+
+    def test_single_case_recovery_postprocesses_after_terminal_barrier(self):
+        self.cases = self.cases[:1]
+        self.plan.update(cases_per_assignment=1, pair_concurrency=1)
+        self.execute(concurrency=1, defer_postprocess=True)
+        scored = []
+        def postprocess(repo, batch, rid, archive):
+            self.assertEqual(self.stopped, ['A'])
+            scored.append(rid)
+            return {'run_id': rid, 'verdict': 'fail'}
+        result = pair.recover_pair(self.plan, self.batch, repo=self.root, postprocess=postprocess)
+        self.assertEqual(result['runs'], ['A'])
+        self.assertEqual(scored, ['A'])
+        pair.recover_pair(self.plan, self.batch, repo=self.root, postprocess=postprocess)
+        self.assertEqual(scored, ['A'])
+
     def test_acquisition_can_finish_before_any_evaluation(self):
         result=self.execute(defer_postprocess=True)
         self.assertEqual(result['reason'],'evaluation_pending')

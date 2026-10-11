@@ -2,7 +2,11 @@
 
 This is a new evaluator version, not a replacement of the frozen
 `education-1.0.0` binary, requirements, results or acquisition inputs. The
-implementation revision is `education-1.1.0-observation-1`. Run reassessment
+initial acceptance revision was `education-1.1.0-observation-1`. The current
+limited marker changes and synthetic validation are described in
+[limited evaluator review](../../../docs/limited-evaluator-review.md), with
+implementation revision `education-1.1.0-observation-2`. The historical
+acceptance evidence below is not a rescore. Run reassessment
 must use a separate evaluation ID and output root bound to the original
 artifact, original acquisition identity and this new binary/spec identity.
 

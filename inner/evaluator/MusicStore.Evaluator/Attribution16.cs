@@ -342,7 +342,14 @@ public static class Attribution16
             {
                 using var json=System.Text.Json.JsonDocument.Parse(response.Body??"");
                 var properties=json.RootElement.EnumerateObject().Where(x=>x.Name.Equals("itemCount",StringComparison.OrdinalIgnoreCase)).ToArray();
-                c.Assert(properties.Length==1 && properties[0].Value.TryGetInt32(out var n) && n==quantity-1,"Removal JSON has one correct itemCount integer");
+                // R-014/R-015 require the remaining quantity. Distinct casing
+                // aliases may agree on it. Identical member names with correct
+                // equal values remain unresolved under the limited adjudication.
+                var valuesCorrect=properties.Length>0 && properties.All(x=>x.Value.TryGetInt32(out var n) && n==quantity-1);
+                c.Assert(valuesCorrect,
+                    "Removal JSON itemCount casing aliases consistently report the correct integer");
+                if(valuesCorrect)c.Require(properties.Select(x=>x.Name).Distinct(StringComparer.Ordinal).Count()==properties.Length,
+                    "Equal repeated JSON member names are outside the adjudicated casing-alias contract.");
             }
             catch(System.Text.Json.JsonException) {c.Assert(false,"Removal response is a JSON object");}
             catch(InvalidOperationException) {c.Assert(false,"Removal response has a numeric itemCount");}

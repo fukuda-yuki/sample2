@@ -96,6 +96,15 @@ class SupervisorTests(unittest.TestCase):
             env=supervisor.safe_environment()
         self.assertNotIn('OPENCODE_GO_API_KEY',env);self.assertNotIn('OTHER_SECRET',env)
 
+    def test_single_assignment_observer_requires_complete_explicit_scope(self):
+        self.phase['assignments'][0]['cases'] = self.phase['assignments'][0]['cases'][:1]
+        self.request['bindings'] = self.bindings[:1]
+        with self.assertRaises(ValueError): supervisor.validate_scope(self.phase, self.request)
+        self.phase['cases_per_assignment'] = 1
+        self.assertEqual(supervisor.validate_scope(self.phase, self.request), self.bindings[:1])
+        with self.assertRaises(ValueError):
+            supervisor.validate_scope(self.phase, dict(self.request, bindings=self.bindings))
+
     def runtime(self,binding):
         state={k:binding[k] for k in ('run_id','run_instance_id')}
         state.update(worker='worker-'+binding['run_id'],gateway='gateway-'+binding['run_id'])

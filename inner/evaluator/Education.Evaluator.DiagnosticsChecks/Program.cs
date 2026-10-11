@@ -110,14 +110,15 @@ try
     var baseline = Path.Combine(root, "baseline"); Directory.CreateDirectory(baseline);
     var output = Path.Combine(root, "output"); Directory.CreateDirectory(output);
     var evidence = Path.Combine(output, "evidence"); Directory.CreateDirectory(evidence);
+    Set("evidence",evidence);MarkerContractChecks.Run(Require);
     var school = Path.Combine(output, "browser-school"); Directory.CreateDirectory(school);
     const string artifactHash = "synthetic-artifact", specHash = "synthetic-spec", instance = "synthetic-instance";
     var requirements = new JsonArray();
     for (var i = 1; i <= 12; i++)
     {
-        var judgement = i == 1 ? "pass" : i == 3 ? "fail" : "blocked";
+        var judgement = i == 1 ? "pass" : i is 3 or 8 or 10 ? "fail" : "blocked";
         results[$"E-{i:000}"] = (judgement, "synthetic HTTP baseline");
-        requirements.Add(new JsonObject { ["id"] = $"EDU-R-{i:000}", ["severity"] = i == 3 ? "critical" : "normal", ["judgement"] = judgement,
+        requirements.Add(new JsonObject { ["id"] = $"EDU-R-{i:000}", ["severity"] = i is 3 or 8 or 10 ? "critical" : "normal", ["judgement"] = judgement,
             ["checks"] = new JsonArray(new JsonObject { ["id"] = $"E-{i:000}" }) });
     }
     var ledger = new JsonObject { ["taskId"] = "synthetic", ["specVersion"] = Evaluator.Version, ["requirements"] = requirements };
@@ -170,6 +171,28 @@ try
     receipt["database"] = Ref("database.json"); File.WriteAllText(receiptPath, receipt.ToJsonString());
     Call("Compose");
     Require(results["E-012"].judgement == "pass", "exact UI and stored date still pass browser criterion");
+    {
+        var capturePath=Path.Combine(school,"after.json");var captured=JsonNode.Parse(File.ReadAllText(capturePath))!;
+        var original=captured.DeepClone();var fields=new Dictionary<string,string>{["studentId"]="student-id",["firstName"]="student-first-name",["lastName"]="student-last-name",["enrollmentDate"]="student-enrollment-date",["fullName"]="student-full-name"};
+        var observations=new JsonObject();captured["page"]!["markerObservations"]=observations;
+        foreach(var pair in fields)observations[pair.Value]=new JsonObject{["status"]="observed",["value"]=captured["page"]![pair.Key]!.ToString()};
+        void SaveCapture(){File.WriteAllText(capturePath,captured.ToJsonString());receipt["after"]=Ref("after.json");File.WriteAllText(receiptPath,receipt.ToJsonString());}
+        SaveCapture();Call("Compose");
+        Require(results["E-012"].judgement=="pass","ordinary composition accepts independently observed visible named markers");
+        observations["student-id"]!["status"]="unresolved";captured["page"]!["studentId"]=null;
+        SaveCapture();Call("Compose");Call("Emit",(object)Array.Empty<string>());
+        Require(results["E-012"].judgement=="blocked"&&Output()["quality"]==null&&Output()["requirements"]!.AsArray().Count==12,"attribute-only ID holds browser result without shrinking requirement denominator");
+        Require(results["E-008"].judgement=="fail"&&results["E-010"].judgement=="fail"&&Output()["verdict"]!.ToString()=="fail_critical","marker hold never erases baseline invalid-input or DB-mutation failures");
+        database["student"]!["FirstMidName"]="Wrong";File.WriteAllText(Path.Combine(school,"database.json"),database.ToJsonString());receipt["database"]=Ref("database.json");
+        SaveCapture();Call("Compose");Require(results["E-012"].judgement=="fail","wrong independently read DB value dominates unresolved UI ID");
+        var firstObservation=observations["student-first-name"]!.DeepClone();observations.Remove("student-first-name");SaveCapture();
+        Require(CompositionFault()&&results["E-012"].judgement=="fail","known DB mismatch survives a subsequent malformed marker observation");
+        observations["student-first-name"]=firstObservation;
+        database["student"]!["FirstMidName"]="Morgan";File.WriteAllText(Path.Combine(school,"database.json"),database.ToJsonString());receipt["database"]=Ref("database.json");
+        observations["student-first-name"]!["status"]="invalid";observations["student-first-name"]!["value"]=null;captured["page"]!["firstName"]=null;
+        SaveCapture();Call("Compose");Require(results["E-012"].judgement=="fail","correct DB does not substitute for a missing visible name");
+        captured=original;SaveCapture();Call("Compose");Require(results["E-012"].judgement=="pass","historical capture representation remains compatible after unresolved evidence");
+    }
     var afterPath=Path.Combine(school,"after.json");var after=JsonNode.Parse(File.ReadAllText(afterPath))!;
     after["page"]!["enrollmentDate"]="2026-02-03 00:00:00";File.WriteAllText(afterPath,after.ToJsonString());receipt["after"]=Ref("after.json");File.WriteAllText(receiptPath,receipt.ToJsonString());
     Call("Compose");Require(results["E-012"].judgement=="fail", "DB date equivalence never relaxes the exact UI date contract");

@@ -234,6 +234,8 @@ def evaluate_pair(repo, attempt):
     process = next_phase_execution.browser_postprocess({'browser': {'record': browser}})
     journal = batch/'_control/pair-journal.jsonl'
     execution = dict(plan_sha256=attempt['epoch']['sha256'], cohort=phase['cohort'], runtime=phase['runtime'])
+    if plan.get('cases_per_assignment') == 1:
+        execution['cases_per_assignment'] = 1
     with pair_execution.exclusive(batch/'_control'):
         current = pair_execution.state(journal)
         assignments = list(current['reserved'].values())
@@ -316,7 +318,30 @@ def pending_acquisition_slots(config, attempts, accepted):
         if attempt['slot'] in accepted: continue
         batch = Path(attempt['record']).parent
         saved = util.read_json(batch/'pipeline-acquisition.json')
-        if not saved['acquired']: continue
+        if not saved['acquired']:
+            retry = config.get('template',{}).get('staged_retry')
+            if retry is not None:
+                # A gateway's absence alone does not prove no dispatch. The
+                # owner writes dispatch before entering runtime.start, so only
+                # a complete reserved journal without that event permits the
+                # separately approved preparation retry. Unknown means hold.
+                try:
+                    current = pair_execution.state(batch/'_control/pair-journal.jsonl')
+                    preparation = util.read_json(batch/'staged-preparation-failure.json')
+                    attempt_record = util.read_json(attempt['record'])
+                    phase = util.read_json(live_pilot.checked(attempt_record['phase']))
+                    cases = [c for p in phase['assignments'] for c in p['cases']]
+                    binding = preparation['binding']
+                    safe = (preparation['kind']=='known_pre_dispatch_preparation_failure'
+                        and len(cases)==1 and all(binding.get(k)==v for k,v in cases[0].items())
+                        and not current['dispatch'])
+                    safe = safe and saved['usage']['dispatched_runs'] == 0 and saved['usage']['requests'] == 0
+                    safe = safe and not saved['usage']['unknown_usage_requests']
+                    safe = safe and all(not util.read_json(p).get('started_at') for p in batch.glob('*/manifest.json'))
+                except (OSError,ValueError,KeyError,TypeError): safe = False
+                count = sum(a['slot'] == attempt['slot'] for a in attempts)
+                if not safe or count > retry['known_pre_dispatch_retries']: held.add(attempt['slot'])
+            continue
         output = batch/'pipeline-evaluation.json'
         decision = util.read_json(output) if output.exists() else {}
         excluded = ('campaign_plan' not in config and decision.get('accepted') is False

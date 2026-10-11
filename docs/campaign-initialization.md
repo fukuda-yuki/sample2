@@ -1,7 +1,7 @@
 # 新 campaign の初期化と producer 契約
 
 研究計画・科学的割付・コホート・分析・論文は misc の正本を参照する。
-この入口は既存の2条件ペアエンジン専用で、条件・モデル・件数を提案しない。
+この入口は既存Run部品による1条件または2条件の割付を扱い、条件・モデル・件数を提案しない。
 旧新100の `initialize(repo, summary_path, root)` と既存 `run config.json` は保持する。
 public Release は取得 admission の条件ではなく、解消済みの gate を追加しない。
 
@@ -20,9 +20,9 @@ epoch、承認文言、UUID、累積 usage の持込みを拒否する。新し�
 
 | 計画項目 | 境界 |
 | --- | --- |
-| `kind`, `campaign_id`, `output_root` | kind は `approved_acquisition_campaign_v1`。未使用の絶対保存先。source/protected root と祖先・子孫関係を持たない |
+| `kind`, `campaign_id`, `output_root` | 2条件は `approved_acquisition_campaign_v1`、1条件は `approved_single_condition_campaign_v1`。未使用の絶対保存先。source/protected root と祖先・子孫関係を持たない |
 | `pair_count`, `pair_concurrency` | 正の明示件数、既存 engine の1または2ペア並列。評価 worker は既存の1本 |
-| `assignments` | 1始まり連続 `pair` と2つの `cases`。case は `task`, `condition`, `pair`, `slot`, `attempt`, `run_id`。同一task・異なる2条件。UUIDは各epochで新規生成 |
+| `assignments` | 1始まり連続 `pair` と kind に一致する数の `cases`。case は `task`, `condition`, `pair`, `slot`, `attempt`, `run_id`。2条件は同一task・異なる2条件。1条件は全割付で1つの条件名を使用し、各割付のslotは1。UUIDは各epochで新規生成 |
 | `runtime_by_task`, `task_revision`, `settings` | 指定された既存profileとの一致。既存Go endpointと balance OFF・paid fallback OFF を保持。新入口だけが承認planのmodel IDを `profiles.resolve` へ渡し、指定profileとの一致を要求する。旧呼出しのDeepSeek固定は保持。新モデルprofileの作成・取得は行わず、万能providerへ拡張しない |
 | `bounds` | `live_pilot.BOUNDS` の全キーと `max_pair_attempts`。全て正の整数。max_pairs/max_runs は件数と一致。run/provider秒はruntime profileと一致 |
 | `protected_roots`, `runtime_locks`, `browser_pin`, `resource_monitor`, `resource_probe`, `thresholds` | 明示した保護先・path/hash付き固定資材。既存の資源監視・所有権・評価器bindingを維持 |
@@ -32,9 +32,29 @@ clean commit、承認hash、入力計画、固定資材の検証後に、空の 
 `run` は承認と genesis を再照合する。実送信には別途その計画の有効な実行指示が必要。
 今回のコード修正の依頼は実送信許可ではない。
 
-新 campaign では旧評価除外 receipt による再取得を許可しない。技術障害だけを fresh UUID で
+1条件でも既存の保存上の `pair_count` / `pair` / `max_pairs` / `max_pair_attempts` は
+割付枠を数える。対照Runは生成しない。`max_runs = pair_count`、同時Run数は
+`pair_concurrency`（同時割付枠数）となる。2条件の件数・保存形式は従来どおり。
+単一条件のtemplate・観測phase・予約bindingには `cases_per_assignment: 1` を記録し、
+再開時に幅の変更を拒否する。未送信・技術障害・低品質と全試行資源は既存receiptへ保持する。
+`staged-explore` の追加入力は明示partitionと固定server/API経路を使用する。
+要求分割・証跡・未受入の範囲は[固定CLIの能力確認](staged-input-capability.md)を参照する。
+
+新 campaign では旧評価除外 receipt による再取得を許可しない。通常経路は技術障害だけを fresh UUID で
 再試行し、取得できた生成物の評価障害は保存物の復旧へ送る。低品質は保持・採用され、品質に
 基づく取り直しをしない。未知send/中断取得は資源回収を確認するまで停止する。
+
+段階入力は1条件のkindだけで扱い、`staged_inputs` と `staged_retry` の両方を追加する。
+`staged_inputs` は全taskのpartitionファイルへのpath/hash参照。元の最終要求、section全文、
+初回/追加section ID、境界transportとsnapshot policyを固定し、workerへ渡すのは初回分だけ。
+公開リポジトリへ実partition本文や承認receiptを追加しない。
+`staged_retry` は `known_pre_dispatch_retries`（0または1）と `after_dispatch_retries`（0）の明示値。
+known preparation failureのreceiptと送信不存在の証拠が揃わなければ、新UUIDも発行せず保留する。
+成功・失敗・未到達を理由に送信後の取得を取り直さず、全試行資源を保持する。
+追加入力の到達状態は `normalized.staged_input` にあり、初回到達と追加未到達を区別する。
+そのcheckpointsには初期/送信前/追加後最初の変更/最終の私有archiveまたはnullと理由を残す。
+Run開始時にも承認済みepoch・partitionとdispatch journalを再照合し、直接起動による迂回を拒否する。
+この状態を集計するときは、未到達Runを分母から黙って落とさない。
 
 ## misc に渡す最小追加項目
 

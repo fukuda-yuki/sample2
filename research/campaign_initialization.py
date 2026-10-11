@@ -1,4 +1,4 @@
-"""Fresh approved campaigns for the existing bounded two-arm engine.
+"""Fresh approved campaigns for bounded one- or two-case assignments.
 
 No scientific defaults, inherited authorization, acquisition or scoring at init.
 The approval is a local user receipt, not a cryptographic identity assertion.
@@ -13,11 +13,13 @@ from outer.harness import profiles, run, util
 from research import live_pilot
 
 KIND = 'approved_acquisition_campaign_v1'
+SINGLE_KIND = 'approved_single_condition_campaign_v1'
 FIELDS = {'kind', 'campaign_id', 'output_root', 'pair_count', 'pair_concurrency',
           'assignments', 'runtime_by_task', 'task_revision', 'bounds', 'settings',
           'protected_roots', 'resource_monitor', 'resource_probe', 'browser_pin',
           'runtime_locks', 'thresholds'}
 BOUNDS = set(live_pilot.BOUNDS) | {'max_pair_attempts'}
+STAGED_FIELDS = {'staged_inputs', 'staged_retry'}
 
 
 def read_approved(plan_ref, approval_ref):
@@ -32,8 +34,18 @@ def read_approved(plan_ref, approval_ref):
 
 
 def validate(plan, repo):
-    if set(plan) != FIELDS or plan.get('kind') != KIND:
+    extra = set(plan)-FIELDS
+    if (not FIELDS <= set(plan) or extra not in (set(), STAGED_FIELDS)
+            or plan.get('kind') not in (KIND, SINGLE_KIND)):
         raise ValueError('Explicit fresh campaign fields required; no inherited template/history')
+    width = 1 if plan['kind'] == SINGLE_KIND else 2
+    if extra:
+        retry = plan['staged_retry']
+        if (width != 1 or set(retry) != {'known_pre_dispatch_retries','after_dispatch_retries'}
+                or type(retry['known_pre_dispatch_retries']) is not int
+                or retry['known_pre_dispatch_retries'] not in (0,1)
+                or type(retry['after_dispatch_retries']) is not int or retry['after_dispatch_retries'] != 0):
+            raise ValueError('Explicit bounded staged retry policy required')
     profiles.identifier(plan['campaign_id'])
     root = live_pilot.safe_path(plan['output_root'])
     if not plan['protected_roots']:
@@ -48,7 +60,7 @@ def validate(plan, repo):
     bounds = plan['bounds']
     if set(bounds) != BOUNDS or any(type(v) is not int or v <= 0 for v in bounds.values()):
         raise ValueError('Explicit positive finite budgets required')
-    if bounds['max_pairs'] != n or bounds['max_runs'] != 2*n or bounds['max_pair_attempts'] < n:
+    if bounds['max_pairs'] != n or bounds['max_runs'] != width*n or bounds['max_pair_attempts'] < n:
         raise ValueError('Count and attempt budget mismatch')
     settings = plan['settings']
     if (set(settings) != {'model_id', 'provider', 'use_balance', 'paid_fallback'}
@@ -59,13 +71,15 @@ def validate(plan, repo):
         raise ValueError('Existing resource safety thresholds required')
     if len(plan['assignments']) != n:
         raise ValueError('Explicit assignment count mismatch')
+    if width == 1 and len({c['condition'] for p in plan['assignments'] for c in p['cases']}) != 1:
+        raise ValueError('Single-condition campaign requires one condition across all assignments')
     tasks = set()
     for index, pair in enumerate(plan['assignments'], 1):
-        if type(pair.get('pair')) is not int or pair['pair'] != index or len(pair.get('cases', [])) != 2:
-            raise ValueError('Contiguous explicit two-arm pairs required')
+        if type(pair.get('pair')) is not int or pair['pair'] != index or len(pair.get('cases', [])) != width:
+            raise ValueError('Contiguous assignments with the declared case count required')
         cases = pair['cases']
-        if len({c['task'] for c in cases}) != 1 or len({c['condition'] for c in cases}) != 2:
-            raise ValueError('Each pair needs one task and two distinct conditions')
+        if len({c['task'] for c in cases}) != 1 or len({c['condition'] for c in cases}) != width:
+            raise ValueError('Each assignment needs one task and distinct conditions')
         for slot, case in enumerate(cases, 1):
             if set(case) != {'task', 'condition', 'pair', 'slot', 'attempt', 'run_id'}:
                 raise ValueError('Plan assignments must not carry old Run UUIDs or state')
@@ -77,10 +91,18 @@ def validate(plan, repo):
             condition = profiles.resolve(repo, case['task'], case['condition'], plan['runtime_by_task'][case['task']],
                                          task_revision=plan['task_revision'], approved_model_id=settings['model_id'])
             runtime = condition['runtime']
+            if (condition['intervention']['method'] == 'staged-explore') != bool(extra):
+                raise ValueError('Staged condition requires explicit request partitions and retry policy')
+            if extra:
+                from outer.harness import staged_input
+                staged_input.request_partition(condition['migration_request'],
+                    util.read_json(live_pilot.checked(plan['staged_inputs'][case['task']])))
             if (runtime['model_id'] != plan['settings']['model_id']
                     or runtime['timeout_seconds'] != bounds['run_seconds']
                     or runtime['provider_timeout_seconds'] != bounds['provider_seconds']):
                 raise ValueError('Approved budget/model differs from pinned runtime profile')
+    if extra and set(plan['staged_inputs']) != tasks:
+        raise ValueError('Exact task/staged partition mapping required')
     if set(plan['runtime_by_task']) != tasks or set(plan['runtime_locks']) != set(plan['runtime_by_task'].values()):
         raise ValueError('Exact task/runtime lock mapping required')
     for task in tasks:
@@ -105,11 +127,16 @@ def validate(plan, repo):
 
 
 def template(plan):
-    return {k: copy.deepcopy(plan[k]) for k in (
+    result = {k: copy.deepcopy(plan[k]) for k in (
         'assignments', 'runtime_by_task', 'task_revision', 'bounds', 'settings',
         'protected_roots', 'resource_monitor', 'resource_probe', 'browser_pin',
         'runtime_locks', 'thresholds', 'pair_concurrency')} | dict(
         kind=live_pilot.MAIN_KIND, schema_version=1, require_fixed_instances=True)
+    # Preserve historical templates byte-for-byte; single-case mode is explicit.
+    if plan['kind'] == SINGLE_KIND:
+        result['cases_per_assignment'] = 1
+    for name in STAGED_FIELDS & set(plan): result[name] = copy.deepcopy(plan[name])
+    return result
 
 
 def initialize(repo, plan_path, approval_path):
@@ -132,7 +159,8 @@ def initialize(repo, plan_path, approval_path):
         accepted_slots=[], attempted_slots=[], reserved_pair_attempts=0,
         usage=dict(requests=0, observed_tokens=0, accumulated_run_seconds=0., dispatched_runs=0,
                    unknown_usage_requests=[]), bounds=copy.deepcopy(plan['bounds']), started_at=run.now(),
-        policy=dict(active_model_pairs=plan['pair_concurrency'], active_model_runs=2*plan['pair_concurrency'],
+        policy=dict(active_model_pairs=plan['pair_concurrency'],
+                    active_model_runs=(1 if plan['kind'] == SINGLE_KIND else 2)*plan['pair_concurrency'],
                     evaluation_workers=1, quality_selection=False, intermediate_publication=False), at=run.now())
     root.mkdir(parents=True, exist_ok=False)
     util.write_new_json(root/'config.json', config)
@@ -151,6 +179,7 @@ def verify_config(config, repo):
             or config['pair_count'] != plan['pair_count'] or config['template'] != template(plan)
             or config['bounds'] != plan['bounds']
             or config['policy']['active_model_pairs'] != plan['pair_concurrency']
+            or config['policy']['active_model_runs'] != (1 if plan['kind'] == SINGLE_KIND else 2)*plan['pair_concurrency']
             or config['policy'].get('quality_selection') is not False
             or config['accepted_slots'] or config['attempted_slots'] or config['reserved_pair_attempts']
             or config['usage'] != dict(requests=0, observed_tokens=0, accumulated_run_seconds=0.,

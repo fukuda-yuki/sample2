@@ -84,7 +84,8 @@ def validate_scope(phase, request):
         raise ValueError('Incorrect phase generation')
     cases = {c['run_id']: c for p in phase['assignments'] for c in p['cases']}
     bindings = request['bindings']
-    if len(bindings) not in (0, 2, 4) or len({b['run_id'] for b in bindings}) != len(bindings):
+    allowed = (0, 1) if phase.get('cases_per_assignment') == 1 else (0, 2, 4)
+    if len(bindings) not in allowed or len({b['run_id'] for b in bindings}) != len(bindings):
         raise ValueError('Invalid fixed scope')
     if bindings and sorted({b['pair'] for b in bindings}) != request['pairs']:
         raise ValueError('Wave differs from enrolled bindings')

@@ -210,13 +210,16 @@ def observer_phase(plan, plan_reference, pair_number, *, batch=None, cohort=None
     selected=next(p for p in plan['assignments'] if p['pair']==pair_number)
     task=selected['cases'][0]['task']
     observer_kind={KIND:OBSERVER_KIND,MAIN_KIND:MAIN_KIND,RECOVERY_KIND:RECOVERY_OBSERVER_KIND,TRIAL_KIND:TRIAL_OBSERVER_KIND}[plan['kind']]
-    return dict(schema_version=1,kind=observer_kind,owner_kind=plan['kind'],
+    result = dict(schema_version=1,kind=observer_kind,owner_kind=plan['kind'],
         original_bundle=plan_reference,phase_id=plan['phase_id']+'-p'+str(pair_number),
         batch=str(batch or Path(plan['batch'])/('pair-'+str(pair_number))),
         cohort=cohort or plan['cohort']+'/pair-'+str(pair_number),
         runtime=plan['runtime_by_task'][task],assignments=[selected],two_pair_blocks=[[pair_number]],
         source_pins=plan['source_pins'],resource_monitor=plan['resource_monitor'],
         resource_probe=plan['resource_probe'],thresholds=plan['thresholds'])
+    if plan.get('cases_per_assignment') == 1:
+        result['cases_per_assignment'] = 1
+    return result
 
 
 def validate_observer_phase(phase,repo):
@@ -289,8 +292,14 @@ def validate_owned_terminal(root,binding,*,observe_resources=True):
     native_sessions=sorted({e['sessionID'] for e in native if isinstance(e.get('sessionID'),str)})
     native_steps=sum(e.get('type')=='step_finish' for e in native)
     sessions=provenance.get('native_agent_session_ids',[])
+    reached = normalized.get('input_reached') is True
+    if manifest.get('staged_input'):
+        stage = normalized.get('staged_input') or {}
+        context = util.read_json(root/'usage/context-evidence.json')
+        reached = (context.get('first_request_prompt_reached') is True and stage.get('issues') == []
+            and (stage.get('terminal') or {}).get('stop_confirmed') is True)
     if (normalized.get('usage_complete') is not True
-            or normalized.get('input_reached') is not True
+            or not reached
             or normalized.get('run_instance_id')!=binding['run_instance_id']
             or provenance.get('run_id')!=binding['run_id'] or provenance.get('run_instance_id')!=binding['run_instance_id']
             or provenance.get('expected_sessions')!=[binding['run_instance_id']]
@@ -596,9 +605,17 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
         binding={**binding,'phase_sha256':util.sha256_file(phase_path)}
         model_options = ({'approved_model_id': plan['settings']['model_id']}
                          if 'campaign_config' in plan else {})
-        manifest=profiles.create(repo,batch,binding['task'],binding['condition'],binding['attempt'],
-            phase['runtime'],run_instance_id=binding['run_instance_id'],assignment=binding,
-            task_revision=plan['task_revision'], **model_options)
+        if 'staged_inputs' in plan:
+            model_options['staged_plan'] = util.read_json(checked(plan['staged_inputs'][binding['task']]))
+        try:
+            manifest=profiles.create(repo,batch,binding['task'],binding['condition'],binding['attempt'],
+                phase['runtime'],run_instance_id=binding['run_instance_id'],assignment=binding,
+                task_revision=plan['task_revision'], **model_options)
+        except Exception:
+            if 'staged_inputs' in plan:
+                util.write_new_json(batch/'staged-preparation-failure.json',
+                    dict(binding=binding,kind='known_pre_dispatch_preparation_failure',at=run.now()))
+            raise
         attempt_path = batch/'pipeline-attempt.json'
         if attempt_path.is_file():
             attempt = util.read_json(attempt_path)
@@ -632,7 +649,7 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
                 raise ValueError('Prepared pilot condition identity changed')
             if not ready: monitor.enroll_ready(scope()); ready=True
             monitor.admit(expected); budget_watch.check()
-            if len(admitted)>=2: raise ValueError('Pair dispatch cap reached')
+            if len(admitted)>=plan.get('cases_per_assignment', 2): raise ValueError('Assignment dispatch cap reached')
             admitted.append(binding['run_id']); budget_watch.run_clocks[binding['run_id']]=time.monotonic()
             yield
     def implement(repo,batch,rid):
@@ -651,9 +668,12 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
         monitor.start()
         monitor.enroll_ready(scope())
         with budget_watch.lock: budget_watch.monitors.append(monitor)
-        result=pair_execution.execute_pair(dict(plan_sha256=digest,cohort=phase['cohort'],
-            runtime=phase['runtime'],pair_concurrency=2,require_fixed_instances=True),
-            phase['assignments'][0]['cases'],batch,repo=repo,concurrency=2,
+        width=plan.get('cases_per_assignment', 2)
+        execution=dict(plan_sha256=digest,cohort=phase['cohort'],
+            runtime=phase['runtime'],pair_concurrency=width,require_fixed_instances=True)
+        if width == 1: execution['cases_per_assignment'] = 1
+        result=pair_execution.execute_pair(execution,
+            phase['assignments'][0]['cases'],batch,repo=repo,concurrency=width,
             prepare=prepare,implement=implement,postprocess=postprocess,admit=admit,
             defer_postprocess=defer_postprocess)
         budget_watch.check()
@@ -662,7 +682,7 @@ def execute_owned_pair_scope(repo,owner_plan_path,phase_path,*,budget_watch,post
         else:
             proofs=[validate_owned_terminal(batch/b['run_id'],b) for b in bindings]
             sessions={p['native_session_id'] for p in proofs}
-            if len(sessions)!=2 or sessions & budget_watch.native_sessions:
+            if len(sessions)!=width or sessions & budget_watch.native_sessions:
                 raise ValueError('Native session reused across Run instances')
             budget_watch.native_sessions.update(sessions)
             util.write_new_json(batch/'owned-terminal-proof.json',dict(plan_sha256=digest,

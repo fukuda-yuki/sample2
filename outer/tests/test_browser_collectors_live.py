@@ -47,7 +47,13 @@ class LiveCollectorTests(unittest.TestCase):
                 if self.path == '/Student/Details/203':
                     fields=state['students']
                     markers={'student-id':'203','student-first-name':fields['FirstMidName'], 'student-last-name':fields['LastName'], 'student-enrollment-date':fields['EnrollmentDate'], 'student-full-name':fields['FirstMidName']+' '+fields['LastName']}
-                    self.send(200, '<html><body>'+''.join('<span id="'+k+'">'+v+'</span>' for k,v in markers.items())+'</body></html>'); return
+                    if mode.startswith('marker-'):
+                        body=''.join('<span '+k+'="'+v+'"'+(' class="concealed"' if mode=='marker-hidden' and k=='student-first-name' else ' style="display:contents"' if mode=='marker-visible' else '')+'>'+
+                            ('' if mode=='marker-id-only' and k=='student-id' or mode=='marker-value-only' and k=='student-first-name' else v)+'</span>' for k,v in markers.items())
+                        if mode=='marker-foreign': body='<section student-id="999">'+body+'</section>'
+                        if mode=='marker-hidden': body='<style>.concealed { display: none; }</style>'+body
+                    else: body=''.join('<span id="'+k+'">'+v+'</span>' for k,v in markers.items())
+                    self.send(200, '<html><body>'+body+'</body></html>'); return
                 session = self.headers.get('Cookie', '').removeprefix('fixture=') or uuid4().hex
                 count=state['carts'].get(session, 0)
                 if self.path == '/ShoppingCart': self.send(200, self.cart(count), cookie=session); return
@@ -87,6 +93,7 @@ class LiveCollectorTests(unittest.TestCase):
                 self.assertEqual(0,result.returncode,result.stderr+repr(receipt['faults']))
                 self.assertEqual([],receipt['faults'])
                 failures=browser_product.validated_checks(root,receipt,'fixture-run','fixture-artifact','fixture-spec')
+                if kind=='education' and (root/'after.json').is_file(): state['after']=util.read_json(root/'after.json')['page']
                 archive=repo/'artifacts/browser-repair-fixtures'/(kind+'-'+mode+'-'+uuid4().hex)
                 shutil.copytree(root,archive,ignore=shutil.ignore_patterns('browser-temp'))
                 util.write_new_json(archive/'fixture-result.json',{'kind':kind,'mode':mode,
@@ -111,6 +118,28 @@ class LiveCollectorTests(unittest.TestCase):
         receipt,failures,_=self.collect('education','unsupported')
         self.assertEqual([],failures); self.assertEqual('ordinary_save_form_unsupported',receipt['reason'])
         self.assertNotEqual('create-edit-save',receipt['action'])
+
+    def test_school_named_attributes_preserve_actual_ordinary_create_edit_save(self):
+        receipt,failures,state=self.collect('education','marker-visible')
+        self.assertEqual([],failures); self.assertEqual('create-edit-save',receipt['action'])
+        self.assertEqual(2,len([r for r in state['requests'] if r[0]=='POST']))
+        self.assertEqual('Morgan',state['after']['firstName'])
+        self.assertTrue(all(r['status']=='observed' for r in state['after']['markerObservations'].values()))
+
+    def test_school_css_hidden_attribute_only_and_foreign_fields_never_become_visible_values(self):
+        for mode in ('marker-hidden','marker-value-only','marker-foreign'):
+            with self.subTest(mode=mode):
+                receipt,_,state=self.collect('education',mode)
+                self.assertEqual('create-edit-save',receipt['action'])
+                self.assertEqual('invalid',state['after']['markerObservations']['student-first-name']['status'])
+                self.assertIsNone(state['after']['firstName'])
+
+    def test_school_attribute_only_student_id_keeps_unresolved_display_and_route_identity(self):
+        receipt,_,state=self.collect('education','marker-id-only')
+        self.assertEqual('create-edit-save',receipt['action'])
+        self.assertEqual('observed-details-url',receipt['studentIdentifierSource'])
+        self.assertIsNone(state['after']['studentId'])
+        self.assertEqual({'status':'unresolved','value':'203'},state['after']['markerObservations']['student-id'])
 
     def test_cart_add_500_preserves_add_failure_without_claiming_remove_coverage(self):
         receipt,failures,_=self.collect('cart','500')

@@ -99,7 +99,7 @@ finally { Directory.Delete(root, true); }
 
 // Only synthetic markers: no discovery or reading of the user's credential.
 BrowserCartReviewTests.Run(Check);
-try { AttributionTests.Run(Check); MigrationAttributionTests.Run(Check); }
+try { AttributionTests.Run(Check); MigrationAttributionTests.Run(Check); RemovalAliasTests.Run(Check); }
 catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode=1; return; }
 using (var scanState = new RunState { EvaluationVersion = "1.4.0", Static = new StaticResult
     { LegacyReferences = new() { "synthetic confirmed System.Web reference" }, LegacyUnresolved = new() { "synthetic unreadable source" } },

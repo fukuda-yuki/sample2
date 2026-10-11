@@ -113,7 +113,9 @@ class CampaignTests(unittest.TestCase):
         self.patch(pipeline.live_pilot, 'execute_owned_pair_scope', side_effect=acquire)
         def score(repo, record):
             attempt = util.read_json(record)
-            output = dict(accepted=True, slot=attempt['slot'], attempt=attempt['attempt'], quality={'explore':0,'preload':0})
+            phase = util.read_json(live_pilot.checked(attempt['phase']))
+            quality = {case['condition']: 0 for pair in phase['assignments'] for case in pair['cases']}
+            output = dict(accepted=True, slot=attempt['slot'], attempt=attempt['attempt'], quality=quality)
             util.write_new_json(Path(record).parent/'pipeline-evaluation.json', output)
             return dict(output, batch=str(Path(record).parent))
         # Relocation remains real in production. Only fixture's locked path is redirected.
@@ -187,6 +189,104 @@ class CampaignTests(unittest.TestCase):
         budget.finish('attempt', usage); budget.finish('attempt', usage)
         self.assertEqual(budget.total['requests'], 2)
         with self.assertRaises(ValueError): budget.finish('attempt', dict(usage, requests=3))
+
+    def test_single_condition_uses_one_run_per_slot_and_preserves_retry_resources(self):
+        self.plan['kind'] = fresh.SINGLE_KIND
+        self.plan['assignments'][0]['cases'] = self.plan['assignments'][0]['cases'][:1]
+        self.plan['bounds']['max_runs'] = 1
+        config = self.initialize()
+        self.assertEqual(config['template']['cases_per_assignment'], 1)
+        self.assertEqual(config['policy']['active_model_runs'], 1)
+        fresh.verify_config(config, REPO)
+        self.setup_engine()
+        path = Path(config['root'])/'config.json'
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(len(set(self.uuids)), 2)
+        events = pipeline.pair_execution.events(Path(config['root'])/'events.jsonl')
+        complete = [e for e in events if e['kind'] == 'complete'][-1]
+        self.assertEqual(complete['usage']['requests'], 2)
+        self.assertEqual(complete['usage']['observed_tokens'], 10)
+        self.assertEqual(complete['usage']['accumulated_run_seconds'], 4)
+        self.assertEqual([e['quality'] for e in events if e['kind'] == 'accepted'], [{'explore': 0}])
+        for event in events:
+            if event['kind'] == 'reserved':
+                receipt = util.read_json(Path(event['record']).parent/'pipeline-acquisition.json')
+                self.assertEqual(len(receipt['runs']), 1)
+                self.assertEqual(receipt['runs'][0]['condition'], 'explore')
+        pipeline.run_pipeline(REPO, path)
+        self.assertEqual(self.calls, 2)
+
+    def test_single_mode_requires_explicit_kind_width_and_matching_budget(self):
+        self.plan['assignments'][0]['cases'] = self.plan['assignments'][0]['cases'][:1]
+        with self.assertRaises(ValueError): fresh.validate(self.plan, REPO)
+        self.plan['kind'] = fresh.SINGLE_KIND
+        with self.assertRaises(ValueError): fresh.validate(self.plan, REPO)
+        self.plan['bounds']['max_runs'] = 1
+        fresh.validate(self.plan, REPO)
+        self.plan['assignments'][0]['cases'] *= 2
+        with self.assertRaises(ValueError): fresh.validate(self.plan, REPO)
+
+    def test_single_mode_cannot_mix_condition_names_across_assignments(self):
+        cases = self.plan['assignments'][0]['cases']
+        self.plan.update(kind=fresh.SINGLE_KIND, pair_count=2,
+            assignments=[dict(pair=i, cases=[dict(case, pair=i, slot=1)])
+                         for i, case in enumerate(cases, 1)])
+        self.plan['bounds'].update(max_pairs=2, max_runs=2)
+        with self.assertRaisesRegex(ValueError, 'one condition'):
+            fresh.validate(self.plan, REPO)
+
+
+    def test_staged_partition_requires_exact_request_and_explicit_zero_postdispatch_retry(self):
+        from outer.harness import staged_input
+        self.plan['kind']=fresh.SINGLE_KIND;self.plan['bounds']['max_runs']=1
+        case=self.plan['assignments'][0]['cases'][0]
+        case.update(condition='staged-explore',run_id=run.run_id_for(case['task'],'staged-explore',1))
+        self.plan['assignments'][0]['cases']=[case]
+        with self.assertRaisesRegex(ValueError,'explicit request'):fresh.validate(self.plan,REPO)
+        request=profiles.task_profile(REPO,case['task'],self.plan['task_revision'])['migration_request']
+        at=len(request)//2;policy={'suffixes':['.cs'],'excluded_directories':['obj','bin']}
+        partition=dict(kind='staged_request_partition_v1',request_sha256=util.sha256_bytes(request.encode()),
+            sections=[dict(id='a',text=request[:at]),dict(id='b',text=request[at:])],initial_ids=['a'],additional_ids=['b'],
+            boundary_contract=dict(transport='opencode-server-response-barrier-v1',snapshot_policy=policy,
+                                   snapshot_policy_sha256=staged_input.digest(policy)))
+        path=self.root/'synthetic-partition.json';util.write_new_json(path,partition)
+        self.plan.update(staged_inputs={case['task']:live_pilot.reference(path)},
+            staged_retry=dict(known_pre_dispatch_retries=1,after_dispatch_retries=0))
+        fresh.validate(self.plan,REPO)
+        self.assertEqual(self.plan['staged_inputs'],fresh.template(self.plan)['staged_inputs'])
+        for retry in (dict(known_pre_dispatch_retries=2,after_dispatch_retries=0),
+                      dict(known_pre_dispatch_retries=1,after_dispatch_retries=1)):
+            with self.assertRaises(ValueError):fresh.validate(dict(self.plan,staged_retry=retry),REPO)
+        partition['sections'][0]['text']+='unapproved requirement'
+        util.write_json_atomic(path,partition)
+        with self.assertRaises(ValueError):fresh.validate(self.plan,REPO)
+        self.plan['staged_inputs'][case['task']]=live_pilot.reference(path)
+        with self.assertRaisesRegex(ValueError,'Frozen original request'):fresh.validate(self.plan,REPO)
+
+    def test_staged_retry_only_one_proven_preparation_failure_no_dispatch_or_unknown(self):
+        config=dict(template={'staged_retry':dict(known_pre_dispatch_retries=1,after_dispatch_retries=0)},
+                    attempted_slots=[],pair_count=1)
+        batch=self.root/'attempt';batch.mkdir()
+        binding=dict(run_id='synthetic-run',run_instance_id='synthetic-instance',condition='staged-explore',task='toy')
+        phase=batch/'phase.json';util.write_new_json(phase,dict(assignments=[dict(cases=[binding])]))
+        record=batch/'pipeline-attempt.json';util.write_new_json(record,dict(phase=live_pilot.reference(phase)))
+        saved=dict(acquired=False,usage=dict(dispatched_runs=0,requests=0,unknown_usage_requests=[]))
+        util.write_new_json(batch/'pipeline-acquisition.json',saved)
+        attempts=[dict(slot=1,record=str(record))]
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+        util.write_new_json(batch/'staged-preparation-failure.json',dict(kind='known_pre_dispatch_preparation_failure',binding=binding))
+        self.assertEqual(([1],set()),pipeline.pending_acquisition_slots(config,attempts,set()))
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts*2,set()))
+        config['template']['staged_retry']['known_pre_dispatch_retries']=0
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+        config['template']['staged_retry']['known_pre_dispatch_retries']=1
+        for key,value in [('dispatched_runs',1),('requests',1),('unknown_usage_requests',[{'status':'unknown'}])]:
+            changed=copy.deepcopy(saved);changed['usage'][key]=value
+            util.write_json_atomic(batch/'pipeline-acquisition.json',changed)
+            self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
+        util.write_json_atomic(batch/'pipeline-acquisition.json',saved)
+        util.write_new_json(batch/'synthetic-run/manifest.json',dict(started_at='synthetic-start'))
+        self.assertEqual(([],{1}),pipeline.pending_acquisition_slots(config,attempts,set()))
 
 
 if __name__ == '__main__': unittest.main()

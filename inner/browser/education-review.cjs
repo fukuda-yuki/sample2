@@ -23,17 +23,60 @@ if (repaired) Object.assign(receipt, { baseUrl: input.baseUrl, evaluationVersion
   requestSha256: sha(fs.readFileSync(process.argv[2])), productFailures: [] });
 if (repaired) receipt.conditions.productResponseHelperSha256 = sha(fs.readFileSync(path.join(__dirname, 'product-response.cjs')));
 async function capture(page, name, tabId) {
-  const state = await page.evaluate(() => {
+  const state = await page.evaluate(repaired => {
     const marker = id => {
       const els = [...document.querySelectorAll('[id="' + id + '"]')]
         .filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden');
       return els.length === 1 ? els[0].textContent.trim() : null;
     };
-    return { html: document.documentElement.outerHTML, url: location.href,
+    if (!repaired) return { html: document.documentElement.outerHTML, url: location.href,
       studentId: marker('student-id'), firstName: marker('student-first-name'),
       lastName: marker('student-last-name'), enrollmentDate: marker('student-enrollment-date'),
       fullName: marker('student-full-name') };
-  });
+    const target = /^\/Student\/Details\/([1-9][0-9]*)$/.exec(location.pathname)?.[1];
+    const visible = e => {
+      for (let n = e; n; n = n.parentElement) {
+        const style = getComputedStyle(n);
+        if (['SCRIPT','STYLE','TEMPLATE','NOSCRIPT'].includes(n.tagName) || n.hidden ||
+            style.display === 'none' || ['hidden','collapse'].includes(style.visibility) || Number(style.opacity) === 0) return false;
+      }
+      if (e.getClientRects().length) return true;
+      // A display:contents marker has no box of its own; its text can render.
+      if (getComputedStyle(e).display !== 'contents') return false;
+      const range = document.createRange(); range.selectNodeContents(e);
+      return !!range.getClientRects().length;
+    };
+    const text = node => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+      if (node.nodeType === Node.ELEMENT_NODE && !visible(node)) return '';
+      return [...node.childNodes].map(text).join('');
+    };
+    const read = name => {
+      const nodes = [...document.querySelectorAll('[id="'+name+'"],['+name+']')];
+      if (!nodes.length) return { status: 'invalid', value: null };
+      if (nodes.length !== 1) return { status: 'unresolved', value: null };
+      const node = nodes[0];
+      for (let e = node; e; e = e.parentElement)
+        if (target && e.getAttribute('student-id') && e.getAttribute('student-id') !== target) return { status: 'invalid', value: null };
+      const value = text(node).trim(), attribute = node.getAttribute(name);
+      if (!visible(node) && name !== 'student-id') return { status: 'invalid', value: null };
+      if (attribute && attribute !== value) {
+        const compound = [...node.attributes].filter(a => /^(student-|course-)/.test(a.name) || a.name === 'department-name').length > 1;
+        if ((name === 'student-id' && (!value || compound)) || (compound && value.includes(attribute)))
+          return { status: 'unresolved', value: attribute };
+        return { status: 'invalid', value: null };
+      }
+      return { status: 'observed', value };
+    };
+    const fields = { studentId: 'student-id', firstName: 'student-first-name', lastName: 'student-last-name',
+      enrollmentDate: 'student-enrollment-date', fullName: 'student-full-name' };
+    const state = { html: document.documentElement.outerHTML, url: location.href, markerObservations: {} };
+    for (const [field, name] of Object.entries(fields)) {
+      const reading = read(name); state.markerObservations[name] = reading;
+      state[field] = reading.status === 'observed' ? reading.value : null;
+    }
+    return state;
+  }, repaired);
   write(name + '.json', { at: new Date().toISOString(), tabId, page: state });
   await page.screenshot({ path: path.join(out, name + '.png'), fullPage: true, timeout: 5000 });
   return state;

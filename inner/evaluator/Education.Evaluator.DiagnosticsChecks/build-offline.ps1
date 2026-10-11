@@ -66,7 +66,7 @@ try {
     foreach($name in 'Education.Evaluator.dll','Education.Evaluator.pdb') {Copy-Item -LiteralPath (Join-Path $binaryDirectory $name) -Destination (Join-Path $bundle $name)}
     if(-not(Test-Path -LiteralPath (Join-Path $bundle 'runtimes/linux-x64/native/libe_sqlite3.so'))){throw 'Linux x64 SQLite native dependency missing.'}
     $sources=@()
-    foreach($relative in @('global.json','inner/evaluator/Education.Evaluator/Program.cs','inner/evaluator/Education.Evaluator/AppHost.cs','inner/evaluator/Education.Evaluator/Education.Evaluator.csproj','inner/evaluator/Education.Evaluator.DiagnosticsChecks/Program.cs','inner/evaluator/Education.Evaluator.DiagnosticsChecks/Education.Evaluator.DiagnosticsChecks.csproj','inner/evaluator/Education.Evaluator.DiagnosticsChecks/build-offline.ps1')) {
+    foreach($relative in @('global.json','inner/evaluator/Education.Evaluator/Program.cs','inner/evaluator/Education.Evaluator/AppHost.cs','inner/evaluator/Education.Evaluator/Education.Evaluator.csproj','inner/evaluator/Education.Evaluator.DiagnosticsChecks/Program.cs','inner/evaluator/Education.Evaluator.DiagnosticsChecks/MarkerContractChecks.cs','inner/evaluator/Education.Evaluator.DiagnosticsChecks/Education.Evaluator.DiagnosticsChecks.csproj','inner/evaluator/Education.Evaluator.DiagnosticsChecks/build-offline.ps1')) {
         $sources+=@{path=$relative;sha256=(Get-FileHash -LiteralPath (Join-Path $repoRoot $relative)).Hash.ToLowerInvariant()}
     }
     $bundleFiles=@(Get-ChildItem -LiteralPath $bundle -Recurse -File | ForEach-Object {@{path=[System.IO.Path]::GetRelativePath($bundle,$_.FullName).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant();bytes=$_.Length}})

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "title": "Staged exploration (explicit private contract required)",
+  "id": "staged-explore",
+  "method": "staged-explore",
+  "description": "One controller-owned additional input in the same native session; explicit frozen request partition and response boundary required. Original source remains available without source preload."
+}

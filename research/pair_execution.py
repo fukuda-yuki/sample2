@@ -93,6 +93,12 @@ def state(journal):
     for event in events(journal):
         kind, rid = event['kind'], event.get('run_id')
         if kind == 'pair_reserved':
+            assignments = event['assignments']
+            # Historical recovery journals can contain incomplete reservations.
+            # Only the new explicit single-case representation tightens this.
+            if (any('cases_per_assignment' in b for b in assignments)
+                    and (len(assignments) != 1 or assignments[0].get('cases_per_assignment') != 1)):
+                raise ValueError('Reservation differs from declared assignment width')
             for binding in event['assignments']:
                 if binding['run_id'] in reserved:
                     raise ValueError('Duplicate reserved identity')
@@ -153,6 +159,9 @@ def _verify_plan(plan, current):
     if any(any(d.get(k) != plan.get(k) for k in ('plan_sha256','cohort','runtime'))
            for d in current['reserved'].values()):
         raise ValueError('Caller plan/cohort/runtime differs from durable assignments')
+    if any(d.get('cases_per_assignment', 2) != plan.get('cases_per_assignment', 2)
+           for d in current['reserved'].values()):
+        raise ValueError('Caller assignment width differs from durable assignments')
 
 
 def _record_implementation(journal, binding, receipt, batch, kind='implemented'):
@@ -176,23 +185,26 @@ def _stop_active(futures, batch, stop):
 def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
                  implement=machine.implement, postprocess=machine.postprocess, stop=runtime.request_stop,
                  admit=None, defer_postprocess=False):
-    """cases: two {run_id, task, condition, attempt, pair, slot} assignments.
+    """cases: one or two {run_id, task, condition, attempt, pair, slot} cases.
 
     plan: {plan_sha256, cohort, runtime}. Caller checks plan/approval/resources.
     Existing completed receipt recovery is explicit via recover_pair; never
     automatically replay a dispatch or an uncertain postprocessing stage.
     """
-    if concurrency not in (1, 2) or len(cases) != 2 or concurrency != plan.get('pair_concurrency', concurrency):
-        raise ValueError('Exactly one pair and concurrency 1 or 2 required')
-    if len({c['pair'] for c in cases}) != 1 or len({c['run_id'] for c in cases}) != 2:
+    width = plan.get('cases_per_assignment', 2)
+    if (type(width) is not int or width not in (1, 2) or len(cases) != width
+            or concurrency not in (1, 2) or concurrency > width
+            or concurrency != plan.get('pair_concurrency', concurrency)):
+        raise ValueError('One declared assignment and bounded concurrency required')
+    if len({c['pair'] for c in cases}) != 1 or len({c['run_id'] for c in cases}) != width:
         raise ValueError('Pair identity or Run identity mismatch')
-    if len({c['slot'] for c in cases}) != 2:
+    if len({c['slot'] for c in cases}) != width:
         raise ValueError('Duplicate slot')
     fixed = [c.get('run_instance_id') for c in cases]
     if plan.get('require_fixed_instances') or any(value is not None for value in fixed):
-        if (len(set(fixed)) != 2 or any(not isinstance(value, str) or len(value) != 32
+        if (len(set(fixed)) != width or any(not isinstance(value, str) or len(value) != 32
                 or any(ch not in '0123456789abcdef' for ch in value) for value in fixed)):
-            raise ValueError('Two distinct preassigned instances required')
+            raise ValueError('Distinct preassigned instances required')
     batch = Path(batch)
     control = batch / '_control'
     with exclusive(control):
@@ -214,6 +226,8 @@ def execute_pair(plan, cases, batch, *, repo, concurrency=1, prepare=None,
             binding = {**case, 'cohort': plan['cohort'], 'plan_sha256': plan['plan_sha256'],
                        'runtime': plan['runtime'],
                        'run_instance_id': case.get('run_instance_id') or uuid.uuid4().hex}
+            if width == 1:
+                binding['cases_per_assignment'] = width
             if prepare:
                 manifest = prepare(binding)
             else:
@@ -328,7 +342,9 @@ def _postprocess(plan, assignments, batch, repo, journal, postprocess):
         implementation = current['implementations'].get(rid)
         if not implementation or implementation['receipt'].get('stop_confirmed') is not True:
             return {'status': 'held', 'reason': 'stop_barrier_unconfirmed'}
-    append(journal, {'kind': 'barrier', 'pair': assignments[0]['pair'], 'both_stopped': True})
+    barrier = {'kind': 'barrier', 'pair': assignments[0]['pair']}
+    barrier.update({'all_stopped': True, 'case_count': 1} if len(assignments) == 1 else {'both_stopped': True})
+    append(journal, barrier)
     for binding in assignments:
         if binding['run_id'] in current['results']:
             continue
@@ -438,7 +454,7 @@ def recover_pair(plan, batch, *, repo, stop=runtime.request_stop, postprocess=ma
                     'receipt': str(path), 'receipt_sha256': util.sha256_file(path)})
         held = _collection_hold(state(journal), assignments)
         if held: return held
-        if len(assignments) != 2:
+        if len(assignments) != plan.get('cases_per_assignment', 2):
             return {'status': 'held', 'reason': 'pair_incomplete_unsent_slot_not_dispatched'}
         return _postprocess(plan, assignments, batch, repo, journal, postprocess)
 

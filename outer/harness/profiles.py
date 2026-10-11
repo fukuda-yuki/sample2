@@ -50,8 +50,10 @@ def resolve(repo, task_id, intervention_id, runtime_id='deepseek', *, task_revis
     runtime = read(repo, 'runtimes', runtime_id)
     if task['task_id'] != task_id or intervention['id'] != intervention_id or runtime['id'] != runtime_id:
         raise ValueError('Profile identity mismatch')
-    if intervention['method'] not in ('explore', 'preload', 'explained', catalog_input.METHOD):
+    if intervention['method'] not in ('explore', 'preload', 'explained', 'staged-explore', catalog_input.METHOD):
         raise ValueError('Unsupported intervention method')
+    if intervention['method'] == 'staged-explore' and (runtime.get('prompt_transport') != 'stdin' or runtime.get('opencode_version') != '1.17.11'):
+        raise ValueError('Staged exploration requires the fixed stdin-capable OpenCode runtime')
     if intervention['method'] == catalog_input.METHOD:
         if (type(intervention.get('append_source_packet')) is not bool
                 or runtime.get('input_mount') != '/inputs'
@@ -143,7 +145,7 @@ def prepare_prompt(condition, source, catalog=None):
 
 
 def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek', *,
-           run_instance_id=None, assignment=None, task_revision=None, approved_model_id=None):
+           run_instance_id=None, assignment=None, task_revision=None, approved_model_id=None, staged_plan=None):
     repo = Path(repo).resolve()
     options = {}
     if task_revision is not None: options['task_revision'] = task_revision
@@ -176,7 +178,17 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
     if condition['intervention']['method'] == catalog_input.METHOD:
         inputs.update(catalog_input.prepare(repo, source))
         condition['input_policy']['allowlist'] += ['catalog-derived', 'catalog-tools']
-    prompt, context = prepare_prompt(condition, source, inputs.get('catalog-derived'))
+    staged = condition['intervention']['method'] == 'staged-explore'
+    if staged != (staged_plan is not None):
+        raise ValueError('Staged condition and explicitly pinned request partition must agree')
+    if staged:
+        from . import staged_input
+        initial, additional, partition = staged_input.request_partition(condition['migration_request'], staged_plan)
+        prompt, context = prepare_prompt({**condition, 'migration_request':initial}, source)
+        partition = {**partition, 'request_initial_sha256':partition['initial_sha256'],
+                     'initial_sha256':util.sha256_bytes(prompt.encode())}
+    else:
+        prompt, context = prepare_prompt(condition, source, inputs.get('catalog-derived'))
     if 'catalog-derived' in inputs:
         receipt = inputs['catalog-derived'].parent / 'preparation.json'
         context['preparation'] = {'path': str(receipt), 'sha256': util.sha256_file(receipt),
@@ -224,6 +236,16 @@ def create(repo, runs_dir, task_id, intervention, attempt, runtime_id='deepseek'
                     assets_sha256=util.tree_hashes(assets),
                     input_files=util.tree_hashes(root / 'inputs'))
     run.save_manifest(runs_dir, manifest['run_id'], manifest)
+    if staged:
+        for name in ('workspace','state'): (root/name).mkdir(exist_ok=True)
+        controller = staged_input.create(root/'_controller/staged-input', run_id=manifest['run_id'],
+            run_instance_id=manifest['run_instance_id'], task=task_id, condition=intervention,
+            workspace=root/'workspace', worker_roots=[root/'inputs',root/'state'],
+            initial_prompt=prompt, additional_prompt=additional, budget_seconds=condition['budget']['value'],
+            boundary_contract=staged_plan['boundary_contract'], partition=partition,
+            artifact_collection_policy=condition.get('collection_policy'))
+        controller.bind_run(root)
+        manifest = run.load_manifest(runs_dir, manifest['run_id'])
     return manifest
 
 

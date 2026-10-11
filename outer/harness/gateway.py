@@ -75,11 +75,50 @@ class SecretFilter:
         return result
 
 
+class ResponseEndFence:
+    """Withhold the terminal SSE line, across arbitrary network chunk splits."""
+    def __init__(self):
+        self.pending = b''
+        self.tail = b''
+        self.ended = False
+
+    def feed(self, chunk, final=False):
+        if self.ended:
+            self.tail += chunk; return b''
+        self.pending += chunk
+        output = bytearray()
+        while b'\n' in self.pending or final and self.pending:
+            if b'\n' in self.pending:
+                line, self.pending = self.pending.split(b'\n', 1); line += b'\n'
+            else: line, self.pending = self.pending, b''
+            if line.startswith(b'data:') and line[5:].strip() == b'[DONE]':
+                self.ended = True; self.tail = line+self.pending; self.pending = b''; break
+            output.extend(line)
+        return bytes(output)
+
+
+def response_tool_ids(raw):
+    ids = []
+    for line in raw.splitlines():
+        if not line.startswith(b'data:') or line[5:].strip() == b'[DONE]': continue
+        item = json.loads(line[5:])
+        if not isinstance(item,dict) or not isinstance(item.get('choices',[]),list):
+            raise ValueError('Unrecognized SSE choices at tool boundary')
+        for choice in item.get('choices', []):
+            if not isinstance(choice,dict) or not isinstance(choice.get('delta',{}),dict):
+                raise ValueError('Unrecognized SSE delta at tool boundary')
+            for call in choice.get('delta', {}).get('tool_calls', []):
+                if not isinstance(call,dict): raise ValueError('Unrecognized SSE tool call')
+                if call.get('id') and call['id'] not in ids: ids.append(call['id'])
+    return ids
+
+
 class Gateway(ThreadingHTTPServer):
     daemon_threads = False
 
     def __init__(self, address, root, run_id, model, secret, *, upstream_host='opencode.ai',
-                 upstream_port=443, tls=True, session_id=None, upstream_timeout=120, expected_prompt=None):
+                 upstream_port=443, tls=True, session_id=None, upstream_timeout=120, expected_prompt=None,
+                 staged_input=None):
         super().__init__(address, Handler)
         self.root, self.run_id, self.model, self.secret = Path(root), run_id, model, secret
         self.session_id = session_id or run_id
@@ -96,6 +135,92 @@ class Gateway(ThreadingHTTPServer):
         self.socket_lock = threading.Lock()
         self.active_sockets = set()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.stage = None
+        self.stage_arm = None
+        self.stage_first_request = None
+        self.stage_barrier = None
+        self.stage_barrier_event = threading.Event()
+        self.stage_busy_request = None
+        self.stage_capture_complete = False
+        self.stage_native_message_id = None
+        if staged_input:
+            directory = Path(staged_input)
+            contract_raw = (directory/'contract.json').read_bytes()
+            contract = json.loads(contract_raw)
+            additional = (directory/'additional.txt').read_bytes().decode('utf-8')
+            if (contract.get('kind') != 'one_additional_input_v1'
+                    or (contract['run_id'], contract['run_instance_id']) != (run_id, self.session_id)
+                    or not additional or not self.expected_prompt
+                    or hashlib.sha256(additional.encode()).hexdigest() != contract['additional_sha256']
+                    or hashlib.sha256(self.expected_prompt.encode()).hexdigest() != contract['initial_sha256']):
+                raise ValueError('Staged input identity mismatch')
+            self.stage = {**contract, 'contract_sha256': hashlib.sha256(contract_raw).hexdigest(), 'text': additional}
+            self.record('staged-input.jsonl', {'kind': 'planned', 'run_id': run_id,
+                'run_instance_id': self.session_id, 'delivery_id': contract['delivery_id'],
+                'contract_sha256': self.stage['contract_sha256'], 'additional_sha256': contract['additional_sha256']})
+
+    def uses_response_barrier(self):
+        return self.stage and self.stage['boundary_contract'].get('transport') == 'opencode-server-response-barrier-v1'
+
+    def inspect_stage_barrier(self):
+        with self.admission_lock:
+            return dict(self.stage_barrier) if self.stage_barrier else None
+
+    def release_stage_barrier(self, barrier_id, native_message_id=None, capture_complete=False):
+        with self.admission_lock:
+            if (not self.stage_barrier or self.stage_barrier['barrier_id'] != barrier_id
+                    or self.stage_barrier_event.is_set()
+                    or self.admission_closed.is_set() or self.stopping.is_set() or self.failed.is_set()):
+                raise ValueError('No matching open response barrier')
+            if self.stage_arm and not native_message_id:
+                raise ValueError('Native input acknowledgement required before releasing an armed barrier')
+            if self.stage_native_message_id and native_message_id != self.stage_native_message_id:
+                raise ValueError('Native acknowledgement changed at later boundary')
+            if capture_complete and self.stage_barrier.get('phase') != 'after_additional':
+                raise ValueError('Post-input checkpoint cannot precede an observed additional request')
+            self.record('response-barriers.jsonl', {'kind':'released', 'at':now(),
+                **self.stage_barrier, 'native_message_id':native_message_id,'capture_complete':capture_complete})
+            if native_message_id:self.stage_native_message_id=native_message_id
+            if capture_complete:self.stage_capture_complete=True
+            self.stage_busy_request = None
+            self.stage_barrier_event.set()
+
+    def hold_response_end(self, event, raw):
+        ids = response_tool_ids(raw)
+        if not ids: return
+        with self.admission_lock:
+            if self.stage_barrier or self.admission_closed.is_set() or self.failed.is_set():
+                raise ValueError('Response barrier unavailable')
+            self.stage_barrier_event.clear()
+            self.stage_barrier = {'barrier_id':uuid.uuid4().hex, 'request_id':event['request_id'],
+                'request_sha256':event['request_sha256'], 'tool_call_ids':ids,
+                'run_id':self.run_id, 'run_instance_id':self.session_id,
+                'phase':'after_additional' if self.stage_first_request else 'before_additional',
+                'first_additional_request_id':self.stage_first_request}
+            self.record('response-barriers.jsonl', {'kind':'held','at':now(),**self.stage_barrier})
+        if (not self.stage_barrier_event.wait(self.stage['budget_seconds'])
+                or self.stopping.is_set() or self.admission_closed.is_set()):
+            raise TimeoutError('Response barrier stopped or expired')
+        with self.admission_lock: self.stage_barrier = None
+
+    def arm_stage(self, body):
+        """Controller-only intent; this does not prove native or provider receipt."""
+        with self.admission_lock:
+            if not self.stage or self.admission_closed.is_set() or self.stopping.is_set() or self.failed.is_set():
+                raise ValueError('Staged input closed')
+            expected = {k: self.stage[k] for k in ('run_id', 'run_instance_id', 'delivery_id', 'contract_sha256', 'additional_sha256')}
+            if (set(body) != set(expected) | {'native_session_id', 'barrier_id'}
+                    or any(body.get(k) != v for k, v in expected.items())
+                    or not body['native_session_id'] or not body['barrier_id']):
+                raise ValueError('Staged input arm binding mismatch')
+            if self.uses_response_barrier() and (not self.stage_barrier or self.stage_barrier['barrier_id'] != body['barrier_id']):
+                raise ValueError('Additional input requires the live response barrier')
+            if self.stage_arm is not None:
+                if self.stage_arm != body: raise ValueError('Conflicting staged input writer')
+                return dict(self.stage_arm)
+            self.record('staged-input.jsonl', {'kind': 'armed', 'at': now(), **body})
+            self.stage_arm = dict(body)
+            return dict(body)
 
     def record(self, file, obj):
         with self.lock:
@@ -119,6 +244,7 @@ class Gateway(ThreadingHTTPServer):
         self.admission_closed.set()
         self.stopping.set()
         self.failed.set()
+        self.stage_barrier_event.set()
         with self.socket_lock:
             sockets = list(self.active_sockets)
         for connection in sockets:
@@ -137,6 +263,7 @@ class Gateway(ThreadingHTTPServer):
         """
         with self.admission_lock:
             self.admission_closed.set()
+            self.stage_barrier_event.set()
             if self.admission_receipt is None:
                 receipt = {'run_id': self.run_id, 'session_id': self.session_id,
                            'closed_at': now(), 'admission_closed': True}
@@ -170,6 +297,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         g = self.server
+        if self.path == '/control/staged-barrier':
+            try:
+                self.connection.settimeout(5); size=int(self.headers.get('Content-Length','0'))
+                if self.client_address[0]!='127.0.0.1' or not 0<size<=4096: raise ValueError()
+                body=json.loads(self.rfile.read(size))
+                if body.get('run_id')!=g.run_id or body.get('run_instance_id')!=g.session_id: raise ValueError()
+                if body.get('action')=='inspect': result=g.inspect_stage_barrier()
+                elif body.get('action')=='release':
+                    g.release_stage_barrier(body['barrier_id'],body.get('native_message_id'),body.get('capture_complete',False)); result={'released':True}
+                else: raise ValueError()
+            except (ValueError,TypeError,OSError,KeyError):
+                self.send_error(403,'Staged barrier unavailable');return
+            self.send_response(200);self.end_headers();self.wfile.write(json.dumps(result).encode());return
+        if self.path == '/control/staged-input':
+            try:
+                self.connection.settimeout(5)
+                size = int(self.headers.get('Content-Length', '0'))
+                if self.client_address[0] != '127.0.0.1' or not 0 < size <= 4096:
+                    raise ValueError()
+                receipt = g.arm_stage(json.loads(self.rfile.read(size)))
+            except (ValueError, TypeError, OSError, KeyError):
+                self.send_error(403, 'Staged input acknowledgement unavailable'); return
+            self.send_response(200); self.end_headers()
+            self.wfile.write(json.dumps(receipt).encode()); return
         if self.path == '/control/stop-admission':
             # The worker cannot reach the gateway's loopback interface. This
             # endpoint is exercised only by ownership-checked docker exec.
@@ -249,6 +400,7 @@ class Handler(BaseHTTPRequestHandler):
         connection = None
         upstream_socket = None
         sent_headers = False
+        response_fence = None
         try:
             cls = http.client.HTTPSConnection if g.tls else http.client.HTTPConnection
             connection = cls(g.upstream_host, g.upstream_port, timeout=g.upstream_timeout)
@@ -258,6 +410,29 @@ class Handler(BaseHTTPRequestHandler):
             with g.admission_lock:
                 if g.admission_closed.is_set() or g.stopping.is_set() or g.failed.is_set():
                     raise ConnectionAbortedError()
+                if g.uses_response_barrier() and not g.stage_capture_complete:
+                    if g.stage_busy_request is not None:
+                        raise ValueError('Concurrent request crossed the staged response fence')
+                    g.stage_busy_request = rid
+                if g.stage is not None:
+                    receipt = check_additional_input(body, g.stage['text'])
+                    reason = ('early_input' if receipt['locations'] and g.stage_arm is None else
+                              'duplicate_or_wrong_role' if receipt['locations'] and not receipt['verified'] else
+                              'boundary_missed' if g.stage_arm and not g.stage_first_request and not receipt['verified'] else None)
+                    stage_record = {'kind': 'request_checked', 'at': now(), 'request_id': rid,
+                        'request_sha256': event['request_sha256'], 'delivery_id': g.stage['delivery_id'],
+                        'contract_sha256': g.stage['contract_sha256'], 'run_id': g.run_id,
+                        'run_instance_id': g.session_id, 'native_session_id': (g.stage_arm or {}).get('native_session_id'),
+                        'receipt': receipt, 'rejection': reason}
+                    g.record('staged-input.jsonl', stage_record)
+                    if reason: raise ValueError('Staged input request denied')
+                    if receipt['verified']:
+                        event['additional_input'] = {'delivery_id': g.stage['delivery_id'],
+                            'contract_sha256': g.stage['contract_sha256'], 'first_observed': g.stage_first_request is None}
+                        if g.stage_first_request is None:
+                            g.stage_first_request = rid
+                if g.uses_response_barrier() and not g.stage_capture_complete:
+                    response_fence = ResponseEndFence()
                 event['send_evidence'] = 'unknown'
                 g.record('transmission.jsonl', {**event, 'phase': 'send_intent', 'at': now()})
                 connection.request('POST', '/zen/go/v1/chat/completions', raw, {
@@ -289,13 +464,19 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('response_limit')
                 if connected:
                     try:
-                        self.wfile.write(safe)
+                        self.wfile.write(response_fence.feed(safe) if response_fence else safe)
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionError, OSError):
                         connected = False
                         event['client_disconnected'] = True
                 if not chunk:
                     break
+            if response_fence:
+                self.wfile.write(response_fence.feed(b'', final=True));self.wfile.flush()
+                if not response_fence.ended or response.status != 200:
+                    raise ValueError('Incomplete response cannot establish a staged tool boundary')
+                g.hold_response_end(event, bytes(response_bytes))
+                self.wfile.write(response_fence.tail);self.wfile.flush()
             event.update(parse_sse(bytes(response_bytes)))
             event['status'] = 'completed' if response.status == 200 and event['stream_done'] else 'provider_error'
         except Exception as exc:
@@ -347,6 +528,8 @@ class Handler(BaseHTTPRequestHandler):
             if g.failed.is_set():
                 g.record('failure.jsonl', {'run_id': g.run_id, 'request_id': rid,
                                           'status': event['status'], 'at': now()})
+            with g.admission_lock:
+                if g.stage_busy_request == rid: g.stage_busy_request = None
 
 
 def check_initial_input(body, expected):
@@ -370,6 +553,16 @@ def check_initial_input(body, expected):
             'source_packet_count': header_count, 'expected_source_packet_count': expected_headers}
 
 
+def check_additional_input(body, expected):
+    """Later input has its own role/occurrence proof, independent of preload headers."""
+    if not expected: raise ValueError('Empty additional input')
+    receipt = check_initial_input(body, expected)
+    locations = receipt['locations']
+    receipt['verified'] = (len(locations) == 1 and locations[0]['role'] == 'user'
+                           and locations[0]['occurrences'] == 1)
+    return receipt
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--run-id', required=True)
@@ -378,6 +571,7 @@ def main():
     p.add_argument('--upstream-timeout', type=int, default=120)
     p.add_argument('--directory', default='/records')
     p.add_argument('--expected-prompt')
+    p.add_argument('--staged-input', help='Controller-only contract directory; never a worker mount')
     args = p.parse_args()
     import sys
     secret = sys.stdin.readline().strip()
@@ -385,7 +579,7 @@ def main():
         raise SystemExit('Gateway credential is missing')
     server = Gateway(('0.0.0.0', 8080), args.directory, args.run_id, args.model, secret,
                      session_id=args.session_id, upstream_timeout=args.upstream_timeout,
-                     expected_prompt=args.expected_prompt)
+                     expected_prompt=args.expected_prompt, staged_input=args.staged_input)
     server.serve_with_signals()
 
 

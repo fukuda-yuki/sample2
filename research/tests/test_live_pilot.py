@@ -293,6 +293,39 @@ class PlanBoundaries(unittest.TestCase):
             with self.assertRaises(FileExistsError): pilot.execute(self.repo,path,approval)
             self.assertEqual(before,util.tree_hashes(base)); self.assertEqual(len(calls),2)
 
+    def test_single_campaign_scope_dispatches_one_run_and_defers_scoring(self):
+        self.plan.update(kind=pilot.MAIN_KIND, cases_per_assignment=1)
+        self.plan['assignments'] = self.plan['assignments'][:1]
+        self.plan['assignments'][0]['cases'] = self.plan['assignments'][0]['cases'][:1]
+        path = self.root/'single-plan.json'; util.write_new_json(path, self.plan)
+        phase = pilot.observer_phase(self.plan, pilot.reference(path), 1)
+        batch = Path(phase['batch']); util.write_new_json(batch/'phase.json', phase)
+        watch = pilot.PilotWatch(self.plan, util.sha256_file(path))
+        Monitor, create, condition = self.controls()
+        calls = []
+        def implement(repo, batch, rid):
+            calls.append(rid)
+            manifest = util.read_json(batch/rid/'manifest.json')
+            return dict(run_id=rid, run_instance_id=manifest['run_instance_id'], stop_confirmed=True)
+        # Approval/genesis validation has its own campaign tests. Exercise the
+        # actual observer derivation, admission, pair journal and session counts.
+        with patch.object(pilot, 'owner_plan', return_value=self.plan), \
+             patch('research.resource_supervisor.ProcessMonitor', Monitor), \
+             patch.object(pilot.profiles, 'create', side_effect=create), \
+             patch.object(pilot.profiles, 'validate_run', side_effect=condition), \
+             patch.object(pilot.next_phase_execution, 'guarded_implementation', side_effect=implement), \
+             patch.object(pilot, 'validate_owned_terminal', side_effect=lambda root,b:dict(native_session_id=b['run_instance_id'])), \
+             patch.object(pilot.next_phase_execution, 'browser_postprocess', return_value=lambda *a:self.fail('No intermediate scoring')):
+            result = pilot.execute_owned_pair_scope(self.repo, path, batch/'phase.json',
+                budget_watch=watch, defer_postprocess=True)
+        self.assertEqual(result['reason'], 'evaluation_pending')
+        self.assertEqual(len(calls), 1)
+        current = pilot.pair_execution.state(batch/'_control/pair-journal.jsonl')
+        self.assertEqual(len(current['dispatch']), 1)
+        self.assertFalse(current['results'])
+        self.assertEqual(len(watch.native_sessions), 1)
+        self.assertIsNone(watch.fault)
+
     def test_unconfirmed_observer_ack_blocks_pilot_complete(self):
         path=self.freeze(); base=Path(self.plan['batch']); batch=base/'pair-1'
         watch=pilot.PilotWatch(self.plan,util.sha256_file(path)); Monitor,create,condition=self.controls()
@@ -358,6 +391,24 @@ class PlanBoundaries(unittest.TestCase):
         util.write_json_atomic(path,original)
         with patch.object(pilot.profiles,'validate_run'),patch.object(pilot.runtime,'docker',return_value=subprocess.CompletedProcess([],1,'','')):
             with self.assertRaisesRegex(RuntimeError,'unobservable'): pilot.validate_owned_terminal(root,b)
+
+    def test_staged_early_completion_is_retained_without_claiming_additional_delivery(self):
+        _,_,binding,root=self.terminal()
+        manifest=util.read_json(root/'manifest.json');manifest['staged_input']={'contract_path':'synthetic'}
+        util.write_json_atomic(root/'manifest.json',manifest)
+        normalized=util.read_json(root/'usage/normalized.json')
+        normalized.update(input_reached=False,staged_input=dict(issues=[],additional_input_reached=False,
+            terminal=dict(stop_confirmed=True,reason='completed')))
+        util.write_json_atomic(root/'usage/normalized.json',normalized)
+        util.write_new_json(root/'usage/context-evidence.json',dict(first_request_prompt_reached=True))
+        with patch.object(pilot.profiles,'validate_run'):
+            proof=pilot.validate_owned_terminal(root,binding,observe_resources=False)
+        self.assertEqual('ses_finite_fixture',proof['native_session_id'])
+        self.assertFalse(util.read_json(root/'usage/normalized.json')['input_reached'])
+        normalized['staged_input']['issues']=['synthetic_missing_evidence']
+        util.write_json_atomic(root/'usage/normalized.json',normalized)
+        with patch.object(pilot.profiles,'validate_run'):
+            with self.assertRaises(ValueError):pilot.validate_owned_terminal(root,binding,observe_resources=False)
 
     def test_missing_native_input_and_tampered_raw_or_snapshot_rejected(self):
         watch,batch,b,root=self.terminal()

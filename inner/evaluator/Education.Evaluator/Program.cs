@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
 using AngleSharp.Html.Parser;
+using AngleSharp.Dom;
 using Microsoft.Data.Sqlite;
 
 namespace Education.Evaluator;
@@ -17,18 +18,19 @@ namespace Education.Evaluator;
 public static class Program
 {
     public const string Version = "education-1.1.0";
-    public const string ImplementationRevision = "education-1.1.0-observation-1";
+    public const string ImplementationRevision = "education-1.1.0-observation-2";
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     static readonly string[] Tables = { "Students", "Departments", "Courses", "Enrollments" };
     static Dictionary<string,string> options;
     static JsonObject ledger, oracle;
     static readonly Dictionary<string,(string judgement,string detail)> results = new();
+    static readonly Dictionary<int,HashSet<string>> markerHolds = new();
     static string artifactHash, specHash, evidence;
     static bool browserWorkflowObserved;
 
     public static int Main(string[] args)
     {
-        options = new();results.Clear();browserWorkflowObserved=false;
+        options = new();results.Clear();markerHolds.Clear();browserWorkflowObserved=false;
         for (var i=0; i<args.Length; i+=2)
         {
             if (i+1>=args.Length || !args[i].StartsWith("--")) throw new ArgumentException("Expected named value pairs.");
@@ -76,7 +78,8 @@ public static class Program
     {
         var key=$"E-{id:000}";
         if(pass&&results[key].judgement=="fail")return;
-        results[key]=(pass?"pass":"fail",detail);
+        var held=pass&&markerHolds.TryGetValue(id,out var holds);
+        results[key]=(pass?(held?"blocked":"pass"):"fail",detail+(held?"; unresolved markers: "+string.Join(",",markerHolds[id]):""));
         File.AppendAllText(Path.Combine(evidence,"observed-checks.jsonl"),JsonSerializer.Serialize(new{checkId=key,judgement=results[key].judgement,observation=detail})+"\n");
     }
     static SqliteConnection Database(string path)
@@ -245,9 +248,63 @@ public static class Program
         }
         public void Dispose()=>http.Dispose();
     }
-    static string Marker(string html,string id)
+    // HTTP observations reject explicit hidden/inert markup. They do not prove
+    // computed CSS visibility; the independent browser capture supplies that.
+    static bool Inert(IElement element)
     {
-        var nodes=new HtmlParser().ParseDocument(html).QuerySelectorAll("[id='"+id+"']");return nodes.Length==1?nodes[0].TextContent.Trim():null;
+        for(var e=element;e!=null;e=e.ParentElement)
+            if(e.LocalName is "script" or "style" or "template" or "noscript"||e.HasAttribute("hidden")
+                ||System.Text.RegularExpressions.Regex.IsMatch(e.GetAttribute("style")??"",@"(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse))\s*(?:!important\s*)?(?:;|$)",System.Text.RegularExpressions.RegexOptions.IgnoreCase))return true;
+        return false;
+    }
+    static string MarkupText(INode node)
+        =>node is IElement element&&Inert(element)?"":node is IText text?text.Data:string.Concat(node.ChildNodes.Select(MarkupText));
+    static (string status,string value) ReadMarker(string html,string name,string targetName,string targetId,string rowId)
+    {
+        var document=new HtmlParser().ParseDocument(html);
+        var nodes=document.QuerySelectorAll("[id='"+name+"'],["+name+"]");
+        if(nodes.Length==0)return ("invalid",null);
+        if(nodes.Length!=1)return ("unresolved",null);
+        var node=nodes[0];var ancestors=new List<IElement>();
+        for(var e=node;e!=null;e=e.ParentElement)ancestors.Add(e);
+        if(rowId!=null&&!ancestors.Any(e=>e.Id==rowId))return ("invalid",null);
+        if(targetName!=null&&ancestors.Any(e=>e.HasAttribute(targetName)&&!string.IsNullOrEmpty(e.GetAttribute(targetName))&&e.GetAttribute(targetName)!=targetId))return ("invalid",null);
+        var value=MarkupText(node).Trim();var attribute=node.GetAttribute(name);
+        if(Inert(node)&&name!="student-id")return ("invalid",null);
+        if(attribute!=null&&attribute.Length>0&&attribute!=value)
+        {
+            // A compound region needs a field-to-visible-value binding. Do not
+            // select matching text from elsewhere on the page or guess a label.
+            var compound=node.Attributes.Count(a=>a.Name.StartsWith("student-")||a.Name.StartsWith("course-")||a.Name=="department-name")>1;
+            if(name=="student-id"&&(value.Length==0||compound)||compound&&value.Contains(attribute,StringComparison.Ordinal))
+                return ("unresolved",attribute);
+            return ("invalid",null);
+        }
+        // Do not promote a newly supported attribute based on TextContent when
+        // CSS/script can change its display. This HTTP path has no renderer.
+        // Existing id observations retain their contract; E-012 uses a browser.
+        if(node.Id!=name&&(document.QuerySelector("style,script,link[rel~='stylesheet']")!=null||ancestors.Any(e=>e.HasAttribute("style"))))return ("unresolved",value);
+        return ("observed",value);
+    }
+    static bool MarkerResult(int check,string name,string expected,string status,string value)
+    {
+        if(status=="invalid"||value!=null&&value!=expected)return false;
+        if(status=="observed")return value==expected;
+        if(status!="unresolved")throw new InvalidDataException("Unknown marker observation status.");
+        if(!markerHolds.TryGetValue(check,out var holds))markerHolds[check]=holds=new();
+        holds.Add(name);return true; // Check records blocked unless another predicate fails.
+    }
+    static bool MarkerMatches(int check,string html,string name,string expected,string targetName,string targetId,string rowId=null)
+    {
+        var reading=ReadMarker(html,name,targetName,targetId,rowId);
+        return MarkerResult(check,name,expected,reading.status,reading.value);
+    }
+    static bool BrowserMarker(JsonNode page,string field,string name,string expected)
+    {
+        if(page["markerObservations"]==null)return S(page,field)==expected; // Historical collector contract.
+        var reading=page["markerObservations"][name]??throw new InvalidDataException("Missing browser marker observation.");
+        if(S(page,field)!=(S(reading,"status")=="observed"?S(reading,"value"):null))throw new InvalidDataException("Browser marker/value disagreement.");
+        return MarkerResult(12,name,expected,S(reading,"status"),S(reading,"value"));
     }
     static HashSet<long> Ids(string html,string prefix)
     {
@@ -311,14 +368,14 @@ public static class Program
         {
             var id=S(s,"ID");var d=web.Get("/Student/Details/"+id);var doc=new HtmlParser().ParseDocument(d.Body);
             var fields=new[]{("student-id","ID"),("student-first-name","FirstMidName"),("student-last-name","LastName"),("student-enrollment-date","EnrollmentDate")};
-            var ok=d.Status==200&&fields.All(f=>Marker(d.Body,f.Item1)==S(s,f.Item2))&&Marker(d.Body,"student-full-name")==S(s,"LastName")+", "+S(s,"FirstMidName");
+            var ok=d.Status==200&&fields.All(f=>MarkerMatches(5,d.Body,f.Item1,S(s,f.Item2),"student-id",id))&&MarkerMatches(5,d.Body,"student-full-name",S(s,"LastName")+", "+S(s,"FirstMidName"),"student-id",id);
             var expected=oracle["tables"]["Enrollments"]["rows"].AsArray().Where(e=>S(e,"StudentID")==id).ToList();
             ok&=Ids(d.Body,"enrollment-").SetEquals(expected.Select(e=>long.Parse(S(e,"EnrollmentID"))));
             foreach(var e in expected)
             {
                 var eid=S(e,"EnrollmentID");var grade=e["Grade"]==null?"No grade":oracle["grade_map"][e["Grade"].ToString()].ToString();
                 var row=doc.GetElementById("enrollment-"+eid);var course=oracle["tables"]["Courses"]["rows"].AsArray().Single(c=>S(c,"CourseID")==S(e,"CourseID"));
-                ok&=Marker(d.Body,"grade-"+eid)==grade&&row!=null&&row.TextContent.Contains(S(course,"Title"))&&row.QuerySelectorAll("a[href]").Any(a=>a.GetAttribute("href")=="/Course/Details/"+S(e,"CourseID"));
+                ok&=MarkerMatches(5,d.Body,"grade-"+eid,grade,"student-id",id,"enrollment-"+eid)&&row!=null&&MarkupText(row).Contains(S(course,"Title"))&&row.QuerySelectorAll("a[href]").Any(a=>!Inert(a)&&a.GetAttribute("href")=="/Course/Details/"+S(e,"CourseID"));
             }
             if(!ok)Check(5,false,"Observed student detail/join/grade failure; ID="+id+"; subsequent observations pending.");
             detailsOk&=ok;notes.Add(id+"="+ok);
@@ -330,7 +387,7 @@ public static class Program
         foreach(var c in courses)
         {
             var d=web.Get("/Course/Details/"+S(c,"CourseID"));var department=oracle["tables"]["Departments"]["rows"].AsArray().Single(x=>S(x,"DepartmentID")==S(c,"DepartmentID"));
-            var courseOk=d.Status==200&&Marker(d.Body,"course-id")==S(c,"CourseID")&&Marker(d.Body,"course-credits")==S(c,"Credits")&&Marker(d.Body,"department-name")==S(department,"Name")&&d.Body.Contains(WebUtility.HtmlEncode(S(c,"Title")));
+            var courseOk=d.Status==200&&MarkerMatches(6,d.Body,"course-id",S(c,"CourseID"),"course-id",S(c,"CourseID"))&&MarkerMatches(6,d.Body,"course-credits",S(c,"Credits"),"course-id",S(c,"CourseID"))&&MarkerMatches(6,d.Body,"department-name",S(department,"Name"),"course-id",S(c,"CourseID"))&&MarkupText(new HtmlParser().ParseDocument(d.Body).Body).Contains(S(c,"Title"));
             if(!courseOk)Check(6,false,"Observed course detail failure; ID="+S(c,"CourseID")+"; subsequent observations pending.");
             coursesOk&=courseOk;
         }
@@ -421,7 +478,7 @@ public static class Program
     }
     static void Compose()
     {
-        browserWorkflowObserved=false;
+        browserWorkflowObserved=false;markerHolds.Clear();
         var baseline=O("--browser-school-baseline");var previous=JsonNode.Parse(File.ReadAllText(Path.Combine(baseline,"evaluation.json")));
         if(S(previous,"artifactSha256")!=artifactHash||S(previous,"specSha256")!=specHash||S(previous,"evaluationVersion")!=Version)throw new InvalidDataException("Baseline identity mismatch.");
         var baselineChecks=new HashSet<string>();
@@ -449,10 +506,11 @@ public static class Program
             ||!captures.Select(c=>DateTimeOffset.Parse(S(c,"at"))).SequenceEqual(captures.Select(c=>DateTimeOffset.Parse(S(c,"at"))).Order()))throw new InvalidDataException("Browser context/action chronology mismatch.");
         var expected=Fields(oracle["workflow"]["edit"]["fields"]);var page=after["page"];
         if(database["read_only"]?.GetValue<bool>()!=true)throw new InvalidDataException("Independent database observation must be read-only.");
-        var pass=new Uri(S(page,"url")).AbsolutePath=="/Student/Details/"+id&&S(page,"studentId")==id&&S(page,"firstName")==expected["FirstMidName"]&&S(page,"lastName")==expected["LastName"]&&S(page,"enrollmentDate")==expected["EnrollmentDate"]
-            &&S(page,"fullName")==expected["LastName"]+", "+expected["FirstMidName"]&&StudentMatches(database["student"].AsObject(),expected)
-            &&S(database["student"],"ID")==id&&database["original_rows_preserved"].GetValue<bool>();
-        Check(12,pass,"Actual ordinary Create/Edit/Save: UI and independently read SQLite row match; student ID="+id);
+        var databaseOk=StudentMatches(database["student"].AsObject(),expected)&&S(database["student"],"ID")==id&&database["original_rows_preserved"].GetValue<bool>();
+        if(!databaseOk)Check(12,false,"Independent ordinary Save database value/identity/original-row mismatch.");
+        var pass=new Uri(S(page,"url")).AbsolutePath=="/Student/Details/"+id&&BrowserMarker(page,"studentId","student-id",id)&&BrowserMarker(page,"firstName","student-first-name",expected["FirstMidName"])&&BrowserMarker(page,"lastName","student-last-name",expected["LastName"])&&BrowserMarker(page,"enrollmentDate","student-enrollment-date",expected["EnrollmentDate"])
+            &&BrowserMarker(page,"fullName","student-full-name",expected["LastName"]+", "+expected["FirstMidName"])&&databaseOk;
+        Check(12,pass,"Actual ordinary Create/Edit/Save comparison of captured UI and independently read SQLite row; student ID="+id);
         browserWorkflowObserved=true;
     }
 
